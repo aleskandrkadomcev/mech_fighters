@@ -113,7 +113,7 @@ func _ready() -> void:
 	mech.torso_yaw = face
 	mech.legs_yaw = face
 	mech.died.connect(_on_mech_died)
-	Battle.register(mech, "Ты")
+	Battle.register(mech, Cfg.player_name)
 	Battle.set_mech(mech, Parts.pname(mech.build.get("mech", "")))
 
 	cam = CameraRig.new()

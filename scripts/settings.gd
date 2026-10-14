@@ -142,8 +142,9 @@ extends Node
 var player_color := Color(1.0, 0.55, 0.15)
 var enemy_color := Color(1.0, 0.15, 0.12)
 var mech_accent := Color(0.72, 0.7, 0.65)    # полосы и огни на мехах: у всех одинаковые, сероватые
+var player_name := "Lenkin"                  # ник игрока над мехом и в таблице после боя (поля для ника в ангаре пока нет)
 # полоска здоровья и ник над мехом: свой мех, союзники, враги
-var bar_self := Color(0.45, 0.78, 1.0)
+var bar_self := Color(0.2, 0.45, 1.0)
 var bar_ally := Color(0.4, 0.9, 0.4)
 var bar_enemy := Color(0.95, 0.25, 0.2)
 
