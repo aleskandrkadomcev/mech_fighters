@@ -22,15 +22,16 @@ const SLOT_NAMES := {"mech": "Мехи", "core": "Ядра", "weapon": "Оруж
 
 const DATA := {
 	# ---------------- МЕХИ (ноги и корпус вместе) ----------------
-	# class: лёгкий/средний/тяжёлый; trait: особенность словами; style: как выглядит корпус
-	"mech_wasp": {"slot": "mech", "name": "Оса", "class": "Лёгкий", "style": "light",
+	# class: лёгкий/средний/тяжёлый; trait: особенность словами; style: как выглядит корпус (если мех из коробок);
+	# model: 3D-модель из assets/mechs (если задана, мех собирается из неё)
+	"mech_wasp": {"slot": "mech", "name": "Оса", "class": "Лёгкий", "style": "light", "model": "light_046748",
 		"trait": "Два рывка подряд, самый быстрый",
 		"weight": 20.0, "capacity": 60.0, "hp": 190.0, "hit_radius": 1.55, "vision": 40.0, "omni": 15.0, "slots": 3,
 		"walk_speed": 9.0, "run_speed": 17.5, "accel": 22.0, "decel": 36.0,
 		"dash_speed": 50.0, "dash_time": 0.22, "dash_cooldown": 1.6, "dash_brake": 120.0, "dash_charges": 2,
 		"legs_turn_speed": 320.0, "torso_turn_speed": 340.0,
 		"stride_walk": 5.0, "stride_run": 6.0, "legs_scale": 0.85, "hull_scale": 0.8},
-	"mech_hound": {"slot": "mech", "name": "Гончая", "class": "Лёгкий", "style": "scout",
+	"mech_hound": {"slot": "mech", "name": "Гончая", "class": "Лёгкий", "style": "scout", "model": "light_cc59ad",
 		"trait": "Разведчик: дальний обзор и сильный омни-сенсор",
 		"weight": 22.0, "capacity": 62.0, "hp": 210.0, "hit_radius": 1.6, "vision": 52.0, "omni": 24.0, "slots": 3,
 		"walk_speed": 8.6, "run_speed": 16.5, "accel": 20.0, "decel": 34.0,
@@ -51,7 +52,7 @@ const DATA := {
 		"dash_speed": 46.0, "dash_time": 0.26, "dash_cooldown": 2.0, "dash_brake": 110.0, "dash_charges": 1,
 		"legs_turn_speed": 220.0, "torso_turn_speed": 260.0, "moving_spread": 0.5,
 		"stride_walk": 5.5, "stride_run": 6.1, "legs_scale": 1.0, "hull_scale": 0.92},
-	"mech_assault": {"slot": "mech", "name": "Штурмовик", "class": "Средний", "style": "mid",
+	"mech_assault": {"slot": "mech", "name": "Штурмовик", "class": "Средний", "style": "mid", "model": "mid_87e20",
 		"trait": "Универсал: ровные числа, много слотов",
 		"weight": 34.0, "capacity": 90.0, "hp": 300.0, "hit_radius": 1.9, "vision": 36.0, "omni": 14.0, "slots": 5,
 		"walk_speed": 7.8, "run_speed": 14.9, "accel": 16.0, "decel": 31.0,
@@ -86,7 +87,7 @@ const DATA := {
 		"dash_speed": 36.0, "dash_time": 0.26, "dash_cooldown": 3.2, "dash_brake": 90.0, "dash_charges": 1,
 		"legs_turn_speed": 150.0, "torso_turn_speed": 160.0, "armor_flat": 3.0, "resist_stun": 0.2,
 		"stride_walk": 6.0, "stride_run": 6.4, "legs_scale": 1.16, "hull_scale": 1.18},
-	"mech_fortress": {"slot": "mech", "name": "Крепость", "class": "Тяжёлый", "style": "heavy",
+	"mech_fortress": {"slot": "mech", "name": "Крепость", "class": "Тяжёлый", "style": "heavy", "model": "heavy_26cbe",
 		"trait": "Больше всех слотов, защита от взрывов и оглушения",
 		"weight": 54.0, "capacity": 135.0, "hp": 460.0, "hit_radius": 2.3, "vision": 30.0, "omni": 12.0, "slots": 7,
 		"walk_speed": 5.2, "run_speed": 10.0, "accel": 10.0, "decel": 27.0,
@@ -359,12 +360,25 @@ var version := 0              # растёт при каждом изменен�
 var player_build := {}
 var saved_builds := {}        # твои сохранённые сборки: имя -> сборка
 var _over := {}               # твои изменения чисел деталей: id -> {поле: значение}
+var _mech_models := {}        # 3D-модели мехов (assets/mechs): имя -> сцена, грузятся один раз при запуске
 
 
 func _ready() -> void:
 	player_build = DEFAULT_BUILD.duplicate(true)
 	_load()
 	_load_builds()
+	# модели мехов сразу в память: иначе первое появление такого меха в бою подтормаживает
+	for id in DATA:
+		if DATA[id].has("model"):
+			mech_model(DATA[id]["model"])
+
+
+# 3D-модель меха по имени (или null, если файла нет)
+func mech_model(name: String) -> PackedScene:
+	if not _mech_models.has(name):
+		var path := "res://assets/mechs/%s.glb" % name
+		_mech_models[name] = load(path) if ResourceLoader.exists(path) else null
+	return _mech_models[name]
 
 
 # ------------------------------------------------------------------
@@ -624,6 +638,7 @@ func compute(b: Dictionary) -> Dictionary:
 		st[f] = v(mech, f)
 	st["mech"] = mech
 	st["style"] = text(mech, "style")
+	st["model"] = text(mech, "model")
 	st["slots"] = slots
 	st["energy_total"] = v(core, "energy_max")
 	st["energy_regen"] = v(core, "energy_regen") * v(mech, "energy_regen_mult")

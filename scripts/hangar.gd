@@ -47,6 +47,8 @@ var _preview_root: Node3D
 var _preview_mech: Node3D
 var _preview_cam: Camera3D
 var _cam_angle := 0.6
+var _model_yaw := PI + 0.1        # поворот меха на платформе: крутится мышью (ЛКМ и тянуть)
+var _drag := false
 var _preview_key := ""
 var _info: RichTextLabel          # все числа (во всплывающем окне «Подробнее»)
 
@@ -242,6 +244,7 @@ func _build_ui() -> void:
 	svc.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	svc.custom_minimum_size = Vector2(480, 420)
 	center.add_child(svc)
+	svc.gui_input.connect(_on_preview_input)
 	_build_preview(svc)
 	_weight_label = _label("", 17)
 	center.add_child(_weight_label)
@@ -776,6 +779,7 @@ func _update_preview(r: Dictionary) -> void:
 		"legs_scale": st["legs_scale"],
 		"hull_scale": st["hull_scale"],
 		"style": st["style"],
+		"model": st.get("model", ""),
 		"weapons": [r["weapons"][0]["look"], r["weapons"][1]["look"]],
 		"rockets": r["abilities"].any(func(a): return a["type"] == "rockets"),
 	}
@@ -793,13 +797,21 @@ func _update_preview(r: Dictionary) -> void:
 	_preview_mech.position.y = 0.3
 
 
+# зажал ЛКМ на мехе и тянешь вбок — мех поворачивается
+func _on_preview_input(e: InputEvent) -> void:
+	if e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_LEFT:
+		_drag = e.pressed
+	elif e is InputEventMouseMotion and _drag and _preview_mech != null:
+		_model_yaw += e.relative.x * 0.012
+		# ноги сразу под корпус, без шагов на месте
+		_preview_mech.reset()
+
+
 func _process(delta: float) -> void:
 	if not _root.visible or _preview_mech == null:
 		return
-	# мех стоит на платформе, корпус чуть поворачивается, камера облетает
-	var t := Time.get_ticks_msec() * 0.001
-	_preview_mech.update_visual(delta, Vector3(0, 0.3, 0), Vector3.ZERO, 0.0, sin(t * 0.6) * 0.35, false)
-	_cam_angle += delta * 0.25
+	# мех стоит на платформе и сам не крутится: его поворачивают мышью
+	_preview_mech.update_visual(delta, Vector3(0, 0.3, 0), Vector3.ZERO, _model_yaw, _model_yaw, false)
 	var size: float = 2.0 + (_preview_mech.ls + _preview_mech.hs) * 2.6
 	var target := Vector3(0, 1.6 + _preview_mech.ls * 0.9, 0)
 	_preview_cam.position = target + Vector3(sin(_cam_angle) * size * 1.9, size * 0.5, cos(_cam_angle) * size * 1.9)

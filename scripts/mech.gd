@@ -248,6 +248,7 @@ static func look_of(st: Dictionary, wl: Array, al: Array) -> Dictionary:
 		"legs_scale": st["legs_scale"],
 		"hull_scale": st["hull_scale"],
 		"style": st.get("style", "mid"),
+		"model": st.get("model", ""),
 		"weapons": [wl[0]["look"], wl[1]["look"]],
 		"rockets": al.any(func(a): return a["type"] == "rockets"),
 	}

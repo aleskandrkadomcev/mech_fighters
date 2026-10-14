@@ -1069,51 +1069,54 @@ func _run_turrettest() -> void:
 			get_tree().quit()
 
 
-# средние мехи во всех трёх видах (Cfg.mid_look 0/1/2) выгружаются в .glb: ряд стоящих
-# с разным оружием и один на ходу. Снимки делает Блендер, окно игры не нужно
+# мехи из 3D-моделей и пара коробочных (для сравнения размеров) выгружаются в mechs.glb:
+# первый ряд стоит с разным оружием, второй идёт. Снимки делает Блендер, окно игры не нужно
 func _run_mechexport() -> void:
 	if _frame != 3:
 		return
 	var MV := preload("res://scripts/mech_visual.gd")
-	var sets := [["mech_assault", "autocannon", "autocannon", true], ["mech_medic", "heavy_cannon", "shotgun", false],
-		["mech_ram", "laser", "railgun", false], ["mech_ray", "minigun", "grenade_launcher", true], ["mech_assault", "autocannon", "blaster", false]]
-	var keep: int = Cfg.mid_look
-	for look in 3:
-		Cfg.mid_look = look
-		var root := Node3D.new()
-		root.name = "look%d" % look
-		main.add_child(root)
+	var sets := [["mech_wasp", "autocannon", "laser", true], ["mech_hound", "shotgun", "railgun", false],
+		["mech_assault", "heavy_cannon", "minigun", true], ["mech_fortress", "autocannon", "grenade_launcher", true],
+		["mech_ram", "autocannon", "autocannon", false], ["mech_mortar", "heavy_cannon", "laser", false]]
+	var root := Node3D.new()
+	root.name = "mechs"
+	main.add_child(root)
+	for row in 2:
+		var walking := row == 1
 		for i in sets.size():
 			var e: Array = sets[i]
 			var r := Parts.compute({"mech": e[0], "core": "core_combat", "weapons": [e[1], e[2]], "modules": ["mod_rockets"] if e[3] else []})
 			var v = MV.new()
 			v.st = r["stats"]
 			root.add_child(v)
-			v.build(Cfg.player_color if i % 2 == 0 else Cfg.enemy_color, Color(1, 1, 1), {"legs_scale": r["stats"]["legs_scale"],
-				"hull_scale": r["stats"]["hull_scale"], "style": r["stats"]["style"],
-				"weapons": [r["weapons"][0]["look"], r["weapons"][1]["look"]], "rockets": e[3]})
-			var pos := Vector3(i * 9.0, 0, 0)
-			var walking := i == sets.size() - 1
-			for k in 50:
-				var vel := Vector3(0, 0, -9.0) if walking else Vector3.ZERO
-				if walking:
-					pos += vel / 60.0
+			v.build(Cfg.player_color if i % 2 == 0 else Cfg.enemy_color, Color(1, 1, 1) if i % 2 == 0 else Color(1.0, 0.82, 0.8),
+				{"legs_scale": r["stats"]["legs_scale"], "hull_scale": r["stats"]["hull_scale"], "style": r["stats"]["style"],
+				"model": r["stats"].get("model", ""), "weapons": [r["weapons"][0]["look"], r["weapons"][1]["look"]], "rockets": e[3]})
+			var pos := Vector3(i * 10.0, 0, row * 14.0)
+			var run: float = r["stats"]["run_speed"]
+			for k in 70:
+				var vel := Vector3(0, 0, -run) if walking else Vector3.ZERO
+				pos += vel / 60.0
 				v.update_visual(1.0 / 60.0, pos, vel, 0.0, 0.0, false)
-			print("[EXPORT] вид %d: %s (%s + %s) ног %s, треугольников ~%d" % [look, Parts.pname(e[0]), e[1], e[2], v.cls, _tris(v)])
-		# скрытое (вспышки, лучи, пламя) не выгружаем: Блендер не читает скрытые узлы
-		var hidden := root.find_children("*", "Node3D", true, false).filter(func(n): return not n.visible)
-		while not hidden.is_empty():
-			var n: Node = hidden[0]
-			n.get_parent().remove_child(n)
-			n.free()
-			hidden = root.find_children("*", "Node3D", true, false).filter(func(m): return not m.visible)
-		var doc := GLTFDocument.new()
-		var state := GLTFState.new()
-		doc.append_from_scene(root, state)
-		var path := "%s/mid_look%d.glb" % [_mechexport, look]
-		var err := doc.write_to_filesystem(state, path)
-		print("[EXPORT] %s -> %s" % [path, error_string(err)])
-	Cfg.mid_look = keep
+			if walking:
+				# ряд идущих стоит там же, где стоящие, только ниже по z
+				v.position.z += (70.0 / 60.0) * run
+			print("[EXPORT] %s%s (%s + %s): модель %s, ноги %.2f+%.2f, колено %s, треугольников ~%d" % [Parts.pname(e[0]),
+				" на бегу" if walking else "", e[1], e[2], v.model if v.model != "" else "коробки", v._l1, v._l2,
+				"назад" if v._knee_dir > 0 else "вперёд", _tris(v)])
+	# скрытое (вспышки, лучи, пламя) не выгружаем: Блендер не читает скрытые узлы
+	var hidden := root.find_children("*", "Node3D", true, false).filter(func(n): return not n.visible)
+	while not hidden.is_empty():
+		var n: Node = hidden[0]
+		n.get_parent().remove_child(n)
+		n.free()
+		hidden = root.find_children("*", "Node3D", true, false).filter(func(m): return not m.visible)
+	var doc := GLTFDocument.new()
+	var state := GLTFState.new()
+	doc.append_from_scene(root, state)
+	var path := "%s/mechs.glb" % _mechexport
+	var err := doc.write_to_filesystem(state, path)
+	print("[EXPORT] %s -> %s" % [path, error_string(err)])
 	get_tree().quit()
 
 

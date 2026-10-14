@@ -90,7 +90,7 @@ func _build_background() -> void:
 	_preview.st = r["stats"]
 	root.add_child(_preview)
 	_preview.build(Cfg.player_color, Color(1, 1, 1), {"legs_scale": r["stats"]["legs_scale"], "hull_scale": r["stats"]["hull_scale"],
-		"style": r["stats"]["style"], "weapons": [r["weapons"][0]["look"], r["weapons"][1]["look"]],
+		"style": r["stats"]["style"], "model": r["stats"].get("model", ""), "weapons": [r["weapons"][0]["look"], r["weapons"][1]["look"]],
 		"rockets": r["abilities"].any(func(a): return a["type"] == "rockets")})
 	_cam = Camera3D.new()
 	_cam.fov = 38.0
@@ -101,7 +101,8 @@ func _process(delta: float) -> void:
 	if _preview == null:
 		return
 	var t := Time.get_ticks_msec() * 0.001
-	_preview.update_visual(delta, Vector3.ZERO, Vector3.ZERO, -0.6, -0.6 + sin(t * 0.5) * 0.4, false)
+	# мех смотрит в сторону камеры (вперёд у меха -Z, поэтому +PI)
+	_preview.update_visual(delta, Vector3.ZERO, Vector3.ZERO, PI - 0.6, PI - 0.6 + sin(t * 0.5) * 0.4, false)
 	# камера стоит, мех справа от кнопок, лёгкое покачивание
 	_cam.position = Vector3(-8.0 + sin(t * 0.15) * 0.8, 5.0, 14.0)
 	_cam.look_at(Vector3(-6.5, 2.2, 0), Vector3.UP)
