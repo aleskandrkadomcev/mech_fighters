@@ -6,7 +6,6 @@ extends RefCounted
 static var _panel_tex: ImageTexture
 static var _panel_norm: ImageTexture
 static var _rocks: Array = []
-static var _grass: ArrayMesh
 
 
 # фактура брони: светлые панели, тёмные швы, болты по углам, лёгкая грязь.
@@ -101,6 +100,38 @@ static func textures(kind: String) -> Dictionary:
 	if not out.has("albedo"):
 		out = {}
 	_tex_cache[kind] = out
+	return out
+
+
+# слои земли по порядку (номер слоя в шейдере земли): трава, грунт, грязь с колеями, сухая грязь, камни, бетон баз
+const GROUND_LAYERS := ["ground_grass", "ground_dirt", "ground_mud", "ground_dry", "ground_rock", "concrete"]
+
+
+# текстуры земли одной пачкой слоёв: [цвет, рельеф]. Пусто, если файлов нет или картинку не достать (проверки без окна)
+static func ground_arrays() -> Array:
+	if _tex_cache.has("ground_arrays"):
+		return _tex_cache["ground_arrays"]
+	var out := []
+	for part in ["albedo", "normal"]:
+		var imgs: Array[Image] = []
+		for kind in GROUND_LAYERS:
+			var t := textures(kind)
+			var img: Image = t[part].get_image() if t.has(part) else null
+			if img == null or img.is_empty():
+				_tex_cache["ground_arrays"] = []
+				return []
+			if img.is_compressed():
+				img.decompress()
+			img.clear_mipmaps()
+			img.convert(Image.FORMAT_RGB8)
+			if img.get_width() != 1024 or img.get_height() != 1024:
+				img.resize(1024, 1024, Image.INTERPOLATE_LANCZOS)
+			img.generate_mipmaps()
+			imgs.append(img)
+		var arr := Texture2DArray.new()
+		arr.create_from_images(imgs)
+		out.append(arr)
+	_tex_cache["ground_arrays"] = out
 	return out
 
 
@@ -228,30 +259,50 @@ static func rock_mesh(variant: int) -> ArrayMesh:
 	return _rocks[variant]
 
 
-# пучок травы: несколько узких травинок веером
-static func grass_mesh() -> ArrayMesh:
-	if _grass != null:
-		return _grass
+static var _grass_bush: ArrayMesh
+
+
+# куст травы: 24 изогнутые травинки разной высоты, расходятся из одной кочки (~0,7 м в поперечнике).
+# Высота травинки (0..1) лежит в UV.y: шейдер травы красит корень тёмным, кончик светлым
+static func grass_bush_mesh() -> ArrayMesh:
+	if _grass_bush != null:
+		return _grass_bush
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var rng := RandomNumberGenerator.new()
-	rng.seed = 5
-	for b in 5:
-		var a := TAU * b / 5.0 + rng.randf_range(-0.3, 0.3)
+	rng.seed = 9
+	for b in 24:
+		var a := rng.randf() * TAU
 		var dir := Vector3(cos(a), 0, sin(a))
 		var side := Vector3(-dir.z, 0, dir.x)
-		var h := rng.randf_range(0.35, 0.65)
-		var lean := dir * rng.randf_range(0.15, 0.35)
-		var w := 0.09
-		var p0 := dir * 0.05 - side * w
-		var p1 := dir * 0.05 + side * w
-		var p2 := dir * 0.05 + lean + Vector3.UP * h
-		st.set_normal(Vector3.UP)
-		st.add_vertex(p0)
-		st.add_vertex(p1)
-		st.add_vertex(p2)
-	_grass = st.commit()
-	return _grass
+		var root := dir * rng.randf_range(0.0, 0.22)
+		var h := rng.randf_range(0.3, 0.8)
+		var lean := rng.randf_range(0.12, 0.45)
+		var w := rng.randf_range(0.03, 0.05)
+		# три точки по высоте: травинка выгибается наружу и сужается к кончику
+		var pts: Array[Vector3] = []
+		for k in 3:
+			var t := float(k) / 2.0
+			pts.append(root + dir * lean * t * t + Vector3.UP * h * t)
+		var tip := root + dir * lean * 1.4 + Vector3.UP * h * 1.15
+		var ws := [w, w * 0.7, w * 0.4]
+		for k in 2:
+			var a0: Vector3 = pts[k] - side * ws[k]
+			var a1: Vector3 = pts[k] + side * ws[k]
+			var b0: Vector3 = pts[k + 1] - side * ws[k + 1]
+			var b1: Vector3 = pts[k + 1] + side * ws[k + 1]
+			var v0 := float(k) / 3.0
+			var v1 := float(k + 1) / 3.0
+			for q in [[a0, v0], [a1, v0], [b1, v1], [a0, v0], [b1, v1], [b0, v1]]:
+				st.set_normal(Vector3.UP)
+				st.set_uv(Vector2(0, q[1]))
+				st.add_vertex(q[0])
+		for q in [[pts[2] - side * ws[2], 2.0 / 3.0], [pts[2] + side * ws[2], 2.0 / 3.0], [tip, 1.0]]:
+			st.set_normal(Vector3.UP)
+			st.set_uv(Vector2(0, q[1]))
+			st.add_vertex(q[0])
+	_grass_bush = st.commit()
+	return _grass_bush
 
 
 # Склейка деталей: все неподвижные детали внутри одного узла с одинаковым материалом

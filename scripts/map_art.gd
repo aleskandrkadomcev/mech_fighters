@@ -14,6 +14,8 @@ const DECOR_KINDS := {"container": "Контейнер", "generator": "Гене�
 
 var vision: Node
 var ground_mask: Image           # где дороги и площадки (из main.gd): трава там не растёт
+var biome: Image                 # где сухая грязь, грунт и камни (из main.gd): там травы меньше
+var puddles: Array = []          # лужи (из main.gd): Vector3(x, радиус, z); в них трава не растёт
 var mask_rect := Rect2()
 var decor_boxes: Array = []      # [x, z, ширина, высота, глубина] для карты проходимости ботов
 var _mats := {}
@@ -68,7 +70,8 @@ func metal() -> ShaderMaterial:
 
 func rock() -> ShaderMaterial:
 	var m := _mat("rock", Color(0.36, 0.34, 0.31), 1, 0.95, 0.0, Color.BLACK, 0.0, "rock2", 0.18, false)
-	m.set_shader_parameter("tex_tint", Color(0.85, 0.82, 0.78))
+	m.set_shader_parameter("tex_tint", Color(0.88, 0.8, 0.72))    # тёплый серо-бурый, как камни в цели
+	m.set_shader_parameter("tex_sat", 0.35)                       # мох на текстуре слишком зелёный
 	return m
 
 
@@ -191,13 +194,13 @@ func _edge_wall(center: Vector3, size: Vector3) -> void:
 		_box(root, sz, pos + Vector3(0, 0.3, 0), metal())
 
 
-# мягкое тёмное пятно на земле под объектом (заменяет затенение в углах)
+# мягкое тёмное пятно на земле под объектом (вместе с затенением в углах, SSAO)
 func _blob(pos: Vector3, size: Vector2) -> void:
 	if not _mats.has("blob"):
 		var sh := Shader.new()
 		sh.code = """shader_type spatial;
 render_mode unshaded, depth_draw_never, shadows_disabled, cull_disabled;
-uniform float strength = 0.5;
+uniform float strength = 0.25;
 void fragment() {
 	vec2 q = abs(UV - 0.5) * 2.0;
 	float d = max(q.x, q.y);
@@ -339,50 +342,97 @@ func _lamp(pos: Vector3) -> void:
 # ------------------------------------------------------------------
 
 # на дороге, площадке или в укрытии траву не сажаем (по той же картинке, что и шейдер земли)
-func _grass_ok(x: float, z: float, covers: Array, no_grass: Array) -> bool:
-	if ground_mask != null:
-		var px := int((x - mask_rect.position.x) / mask_rect.size.x * ground_mask.get_width())
-		var pz := int((z - mask_rect.position.y) / mask_rect.size.y * ground_mask.get_height())
-		if px >= 0 and pz >= 0 and px < ground_mask.get_width() and pz < ground_mask.get_height():
-			var c := ground_mask.get_pixel(px, pz)
-			if c.r > 0.25 or c.g > 0.2 or c.b > 0.2:
-				return false
+const GRASS_CHUNK := 16          # трава режется на куски 16×16 м: рисуются только куски в кадре
+const GRASS_PER_M2 := 5.0        # кустов на квадратный метр там, где трава гуще всего
+
+
+# густая трава кустами (Art.grass_bush_mesh). Где расти нельзя (дороги, площадки, укрытия, постройки),
+# считается один раз сеткой 1×1 м; густота — по карте земли (на грязи и камнях мало) и шуму кочек
+func _grass(rect: Rect2, covers: Array, no_grass: Array) -> void:
+	var w := int(rect.size.x)
+	var h := int(rect.size.y)
+	var ok := PackedByteArray()
+	ok.resize(w * h)
+	ok.fill(1)
+	if ground_mask != null and ground_mask.get_width() == w and ground_mask.get_height() == h:
+		for y in h:
+			for x in w:
+				var c := ground_mask.get_pixel(x, y)
+				if c.r > 0.25 or c.g > 0.2 or c.b > 0.2:
+					ok[y * w + x] = 0
+	var block := func(cx: float, cz: float, hx: float, hz: float) -> void:
+		for y in range(maxi(int(cz - hz - rect.position.y), 0), mini(int(cz + hz - rect.position.y) + 1, h)):
+			for x in range(maxi(int(cx - hx - rect.position.x), 0), mini(int(cx + hx - rect.position.x) + 1, w)):
+				ok[y * w + x] = 0
 	for c in covers:
-		if absf(x - c[0]) < c[2] * 0.5 + 0.6 and absf(z - c[1]) < c[4] * 0.5 + 0.6:
-			return false
+		block.call(c[0], c[1], c[2] * 0.5 + 0.6, c[4] * 0.5 + 0.6)
 	for b in decor_boxes:
-		if absf(x - b[0]) < b[2] * 0.5 + 0.4 and absf(z - b[1]) < b[4] * 0.5 + 0.4:
-			return false
+		block.call(b[0], b[1], b[2] * 0.5 + 0.4, b[4] * 0.5 + 0.4)
 	for p in no_grass:
-		if Vector2(x - p.x, z - p.z).length() < 4.0:
-			return false
-	return true
+		block.call(p.x, p.z, 4.0, 4.0)
+	for pd in puddles:
+		var rr: float = pd.y + 0.35
+		for y in range(maxi(int(pd.z - rr - rect.position.y), 0), mini(int(pd.z + rr - rect.position.y) + 1, h)):
+			for x in range(maxi(int(pd.x - rr - rect.position.x), 0), mini(int(pd.x + rr - rect.position.x) + 1, w)):
+				if Vector2(rect.position.x + x + 0.5 - pd.x, rect.position.y + y + 0.5 - pd.z).length() < rr:
+					ok[y * w + x] = 0
 
-
-func _scatter(rect: Rect2, covers: Array, no_grass: Array) -> void:
+	var clump := FastNoiseLite.new()
+	clump.seed = 5
+	clump.frequency = 0.15
+	var chunks := {}
+	for y in range(1, h - 1):
+		for x in range(1, w - 1):
+			if ok[y * w + x] == 0:
+				continue
+			var wx := rect.position.x + x
+			var wz := rect.position.y + y
+			var dens := _grass_density(wx + 0.5, wz + 0.5) * (0.2 + 0.8 * smoothstep(-0.3, 0.3, clump.get_noise_2d(wx, wz)))
+			var n := int(GRASS_PER_M2 * dens + _rng.randf())
+			if n == 0:
+				continue
+			var key := Vector2i(int(x / GRASS_CHUNK), int(y / GRASS_CHUNK))
+			if not chunks.has(key):
+				chunks[key] = []
+			for k in n:
+				var s := _rng.randf_range(0.65, 1.3) * (0.6 + 0.4 * dens)
+				var tr := Transform3D(Basis(Vector3.UP, _rng.randf() * TAU).scaled(Vector3(s, s * _rng.randf_range(0.8, 1.2), s)),
+					Vector3(wx + _rng.randf(), 0, wz + _rng.randf()))
+				# оттенок куста: солома, олива или тёмная сухая трава
+				var tint := Color(1.0, 0.96, 0.86).lerp(Color(0.86, 0.94, 0.7), _rng.randf()).lerp(Color(0.7, 0.68, 0.6), _rng.randf() * 0.5)
+				chunks[key].append([tr, tint])
 	var gm := ShaderMaterial.new()
 	gm.shader = GrassShader
 	vision.register_material(gm)
-	var xforms: Array = []
-	var tries := int(26000.0 * rect.get_area() / 33600.0)
-	for i in tries:
-		var x := _rng.randf_range(rect.position.x + 2.0, rect.end.x - 2.0)
-		var z := _rng.randf_range(rect.position.y + 2.0, rect.end.y - 2.0)
-		if not _grass_ok(x, z, covers, no_grass):
-			continue
-		var b := Basis(Vector3.UP, _rng.randf() * TAU).scaled(Vector3.ONE * _rng.randf_range(0.7, 1.35))
-		xforms.append(Transform3D(b, Vector3(x, 0, z)))
-	var mm := MultiMesh.new()
-	mm.transform_format = MultiMesh.TRANSFORM_3D
-	mm.mesh = Art.grass_mesh()
-	mm.instance_count = xforms.size()
-	for i in xforms.size():
-		mm.set_instance_transform(i, xforms[i])
-	var mmi := MultiMeshInstance3D.new()
-	mmi.multimesh = mm
-	mmi.material_override = gm
-	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(mmi)
+	for key in chunks:
+		var list: Array = chunks[key]
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.use_colors = true
+		mm.mesh = Art.grass_bush_mesh()
+		mm.instance_count = list.size()
+		for i in list.size():
+			mm.set_instance_transform(i, list[i][0])
+			mm.set_instance_color(i, list[i][1])
+		var mmi := MultiMeshInstance3D.new()
+		mmi.multimesh = mm
+		mmi.material_override = gm
+		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(mmi)
+
+
+# сколько травы в точке: 1 на траве, меньше на сухой грязи, грунте и камнях
+func _grass_density(x: float, z: float) -> float:
+	if biome == null:
+		return 1.0
+	var px := clampi(int(x - mask_rect.position.x), 0, biome.get_width() - 1)
+	var pz := clampi(int(z - mask_rect.position.y), 0, biome.get_height() - 1)
+	var c := biome.get_pixel(px, pz)
+	return 1.0 - maxf(maxf(c.r * 0.85, c.g * 0.45), c.b * 0.9)
+
+
+func _scatter(rect: Rect2, covers: Array, no_grass: Array) -> void:
+	_grass(rect, covers, no_grass)
 
 	# мелкие камни по траве и обочинам
 	for v in 3:

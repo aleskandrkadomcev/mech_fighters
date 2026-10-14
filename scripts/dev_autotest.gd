@@ -50,6 +50,8 @@ var _shots_left: Array = []
 
 func setup(main_node: Node3D, args: PackedStringArray) -> void:
 	main = main_node
+	# в проверках и снимках звука нет (не мешать Сане); обычная игра сюда не попадает
+	AudioServer.set_bus_mute(AudioServer.get_bus_index("Master"), true)
 	for a in args:
 		if a.begins_with("--shot-dir="):
 			_shot_dir = a.trim_prefix("--shot-dir=")

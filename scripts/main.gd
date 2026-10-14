@@ -29,6 +29,7 @@ const Creep := preload("res://scripts/creep.gd")
 const GroundShader := preload("res://shaders/ground.gdshader")
 const Autotest := preload("res://scripts/dev_autotest.gd")
 const MapArt := preload("res://scripts/map_art.gd")
+const Art := preload("res://scripts/art.gd")
 
 const WALL_EXTRA := 30.0          # насколько стены и укрытия выше для выстрелов, чем на вид
 const POI_TITLES := {"regen": "Реактор", "damage": "Арсенал"}
@@ -43,6 +44,8 @@ var menu: CanvasLayer
 var nav: RefCounted
 var vision: Node
 var art: Node3D
+var sun_dir := Vector3.UP         # откуда светит солнце (для бликов в лужах)
+var puddles: Array = []          # лужи на земле: Vector3(x, радиус, z); трава в них не растёт
 var minimap: Control
 var bots: Array = []
 var kills := 0
@@ -804,10 +807,15 @@ func _build_environment() -> void:
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = Color(0.05, 0.06, 0.07)
-	# мягкий рассеянный свет: сверху холодный, как от неба
+	# мягкий рассеянный свет: сверху холодный, как от неба (тени холодные, солнце тёплое)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.5, 0.58, 0.72)
-	env.ambient_light_energy = 0.55
+	env.ambient_light_color = Color(0.45, 0.52, 0.68)
+	env.ambient_light_energy = 1.6     # киношная цветопередача сильно давит тёмное: без этого тени чёрные
+	# затенение в углах и под предметами: всё «стоит» на земле
+	env.ssao_enabled = true
+	env.ssao_radius = 1.6
+	env.ssao_intensity = 1.2
+	env.ssao_power = 1.4
 	# киношная цветопередача и свечение ярких огней (полосы, трассеры, взрывы)
 	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	env.tonemap_exposure = 1.15
@@ -820,27 +828,30 @@ func _build_environment() -> void:
 	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_SOFTLIGHT
 	env.adjustment_enabled = true
 	env.adjustment_contrast = 1.08
-	env.adjustment_saturation = 1.12
+	env.adjustment_saturation = 1.25
 	# дымки нет: лоу-поли картинка должна быть чистой на любой высоте камеры
 	env.fog_enabled = false
 	var we := WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
 
-	# солнце: тёплое, низковато, длинные мягкие тени
+	# солнце: тёплое, низкое (вечер), с дальней стороны карты (контровой свет, как в цели docs/targets):
+	# тени ложатся к камере, лужи и влажная земля ловят блик
 	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-48, 32, 0)
-	sun.light_energy = 1.35
-	sun.light_color = Color(1.0, 0.93, 0.82)
+	sun.rotation_degrees = Vector3(-34, 150, 0)
+	sun.light_energy = 1.75
+	sun.light_color = Color(1.0, 0.9, 0.76)
 	sun.shadow_enabled = true
 	sun.shadow_blur = 1.5
+	sun.shadow_opacity = 0.78     # тень не чёрная: в ней видно землю и траву
 	sun.directional_shadow_max_distance = 160.0
 	add_child(sun)
+	sun_dir = sun.global_transform.basis.z.normalized()
 	# слабая подсветка с противоположной стороны, чтобы тени не были чёрными
 	var fill := DirectionalLight3D.new()
-	fill.rotation_degrees = Vector3(-35, -150, 0)
-	fill.light_energy = 0.25
-	fill.light_color = Color(0.55, 0.65, 0.9)
+	fill.rotation_degrees = Vector3(-35, -30, 0)
+	fill.light_energy = 0.35
+	fill.light_color = Color(0.62, 0.64, 0.72)
 	add_child(fill)
 
 
@@ -917,6 +928,103 @@ func _ground_mask() -> Image:
 	return img
 
 
+# где на земле сухая грязь, грунт и камни (1 пиксель = 1 метр; красный, зелёный, синий; остальное трава).
+# По ней шейдер земли смешивает текстуры, а пучки травы растут только на траве
+func _ground_biome() -> Image:
+	var r := map_rect()
+	var w := int(r.size.x)
+	var h := int(r.size.y)
+	var noise: Array[Image] = []
+	for k in 3:
+		var n := FastNoiseLite.new()
+		n.seed = 11 + k * 17
+		n.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+		n.frequency = [0.03, 0.06, 0.045][k]
+		n.fractal_octaves = 3
+		noise.append(n.get_image(w, h))
+	var img := Image.create(w, h, false, Image.FORMAT_RGB8)
+	for y in h:
+		for x in w:
+			img.set_pixel(x, y, Color(smoothstep(0.6, 0.7, noise[0].get_pixel(x, y).r),
+				smoothstep(0.6, 0.7, noise[1].get_pixel(x, y).r),
+				smoothstep(0.74, 0.8, noise[2].get_pixel(x, y).r)))
+	return img
+
+
+# колеи и лужи (4 пикселя на метр): красный — колеи вдоль линий (пара полос от колёс посередине
+# и пара слабее по краям, чуть виляют), зелёный — лужи. Лужи раскладываются здесь же: вдоль дорог
+# через 9–18 м и немного на сухой грязи; каждая из 2–4 кругов. Список луж [x, z, радиус] — в
+# puddles: по нему трава в лужах не растёт
+func _ground_wet(mask: Image, biome: Image) -> Image:
+	var r := map_rect()
+	var k := 4.0
+	var w := int(r.size.x * k)
+	var h := int(r.size.y * k)
+	var img := Image.create(w, h, false, Image.FORMAT_RG8)
+	var put := func(x: int, y: int, ch: int, v: float) -> void:
+		if x < 0 or y < 0 or x >= w or y >= h:
+			return
+		var c := img.get_pixel(x, y)
+		if v > c[ch]:
+			c[ch] = v
+			img.set_pixel(x, y, c)
+	var on_pad := func(p: Vector3) -> bool:
+		var c := mask.get_pixel(clampi(int(p.x - r.position.x), 0, mask.get_width() - 1), clampi(int(p.z - r.position.y), 0, mask.get_height() - 1))
+		return c.g > 0.15 or c.b > 0.15
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 23
+	var spots: Array = []
+	for lane in lanes:
+		var path: PackedVector3Array = lanes[lane]
+		var dist := 0.0
+		var next_puddle := rng.randf_range(4.0, 12.0)
+		for i in path.size() - 1:
+			var a := path[i]
+			var b := path[i + 1]
+			var seg := a.distance_to(b)
+			var side := Vector3(-(b.z - a.z), 0, b.x - a.x) / maxf(seg, 0.001)
+			var n := int(seg / 0.25) + 1
+			for s in n:
+				var d := dist + seg * s / n
+				var c0 := a.lerp(b, float(s) / n)
+				for t in [[-1.3, 0.0, 1.0], [1.3, 0.0, 1.0], [-2.7, 1.7, 0.55], [2.7, 1.7, 0.55]]:
+					var off: float = t[0] + sin(d * 0.12 + t[1]) * 0.35
+					var p: Vector3 = c0 + side * off
+					var px := int((p.x - r.position.x) * k)
+					var pz := int((p.z - r.position.y) * k)
+					for oy in range(-1, 2):
+						for ox in range(-1, 2):
+							put.call(px + ox, pz + oy, 0, t[2] * (1.0 if ox == 0 and oy == 0 else 0.55))
+				if d >= next_puddle:
+					next_puddle = d + rng.randf_range(9.0, 18.0)
+					var at: Vector3 = c0 + side * rng.randf_range(-2.2, 2.2)
+					if not on_pad.call(at):
+						spots.append([at, rng.randf_range(0.9, 1.9)])
+			dist += seg
+	for i in 60:
+		var at := Vector3(rng.randf_range(r.position.x + 4, r.end.x - 4), 0, rng.randf_range(r.position.y + 4, r.end.y - 4))
+		var bc := biome.get_pixel(clampi(int(at.x - r.position.x), 0, biome.get_width() - 1), clampi(int(at.z - r.position.y), 0, biome.get_height() - 1))
+		if bc.r > 0.7 and not on_pad.call(at):
+			spots.append([at, rng.randf_range(0.6, 1.3)])
+	puddles = []
+	for sp in spots:
+		var center: Vector3 = sp[0]
+		var size: float = sp[1]
+		for q in rng.randi_range(2, 4):
+			var cc := center + Vector3(rng.randf_range(-1, 1), 0, rng.randf_range(-1, 1)) * size * 0.7
+			var rad := size * rng.randf_range(0.55, 1.0)
+			puddles.append(Vector3(cc.x, rad, cc.z))
+			var cx := (cc.x - r.position.x) * k
+			var cz := (cc.z - r.position.y) * k
+			var rp := rad * k
+			for y in range(int(cz - rp) - 1, int(cz + rp) + 2):
+				for x in range(int(cx - rp) - 1, int(cx + rp) + 2):
+					var dd := Vector2(x + 0.5 - cx, y + 0.5 - cz).length() / rp
+					if dd < 1.0:
+						put.call(x, y, 1, 1.0 - smoothstep(0.45, 1.0, dd))
+	return img
+
+
 func _build_ground() -> void:
 	var r := map_rect()
 	var body := StaticBody3D.new()
@@ -940,6 +1048,16 @@ func _build_ground() -> void:
 	var sm := ShaderMaterial.new()
 	sm.shader = GroundShader
 	sm.set_shader_parameter("ground_tex", ImageTexture.create_from_image(mask))
+	var biome := _ground_biome()
+	set_meta("ground_biome", biome)
+	sm.set_shader_parameter("biome_tex", ImageTexture.create_from_image(biome))
+	sm.set_shader_parameter("sun_dir", sun_dir)
+	sm.set_shader_parameter("ruts_tex", ImageTexture.create_from_image(_ground_wet(mask, biome)))
+	var layers := Art.ground_arrays()
+	if not layers.is_empty():
+		sm.set_shader_parameter("tex_albedo", layers[0])
+		sm.set_shader_parameter("tex_normal", layers[1])
+		sm.set_shader_parameter("use_tex", 1.0)
 	vision.register_material(sm)
 	mi.material_override = sm
 	body.add_child(mi)
@@ -979,6 +1097,8 @@ func _build_walls() -> void:
 	art = MapArt.new()
 	art.vision = vision
 	art.ground_mask = get_meta("ground_mask")
+	art.biome = get_meta("ground_biome")
+	art.puddles = puddles
 	art.mask_rect = r
 	add_child(art)
 	for c in covers:

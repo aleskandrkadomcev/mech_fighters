@@ -25,6 +25,7 @@ uniform sampler2D tex_normal : hint_normal, filter_linear_mipmap, repeat_enable;
 uniform sampler2D tex_rough : hint_default_white, filter_linear_mipmap, repeat_enable;
 uniform float tex_scale = 0.25;
 uniform vec3 tex_tint : source_color = vec3(1.0);
+uniform float tex_sat = 1.0;           // насыщенность цвета текстуры (меньше 1 — бледнее, например зелёный мох на скалах)
 uniform float crack = 0.0;
 
 varying vec3 wpos;
@@ -98,7 +99,8 @@ void fragment() {
 	float rough_k = roughness;
 	if (use_tex > 0.5 && mode != 3) {
 		vec2 uv = tuv * tex_scale;
-		col = texture(tex_albedo, uv).rgb * tex_tint;
+		col = texture(tex_albedo, uv).rgb;
+		col = mix(vec3(dot(col, vec3(0.3, 0.59, 0.11))), col, tex_sat) * tex_tint;
 		rough_k = texture(tex_rough, uv).r;
 		if (use_normal > 0.5) {
 			NORMAL_MAP = texture(tex_normal, uv).rgb;
