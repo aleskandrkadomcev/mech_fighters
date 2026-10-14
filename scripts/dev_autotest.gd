@@ -32,6 +32,9 @@ var _coreshot := false           # снимок и проверка: ядра ш
 var _fxshot := false             # снимок: пыль, гильзы, дым подбитого меха, метка
 var _dropshot := false
 var _resultshot := false
+var _target := ""                # --targetshot=fight|base|calm: постановка для целевых кадров (ROADMAP.md, 2.1)
+var _nohud := false              # без интерфейса и прицела на земле: чистый кадр
+var _actors: Array = []          # мехи постановки targetshot: [мех, в кого он стреляет]
 var _stuckcheck := false
 var _boom := false               # взрыв рядом с игроком на 5-м кадре (проверка следа гари)
 var _moba_secs := 60
@@ -79,6 +82,10 @@ func setup(main_node: Node3D, args: PackedStringArray) -> void:
 			_zap = true
 		elif a == "--wallshot":
 			_wallshot = true
+		elif a.begins_with("--targetshot="):
+			_target = a.trim_prefix("--targetshot=")
+		elif a == "--nohud":
+			_nohud = true
 		elif a == "--gallery":
 			_gallery = true
 		elif a == "--verbose":
@@ -207,6 +214,8 @@ func _process(_delta: float) -> void:
 		_run_dropshot()
 	if _resultshot:
 		_run_resultshot()
+	if _target != "":
+		_run_targetshot()
 	if _boom and _frame == 5:
 		Fx.explosion(main.mech.global_position + Vector3(7, 1.8, 3), 4.5)
 		Fx.explosion(main.mech.global_position + Vector3(-6, 1.8, -4), 3.0)
@@ -215,11 +224,12 @@ func _process(_delta: float) -> void:
 	if _mechexport != "":
 		_run_mechexport()
 	if _shot_dir != "" and _shots_left.has(_frame):
+		var shot_f := _frame     # пока ждём отрисовку, счётчик кадров может уйти вперёд
 		await RenderingServer.frame_post_draw
 		var img := get_viewport().get_texture().get_image()
-		img.save_png("%s/f%04d.png" % [_shot_dir, _frame])
-		_shots_left.erase(_frame)
-		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _mechexport == "":
+		img.save_png("%s/f%04d.png" % [_shot_dir, shot_f])
+		_shots_left.erase(shot_f)
+		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and _mechexport == "":
 			get_tree().quit()
 
 
@@ -1320,6 +1330,122 @@ func _run_resultshot() -> void:
 		print("[RESULT] winner=%d paused=%s results=%s time=%s rows=%d" % [main.winner, get_tree().paused, main.menu._results.visible, Battle.time_text(), Battle.rows.size()])
 	if _frame >= 530 and _shots_left.is_empty():
 		get_tree().quit()
+
+
+# ------------------------------------------------------------------
+#  Целевые кадры (ROADMAP.md, 2.1): снимки, которые Саня дорисовывает нейросетью.
+#  fight: мехи и крипы дерутся у вражеской турели 2 уровня;
+#  base: штурм вражеской базы, ядра бьют молнией, на штабе барьер;
+#  calm: спокойные места карты (стены и скалы, своя база, Реактор)
+# ------------------------------------------------------------------
+
+func _run_targetshot() -> void:
+	var m = main.mech
+	if _frame == 3:
+		Cfg.creeps_enabled = 0
+		m.shield_left = 0.0
+		if _nohud:
+			main.hud.visible = false
+			for c in main.get_children():
+				if c.get_script() == main.Crosshair:
+					c.visible = false
+		if _target == "fight":
+			_stage_fight(m)
+		elif _target == "base":
+			_stage_base(m)
+	if _target == "calm":
+		_stage_calm(m)
+	# все стреляют в свои цели и не умирают, пока идёт съёмка
+	for a in _actors:
+		var b = a[0]
+		b.hp = maxf(b.hp, b.max_hp() * 0.6)
+		var t = a[1]
+		if t != null and is_instance_valid(t) and not t.dead:
+			b.demo["aim"] = t.global_position + Vector3.UP * 1.5
+	for a in _actors:
+		if a[0].stun_left > 0.0 and not a[0].get_meta("was_stun", false):
+			print("[TARGET] f=%d молния в %s" % [_frame, Parts.pname(a[0].build["mech"])])
+			if _shot_dir != "":
+				_shots_left.append_array([_frame + 2, _frame + 6])   # молния видна доли секунды: снимаем сразу
+		a[0].set_meta("was_stun", a[0].stun_left > 0.0)
+	var end_f: int = {"fight": 200, "base": 500, "calm": 220}.get(_target, 300)
+	if _frame >= end_f and _shots_left.is_empty():
+		get_tree().quit()
+
+
+# мех постановки: сборка, место, стрельба по цели (цель задаётся потом в _actors)
+func _stage_mech(b, mech_id: String, weapons: Array, pos: Vector3) -> Node:
+	b.brain = null
+	b.set_build({"mech": mech_id, "core": "core_combat", "weapons": weapons, "modules": []})
+	b.global_position = pos
+	b.shield_left = 0.0
+	b.demo = {"move": Vector2.ZERO, "fire": true, "aim": pos + Vector3(10, 1.5, 0)}
+	b.snap_interpolation(b)
+	return b
+
+
+func _stage_creeps(team: int, n: int, x: float, z0: float) -> void:
+	for k in n:
+		var c = main.Creep.new()
+		c.team = team
+		c.lane = "mid"
+		c.path = main.lane_path(team, "mid")
+		c.nav = main.nav
+		c.slot = k
+		c.position = Vector3(x, 0, z0 + k * 5.0)
+		main.add_child(c)
+
+
+func _enemy_structure(id: String, lane := "") -> Node3D:
+	for s in get_tree().get_nodes_in_group("structures"):
+		if s.team == 1 and s.id == id and (lane == "" or s.get_meta("lane", "") == lane):
+			return s
+	return null
+
+
+func _stage_fight(m) -> void:
+	Cfg.bot_allies = 1      # иначе бой уберёт ботов сверх настройки
+	Cfg.bot_enemies = 2
+	var p = _stage_mech(m, "mech_fortress", ["autocannon", "laser"], Vector3(50, 0.05, 4))
+	var ally = _stage_mech(main._spawn_bot(0), "mech_assault", ["autocannon", "heavy_cannon"], Vector3(47, 0.05, -8))
+	var wasp = _stage_mech(main._spawn_bot(1), "mech_wasp", ["laser", "autocannon"], Vector3(64, 0.05, 6))
+	var hound = _stage_mech(main._spawn_bot(1), "mech_hound", ["shotgun", "grenade_launcher"], Vector3(66, 0.05, -7))
+	_actors = [[p, wasp], [ally, hound], [wasp, p], [hound, ally]]
+	_stage_creeps(0, 4, 55.0, -10.0)
+	_stage_creeps(1, 4, 63.0, -10.0)
+	var t2 = _enemy_structure("turret_t2", "mid")
+	if t2 != null:
+		t2._emp_cd = 0.0
+
+
+func _stage_base(m) -> void:
+	# линия уже продавлена: средние турели 1 и 2 уровня сломаны
+	for id in ["turret_t1", "turret_t2"]:
+		var s = _enemy_structure(id, "mid")
+		if s != null:
+			s.take_damage(1e9, s.global_position, Vector3.ZERO, "", m)
+	var hq = _enemy_structure("hq")
+	Cfg.bot_allies = 1
+	Cfg.bot_enemies = 1
+	var p = _stage_mech(m, "mech_fortress", ["autocannon", "laser"], Vector3(91, 0.05, 3))
+	var ally = _stage_mech(main._spawn_bot(0), "mech_assault", ["autocannon", "heavy_cannon"], Vector3(88, 0.05, -7))
+	var hound = _stage_mech(main._spawn_bot(1), "mech_hound", ["shotgun", "grenade_launcher"], Vector3(100, 0.05, -5))
+	_actors = [[p, hq], [ally, hound], [hound, ally]]
+	_stage_creeps(0, 4, 94.0, -9.0)
+
+
+# три спокойных места; камеру сразу ставим на меха, без доводки
+func _stage_calm(m) -> void:
+	var spots := {3: [Vector3(-46, 0.05, -30), Vector3(-30, 1.5, -30)],
+		70: [Vector3(-88, 0.05, 0), Vector3(-108, 1.5, 0)],
+		140: [Vector3(0, 0.05, -46), Vector3(0, 1.5, -58)]}
+	if not spots.has(_frame):
+		return
+	var s: Array = spots[_frame]
+	m.global_position = s[0]
+	m.snap_interpolation(m)
+	m.demo = {"move": Vector2.ZERO, "fire": false, "aim": s[1]}
+	main.cam._started = false
 
 
 # что копится в сцене: всего узлов/объектов/ресурсов, время кадра, и какие узлы верхнего уровня самые частые
