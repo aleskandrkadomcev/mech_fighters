@@ -18,6 +18,16 @@ const ANKLE_H := 0.32    # высота щиколотки над подошво
 const HIP_X := 0.9       # на сколько бёдра разнесены в стороны
 const FOOT_X0 := 1.05    # на сколько ступни разнесены в стороны
 
+# Средний класс по 3D-модели medium1 (Cfg.mid_look = 1 коробки по ней, 2 сама модель).
+# Модель порезана скриптом tools/medium1_cut.py. Суставы в позе модели (метры игры, левая сторона):
+const MID_HIP := Vector3(-0.983, 2.05, 0.0)
+const MID_KNEE := Vector3(-1.053, 1.17, 0.445)
+const MID_ANKLE := Vector3(-1.334, 0.608, 0.023)
+const MID_STRETCH := 1.2  # кости в модели короче наших: без растяжки ступня не дотягивается при беге
+const MID_POD := Vector3(1.266, 0.495, -0.1)   # подвес пушки в корпусе
+const MID_MUZZLE := Vector3(0.0, -0.27, -2.35) # конец стволов автопушки модели (от подвеса)
+const MEDIUM1 := "res://assets/mechs/medium1.glb"
+
 
 class Foot:
 	var pos := Vector3.ZERO      # где ступня стоит в мире
@@ -65,8 +75,12 @@ var braced := false              # упор (Мортира): сзади опу�
 var airborne := false            # летит при высадке: ноги поджаты, задние двигатели не горят
 var style := "mid"
 var cls := "mid"                # класс: light (птица), mid (штурмовик по референсу), heavy (крепость)
+var look_mid := 0               # вид среднего: 0 старые коробки, 1 коробки по модели, 2 модель
 var _hip_x := HIP_X
 var _foot_x := FOOT_X0
+var _l1 := L1
+var _l2 := L2
+var _ankle_h := ANKLE_H
 var _jets: Array[MeshInstance3D] = []
 var _jet_light: OmniLight3D
 var _struts: Array[Node3D] = []
@@ -82,6 +96,11 @@ var m_accent: StandardMaterial3D
 var m_glow: StandardMaterial3D
 var m_beam: StandardMaterial3D
 var m_light: StandardMaterial3D
+# для 3D-модели: те же материалы, но с затенением, запечённым в цвет вершин
+var m_armor_v: StandardMaterial3D
+var m_armor2_v: StandardMaterial3D
+var m_dark_v: StandardMaterial3D
+var _model_meshes := {}          # части модели по именам (берутся из файла при сборке)
 
 const Art := preload("res://scripts/art.gd")
 
@@ -98,6 +117,16 @@ func build(team_color: Color, tint: Color, look: Dictionary) -> void:
 	cls = "light" if style in ["light", "scout"] else ("heavy" if style in ["heavy", "bastion", "siege"] else "mid")
 	_hip_x = {"light": 0.72, "mid": 0.95, "heavy": 1.15}[cls]
 	_foot_x = {"light": 0.9, "mid": 1.12, "heavy": 1.38}[cls]
+	look_mid = int(Cfg.mid_look) if cls == "mid" else 0
+	if look_mid == 2 and _model_mesh("hull") == null:
+		look_mid = 1     # файла модели нет: коробки по ней
+	if look_mid > 0:
+		# ноги как у модели: шире, щиколотка выше, кости чуть вытянуты
+		_hip_x = -MID_HIP.x
+		_foot_x = -MID_ANKLE.x
+		_ankle_h = MID_ANKLE.y
+		_l1 = MID_HIP.distance_to(MID_KNEE) * MID_STRETCH
+		_l2 = MID_KNEE.distance_to(MID_ANKLE) * MID_STRETCH
 	# броня слегка окрашена в цвет команды, чтобы мехи отличались не только полосками
 	var paint := Color(0.42, 0.43, 0.44).lerp(team_color, 0.12) * tint
 	m_armor = _mat(paint, 0.35, 0.5)
@@ -123,6 +152,10 @@ func build(team_color: Color, tint: Color, look: Dictionary) -> void:
 	m_light.emission_enabled = true
 	m_light.emission = Color(1.0, 0.92, 0.75)
 	m_light.emission_energy_multiplier = 3.0
+	if look_mid == 2:
+		m_armor_v = _vcol(m_armor)
+		m_armor2_v = _vcol(m_armor2)
+		m_dark_v = _vcol(m_dark)
 
 	_build_pelvis()
 	_build_torso(look.get("weapons", ["twin", "twin"]), look.get("rockets", false))
@@ -215,12 +248,13 @@ func set_charge(gun: int, k: float) -> void:
 func set_charred() -> void:
 	set_fade(0.0)
 	var burnt := Color(0.07, 0.065, 0.06)
-	for m in [m_armor, m_armor2, m_accent]:
+	for m in [m_armor, m_armor2, m_accent, m_armor_v, m_armor2_v]:
 		if m != null:
 			m.albedo_color = burnt * randf_range(0.8, 1.3)
 			m.emission_enabled = false
-	if m_dark != null:
-		m_dark.albedo_color = Color(0.03, 0.03, 0.03)
+	for m in [m_dark, m_dark_v]:
+		if m != null:
+			m.albedo_color = Color(0.03, 0.03, 0.03)
 	if m_glow != null:
 		m_glow.albedo_color = Color(0.12, 0.05, 0.03)
 		m_glow.emission = Color(0.35, 0.08, 0.02)
@@ -240,7 +274,7 @@ func set_charred() -> void:
 
 # невидимость: 0 = обычный, 1 = совсем прозрачный
 func set_fade(f: float) -> void:
-	for m in [m_armor, m_armor2, m_dark, m_accent, m_glow, m_light]:
+	for m in [m_armor, m_armor2, m_dark, m_accent, m_glow, m_light, m_armor_v, m_armor2_v, m_dark_v]:
 		if m == null:
 			continue
 		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA if f > 0.001 else BaseMaterial3D.TRANSPARENCY_DISABLED
@@ -254,6 +288,18 @@ func hip_h() -> float:
 func _build_pelvis() -> void:
 	legs_root = Node3D.new()
 	add_child(legs_root)
+	if look_mid == 2:
+		_model(legs_root, "pelvis")
+		return
+	if look_mid == 1:
+		var h := _holder(legs_root, Transform3D(Basis.IDENTITY, Vector3(0, -HIP_H0, 0)))
+		_box(h, Vector3(0.85, 0.6, 1.2), Vector3(0, 2.05, 0.05), m_armor2)
+		_box(h, Vector3(0.6, 0.35, 0.75), Vector3(0, 1.74, -0.12), m_armor2, Vector3(0.3, 0, 0))
+		_box(h, Vector3(0.5, 0.12, 0.9), Vector3(0, 2.38, 0.05), m_dark)
+		for s in [-1.0, 1.0]:
+			_cyl(h, 0.17, 0.62, Vector3(0.62 * s, 2.05, 0), m_dark, Vector3(0, 0, PI / 2))
+			_cyl(h, 0.24, 0.12, Vector3(0.4 * s, 2.05, 0), m_armor2, Vector3(0, 0, PI / 2))
+		return
 	var k: float = {"light": 0.75, "mid": 1.0, "heavy": 1.3}[cls]
 	_box(legs_root, Vector3(1.25 * k, 0.5, 1.05), Vector3.ZERO, m_dark)
 	_box(legs_root, Vector3(0.9 * k, 0.35, 1.25), Vector3(0, -0.12, 0), m_armor2)
@@ -285,9 +331,14 @@ func _build_torso(weapon_looks: Array, rockets: bool) -> void:
 			ports = [Vector3(-0.75, 2.15, -0.1), Vector3(0.75, 2.15, -0.1)]
 			jets = [Vector3(-0.55, 0.95, 1.9), Vector3(0.55, 0.95, 1.9)]
 		_:
-			pods = _hull_mid()
-			ports = [Vector3(-1.32, 2.05, -0.35), Vector3(1.32, 2.05, -0.35)]
-			jets = [Vector3(-0.42, 0.95, 1.85), Vector3(0.42, 0.95, 1.85)]
+			if look_mid > 0:
+				pods = _hull_mid_new()
+				ports = [Vector3(-MID_POD.x, 1.1, -0.2), Vector3(MID_POD.x, 1.1, -0.2)]
+				jets = [Vector3(-0.42, 0.5, 1.85), Vector3(0.42, 0.5, 1.85)]
+			else:
+				pods = _hull_mid()
+				ports = [Vector3(-1.32, 2.05, -0.35), Vector3(1.32, 2.05, -0.35)]
+				jets = [Vector3(-0.42, 0.95, 1.85), Vector3(0.42, 0.95, 1.85)]
 	# двигатели рывка сзади
 	for j in jets:
 		_cyl(torso, 0.2, 0.35, j - Vector3(0, 0, 0.3), m_dark, Vector3(PI / 2, 0, 0))
@@ -321,9 +372,20 @@ func _build_torso(weapon_looks: Array, rockets: bool) -> void:
 		torso.add_child(pod)
 		gun_pods.append(pod)
 		var look: String = weapon_looks[i] if i < weapon_looks.size() else "twin"
-		var muzzle_z := _build_weapon(pod, look, s, i)
+		var muzzle := Vector3(0, -0.05, 0)
+		if look_mid > 0:
+			# корпус пушки свой (модель или коробки по ней); у автопушки и стволы свои,
+			# у остального оружия ставим только его стволы
+			var own_barrels := _pod_mid_new(pod, s, look == "twin")
+			if own_barrels:
+				muzzle = MID_MUZZLE
+			else:
+				muzzle.z = _build_weapon(pod, look, s, i, false)
+		else:
+			muzzle.z = _build_weapon(pod, look, s, i)
+		var muzzle_z := muzzle.z
 		var mz := Node3D.new()
-		mz.position = Vector3(0, -0.05, muzzle_z)
+		mz.position = muzzle
 		pod.add_child(mz)
 		muzzles.append(mz)
 		# вспышка выстрела: спрайт (если есть) или светящийся шар
@@ -343,7 +405,7 @@ func _build_torso(weapon_looks: Array, rockets: bool) -> void:
 			fm.cull_mode = BaseMaterial3D.CULL_DISABLED
 			fl.material_override = fm
 			fl.rotation = Vector3(-PI / 2, 0, 0)
-			fl.position = Vector3(0, -0.05, muzzle_z - 0.9)
+			fl.position = Vector3(0, muzzle.y, muzzle_z - 0.9)
 		else:
 			var sm := SphereMesh.new()
 			sm.radius = 0.38
@@ -352,7 +414,7 @@ func _build_torso(weapon_looks: Array, rockets: bool) -> void:
 			sm.rings = 4
 			fl.mesh = sm
 			fl.material_override = _unshaded(Color(1.0, 0.82, 0.4) * 2.5)
-			fl.position = Vector3(0, -0.05, muzzle_z - 0.3)
+			fl.position = Vector3(0, muzzle.y, muzzle_z - 0.3)
 			fl.scale = Vector3(0.8, 0.8, 1.8)
 		fl.scale *= (1.5 if look == "heavy" or look == "shotgun" else 1.0)
 		fl.visible = false
@@ -431,6 +493,69 @@ func _hull_mid() -> Array:
 	return [Vector3(-1.38, 0.95, -0.55), Vector3(1.38, 0.95, -0.55)]
 
 
+# средний по 3D-модели medium1: длинный горбатый корпус с носом-клином, по бокам на коротких
+# плечах орудийные блоки, сзади выхлопы. look_mid 2 — сама модель, 1 — коробки по её меркам.
+# Коробки ниже заданы в координатах позы модели (метры игры, как на снимках модели с сеткой),
+# держатель переносит их в корпус.
+func _hull_mid_new() -> Array:
+	var pods := [Vector3(-MID_POD.x, MID_POD.y, MID_POD.z), MID_POD]
+	if look_mid == 2:
+		_model(torso, "hull")
+		# цвет команды: полосы по хребту и на плечевых коробах
+		_box(torso, Vector3(0.12, 0.05, 1.6), Vector3(0, 1.16, 0.2), m_accent)
+		for s in [-1.0, 1.0]:
+			_box(torso, Vector3(0.08, 0.05, 0.9), Vector3(0.62 * s, 1.08, -0.1), m_accent)
+		return pods
+	var h := _holder(torso, Transform3D(Basis.IDENTITY, Vector3(0, -(HIP_H0 + WAIST_UP), 0)))
+	# основное тело и горб
+	_box(h, Vector3(1.15, 0.85, 2.7), Vector3(0, 2.95, 0.35), m_armor2)
+	_box(h, Vector3(1.25, 0.32, 2.4), Vector3(0, 3.3, 0.25), m_armor, Vector3(-0.04, 0, 0))
+	_box(h, Vector3(0.45, 0.2, 2.2), Vector3(0, 3.5, 0.3), m_armor2)
+	_box(h, Vector3(0.12, 0.05, 2.0), Vector3(0, 3.61, 0.3), m_accent)
+	# нос клином: верх уходит вниз к острию, снизу подбородок
+	_box(h, Vector3(1.0, 0.5, 1.25), Vector3(0, 3.05, -1.1), m_armor, Vector3(-0.28, 0, 0))
+	_box(h, Vector3(0.55, 0.38, 0.6), Vector3(0, 2.8, -1.55), m_armor, Vector3(-0.28, 0, 0))
+	_box(h, Vector3(0.85, 0.3, 0.9), Vector3(0, 2.58, -0.95), m_armor2, Vector3(0.35, 0, 0))
+	_box(h, Vector3(0.5, 0.06, 0.05), Vector3(0, 2.92, -1.73), m_glow, Vector3(-0.28, 0, 0))
+	# корма и выхлопы
+	_box(h, Vector3(1.4, 0.75, 0.9), Vector3(0, 2.95, 1.55), m_armor)
+	for k in 4:
+		_box(h, Vector3(0.15, 0.22, 0.45), Vector3((k - 1.5) * 0.3, 2.85, 2.0), m_dark)
+	for s in [-1.0, 1.0]:
+		# боковые секции, плечо к орудийному блоку, короб на плече
+		_box(h, Vector3(0.42, 0.62, 2.2), Vector3(0.8 * s, 2.95, 0.35), m_armor)
+		_box(h, Vector3(0.55, 0.42, 0.7), Vector3(0.78 * s, 2.86, -0.45), m_dark)
+		_box(h, Vector3(0.32, 0.36, 0.7), Vector3(0.72 * s, 3.36, -0.35), m_armor2)
+		_box(h, Vector3(0.08, 0.04, 0.6), Vector3(0.72 * s, 3.55, -0.35), m_accent)
+		_box(h, Vector3(0.14, 0.08, 0.05), Vector3(0.3 * s, 2.62, -1.4), m_light)
+	return pods
+
+
+# орудийный блок среднего по модели. Возвращает true, если стволы автопушки поставлены свои
+func _pod_mid_new(pod: Node3D, s: float, twin: bool) -> bool:
+	var side := "l" if s < 0.0 else "r"
+	if look_mid == 2:
+		_model(pod, "pod_" + side)
+		if twin:
+			_model(pod, "barrels_" + side)
+		return twin
+	var h := _holder(pod, Transform3D(Basis.IDENTITY, -(Vector3(0, HIP_H0 + WAIST_UP, 0) + Vector3(MID_POD.x * s, MID_POD.y, MID_POD.z))))
+	var x := MID_POD.x
+	_box(h, Vector3(0.7, 0.62, 2.3), Vector3(x * s, 2.8, -0.05), m_armor)
+	_box(h, Vector3(0.6, 0.18, 1.8), Vector3((x - 0.02) * s, 3.17, 0.1), m_armor2)
+	_box(h, Vector3(0.14, 0.55, 1.6), Vector3((x + 0.4) * s, 2.8, 0.15), m_armor2)
+	_box(h, Vector3(0.08, 0.05, 1.5), Vector3((x + 0.15) * s, 3.27, 0.1), m_accent)
+	_box(h, Vector3(0.6, 0.5, 0.3), Vector3(x * s, 2.85, 1.2), m_dark)
+	_box(h, Vector3(0.55, 0.5, 0.25), Vector3(x * s, 2.62, -1.22), m_dark)
+	if twin:
+		var my := HIP_H0 + WAIST_UP + MID_POD.y + MID_MUZZLE.y
+		for b in [-0.08, 0.08]:
+			_cyl(h, 0.055, 1.15, Vector3(x * s, my + b, -1.82), m_dark, Vector3(PI / 2, 0, 0))
+			_cyl(h, 0.075, 0.15, Vector3(x * s, my + b, -1.75), m_armor2, Vector3(PI / 2, 0, 0))
+			_cyl(h, 0.08, 0.2, Vector3(x * s, my + b, -2.3), m_armor2, Vector3(PI / 2, 0, 0))
+	return twin
+
+
 # тяжёлый: широкая плита-бункер с вертикальной лобовой бронёй, боковые спонсоны с пушками,
 # рубка сверху, выхлопные трубы, юбки над ногами
 func _hull_heavy() -> Array:
@@ -481,19 +606,24 @@ func _build_style_parts() -> void:
 				_box(torso, Vector3(0.07, 0.07, 0.07), Vector3(0.25 * s, 2.9, 1.9), m_glow)
 		"repair":
 			# механик: ящик с инструментом на ранце, кран-манипулятор, зелёный маячок
-			_box(torso, Vector3(1.1, 0.6, 0.7), Vector3(0, 1.7, 1.25), m_armor2)
+			# (у среднего по модели корпус ниже: всё опускаем)
+			var up := Vector3(0, -0.6, 0) if look_mid > 0 else Vector3.ZERO
+			_box(torso, Vector3(1.1, 0.6, 0.7), Vector3(0, 1.7, 1.25) + up, m_armor2)
 			var green := _unshaded(Color(0.35, 1.0, 0.5) * 2.0)
-			_cyl(torso, 0.1, 0.18, Vector3(0.35, 2.1, 1.35), green)
-			_box(torso, Vector3(0.12, 0.12, 1.5), Vector3(-0.42, 2.05, 0.75), m_dark, Vector3(0.5, 0, 0))
-			_box(torso, Vector3(0.16, 0.4, 0.16), Vector3(-0.42, 2.15, 0.05), m_accent)
+			_cyl(torso, 0.1, 0.18, Vector3(0.35, 2.1, 1.35) + up, green)
+			_box(torso, Vector3(0.12, 0.12, 1.5), Vector3(-0.42, 2.05, 0.75) + up, m_dark, Vector3(0.5, 0, 0))
+			_box(torso, Vector3(0.16, 0.4, 0.16), Vector3(-0.42, 2.15, 0.05) + up, m_accent)
 		"ram":
-			# таран: отвал спереди и рога
-			_box(torso, Vector3(2.4, 1.1, 0.32), Vector3(0, 0.55, -1.45), m_armor, Vector3(-0.25, 0, 0))
-			_box(torso, Vector3(2.5, 0.12, 0.38), Vector3(0, 0.05, -1.55), m_dark)
+			# таран: отвал спереди и рога (у среднего по модели нос длиннее, а пушки шире:
+			# отвал уже и вынесен вперёд)
+			var w := 0.7 if look_mid > 0 else 1.0
+			var dz := -0.4 if look_mid > 0 else 0.0
+			_box(torso, Vector3(2.4 * w, 1.1, 0.32), Vector3(0, 0.55, -1.45 + dz), m_armor, Vector3(-0.25, 0, 0))
+			_box(torso, Vector3(2.5 * w, 0.12, 0.38), Vector3(0, 0.05, -1.55 + dz), m_dark)
 			for s in [-1.0, 1.0]:
-				_box(torso, Vector3(0.2, 0.2, 0.9), Vector3(1.05 * s, 0.6, -1.85), m_dark, Vector3(0, 0.25 * s, 0))
+				_box(torso, Vector3(0.2, 0.2, 0.9), Vector3(1.05 * w * s, 0.6, -1.85 + dz), m_dark, Vector3(0, 0.25 * s, 0))
 			for i in 3:
-				_box(torso, Vector3(2.1, 0.06, 0.05), Vector3(0, 0.3 + i * 0.3, -1.63), m_accent, Vector3(-0.25, 0, 0))
+				_box(torso, Vector3(2.1 * w, 0.06, 0.05), Vector3(0, 0.3 + i * 0.3, -1.63 + dz), m_accent, Vector3(-0.25, 0, 0))
 		"siege":
 			# мортира: короба боезапаса на палубе и упоры сзади (опускаются, когда стоит)
 			_box(torso, Vector3(1.0, 0.5, 0.9), Vector3(-0.55, 2.05, -0.25), m_armor2)
@@ -516,32 +646,42 @@ func _build_style_parts() -> void:
 					_box(torso, Vector3(0.14, 0.08, 0.08), Vector3(2.17 * s, 0.7, -0.85 + k * 0.55), m_dark)
 
 
-# строит пушку на подвесе, возвращает, где кончается ствол
-func _build_weapon(pod: Node3D, look: String, s: float, gun := 0) -> float:
+# строит пушку на подвесе, возвращает, где кончается ствол.
+# housing = false: только стволы, кожух даёт сам корпус меха (средний по модели)
+func _build_weapon(pod: Node3D, look: String, s: float, gun := 0, housing := true) -> float:
+	var hp: Node3D = pod if housing else Node3D.new()
+	var muzzle_z := _weapon_parts(pod, hp, look, s, gun)
+	if not housing:
+		hp.free()
+	return muzzle_z
+
+
+# строит пушку на подвесе (кожух в hp, стволы в pod), возвращает, где кончается ствол
+func _weapon_parts(pod: Node3D, hp: Node3D, look: String, s: float, gun: int) -> float:
 	match look:
 		"heavy":
 			# тяжёлое орудие: один толстый длинный ствол
-			_box(pod, Vector3(0.86, 0.9, 1.7), Vector3.ZERO, m_armor)
-			_box(pod, Vector3(0.14, 1.0, 1.4), Vector3(0.48 * s, 0.06, 0.0), m_armor2)
-			_box(pod, Vector3(0.2, 0.05, 1.4), Vector3(0, 0.47, 0.0), m_accent)
-			_box(pod, Vector3(0.7, 0.6, 0.35), Vector3(0, 0, 0.95), m_dark)
+			_box(hp, Vector3(0.86, 0.9, 1.7), Vector3.ZERO, m_armor)
+			_box(hp, Vector3(0.14, 1.0, 1.4), Vector3(0.48 * s, 0.06, 0.0), m_armor2)
+			_box(hp, Vector3(0.2, 0.05, 1.4), Vector3(0, 0.47, 0.0), m_accent)
+			_box(hp, Vector3(0.7, 0.6, 0.35), Vector3(0, 0, 0.95), m_dark)
 			_cyl(pod, 0.2, 2.0, Vector3(0, -0.05, -1.75), m_dark, Vector3(PI / 2, 0, 0))
 			_cyl(pod, 0.27, 0.45, Vector3(0, -0.05, -1.05), m_armor2, Vector3(PI / 2, 0, 0))
 			_box(pod, Vector3(0.5, 0.36, 0.42), Vector3(0, -0.05, -2.75), m_armor2)
 			return -2.95
 		"laser":
 			# лазер: гладкий кожух со светящейся линзой
-			_box(pod, Vector3(0.72, 0.72, 1.6), Vector3.ZERO, m_armor)
-			_box(pod, Vector3(0.12, 0.8, 1.3), Vector3(0.42 * s, 0.04, 0.0), m_armor2)
-			_box(pod, Vector3(0.2, 0.05, 1.3), Vector3(0, 0.39, 0.0), m_accent)
+			_box(hp, Vector3(0.72, 0.72, 1.6), Vector3.ZERO, m_armor)
+			_box(hp, Vector3(0.12, 0.8, 1.3), Vector3(0.42 * s, 0.04, 0.0), m_armor2)
+			_box(hp, Vector3(0.2, 0.05, 1.3), Vector3(0, 0.39, 0.0), m_accent)
 			_box(pod, Vector3(0.5, 0.5, 1.0), Vector3(0, -0.05, -1.25), m_armor2)
 			_box(pod, Vector3(0.36, 0.36, 0.5), Vector3(0, -0.05, -1.9), m_dark)
 			_box(pod, Vector3(0.24, 0.24, 0.08), Vector3(0, -0.05, -2.17), m_beam)
 			return -2.2
 		"blaster":
 			# бластер: ствол с катушками, светятся голубым
-			_box(pod, Vector3(0.7, 0.7, 1.4), Vector3.ZERO, m_armor)
-			_box(pod, Vector3(0.2, 0.05, 1.2), Vector3(0, 0.37, 0.0), m_accent)
+			_box(hp, Vector3(0.7, 0.7, 1.4), Vector3.ZERO, m_armor)
+			_box(hp, Vector3(0.2, 0.05, 1.2), Vector3(0, 0.37, 0.0), m_accent)
 			_cyl(pod, 0.12, 1.7, Vector3(0, -0.05, -1.3), m_dark, Vector3(PI / 2, 0, 0))
 			var coil := _unshaded(Color(0.4, 0.9, 1.0) * 2.2)
 			for k in 4:
@@ -550,24 +690,24 @@ func _build_weapon(pod: Node3D, look: String, s: float, gun := 0) -> float:
 			return -2.3
 		"grenade":
 			# гранатомёт: толстая короткая труба и барабан
-			_box(pod, Vector3(0.78, 0.8, 1.3), Vector3.ZERO, m_armor)
-			_cyl(pod, 0.45, 0.5, Vector3(0, 0.1, 0.15), m_armor2, Vector3(0, 0, PI / 2))
+			_box(hp, Vector3(0.78, 0.8, 1.3), Vector3.ZERO, m_armor)
+			_cyl(hp, 0.45, 0.5, Vector3(0, 0.1, 0.15), m_armor2, Vector3(0, 0, PI / 2))
 			_cyl(pod, 0.26, 1.4, Vector3(0, -0.05, -1.15), m_dark, Vector3(PI / 2, 0, 0))
 			_cyl(pod, 0.31, 0.2, Vector3(0, -0.05, -1.75), m_armor2, Vector3(PI / 2, 0, 0))
-			_box(pod, Vector3(0.2, 0.05, 1.1), Vector3(0, 0.41, 0.0), m_accent)
+			_box(hp, Vector3(0.2, 0.05, 1.1), Vector3(0, 0.41, 0.0), m_accent)
 			return -1.85
 		"shotgun":
 			# дробовик: два широких коротких ствола
-			_box(pod, Vector3(0.8, 0.75, 1.3), Vector3.ZERO, m_armor)
-			_box(pod, Vector3(0.2, 0.05, 1.1), Vector3(0, 0.39, 0.0), m_accent)
+			_box(hp, Vector3(0.8, 0.75, 1.3), Vector3.ZERO, m_armor)
+			_box(hp, Vector3(0.2, 0.05, 1.1), Vector3(0, 0.39, 0.0), m_accent)
 			for b in [-0.18, 0.18]:
 				_cyl(pod, 0.16, 1.2, Vector3(b, -0.05, -1.2), m_dark, Vector3(PI / 2, 0, 0))
 			_box(pod, Vector3(0.75, 0.42, 0.3), Vector3(0, -0.05, -0.7), m_armor2)
 			return -1.8
 		"rail":
 			# рельсотрон: две длинные рельсы, между ними разгорается заряд
-			_box(pod, Vector3(0.8, 0.8, 1.6), Vector3.ZERO, m_armor)
-			_box(pod, Vector3(0.2, 0.05, 1.4), Vector3(0, 0.42, 0.0), m_accent)
+			_box(hp, Vector3(0.8, 0.8, 1.6), Vector3.ZERO, m_armor)
+			_box(hp, Vector3(0.2, 0.05, 1.4), Vector3(0, 0.42, 0.0), m_accent)
 			for b in [-0.2, 0.2]:
 				_box(pod, Vector3(0.12, 0.34, 2.6), Vector3(b, -0.05, -1.9), m_armor2)
 			var cm := StandardMaterial3D.new()
@@ -581,8 +721,8 @@ func _build_weapon(pod: Node3D, look: String, s: float, gun := 0) -> float:
 			return -3.2
 		"minigun":
 			# Гатлинг: блок из шести стволов, крутится при стрельбе
-			_box(pod, Vector3(0.8, 0.8, 1.3), Vector3.ZERO, m_armor)
-			_box(pod, Vector3(0.2, 0.05, 1.1), Vector3(0, 0.42, 0.0), m_accent)
+			_box(hp, Vector3(0.8, 0.8, 1.3), Vector3.ZERO, m_armor)
+			_box(hp, Vector3(0.2, 0.05, 1.1), Vector3(0, 0.42, 0.0), m_accent)
 			var sp := Node3D.new()
 			sp.position = Vector3(0, -0.05, -0.65)
 			pod.add_child(sp)
@@ -595,10 +735,10 @@ func _build_weapon(pod: Node3D, look: String, s: float, gun := 0) -> float:
 			return -2.4
 		_:
 			# автопушка: два ствола
-			_box(pod, Vector3(0.78, 0.8, 1.55), Vector3.ZERO, m_armor)
-			_box(pod, Vector3(0.14, 0.95, 1.3), Vector3(0.44 * s, 0.06, 0.0), m_armor2)
-			_box(pod, Vector3(0.2, 0.05, 1.3), Vector3(0, 0.42, 0.0), m_accent)
-			_box(pod, Vector3(0.6, 0.5, 0.3), Vector3(0, 0, 0.85), m_dark)
+			_box(hp, Vector3(0.78, 0.8, 1.55), Vector3.ZERO, m_armor)
+			_box(hp, Vector3(0.14, 0.95, 1.3), Vector3(0.44 * s, 0.06, 0.0), m_armor2)
+			_box(hp, Vector3(0.2, 0.05, 1.3), Vector3(0, 0.42, 0.0), m_accent)
+			_box(hp, Vector3(0.6, 0.5, 0.3), Vector3(0, 0, 0.85), m_dark)
 			for b in [-0.17, 0.17]:
 				_cyl(pod, 0.1, 1.5, Vector3(b, -0.05, -1.45), m_dark, Vector3(PI / 2, 0, 0))
 				_cyl(pod, 0.145, 0.3, Vector3(b, -0.05, -2.1), m_armor2, Vector3(PI / 2, 0, 0))
@@ -620,6 +760,9 @@ func _build_leg(side: float) -> Foot:
 	add_child(f.shin)
 	f.node = Node3D.new()
 	add_child(f.node)
+	if look_mid > 0:
+		_leg_mid_new(f, side)
+		return f
 	match cls:
 		"light":
 			_box(f.thigh, Vector3(0.26, L1, 0.32), Vector3.ZERO, m_dark)
@@ -680,6 +823,107 @@ func _build_leg(side: float) -> Foot:
 			_box(f.node, Vector3(0.6, 0.24, 0.5), Vector3(0, 0.18, 0.62), m_dark)
 			_box(f.node, Vector3(0.7, 0.3, 0.45), Vector3(0, 0.45, -0.05), m_armor)
 	return f
+
+
+# нога среднего по модели: массивное бедро с бронеплитой вперёд, колено сзади, голень к щиколотке,
+# широкая ступня. Коробки заданы в позе модели (метры игры), держатели переносят их в кости.
+func _leg_mid_new(f: Foot, s: float) -> void:
+	var hip := Vector3(absf(MID_HIP.x) * s, MID_HIP.y, MID_HIP.z)
+	var knee := Vector3(absf(MID_KNEE.x) * s, MID_KNEE.y, MID_KNEE.z)
+	var ankle := Vector3(absf(MID_ANKLE.x) * s, MID_ANKLE.y, MID_ANKLE.z)
+	var thigh_tr := _bone_tr(hip, knee, _l1)
+	var shin_tr := _bone_tr(knee, ankle, _l2)
+	var knee_tr := _bone_tr(hip, knee, -1.0)
+	knee_tr.origin = knee_tr.basis * -knee
+	var foot_tr := Transform3D(Basis.IDENTITY, -Vector3(ankle.x, 0, ankle.z))
+	if look_mid == 2:
+		var side := "l" if s < 0.0 else "r"
+		_model(f.thigh, "thigh_" + side).scale = Vector3(1, _l1, 1)
+		_model(f.knee, "knee_" + side)
+		_model(f.shin, "shin_" + side).scale = Vector3(1, _l2, 1)
+		_model(f.node, "foot_" + side)
+		return
+	var x := absf(MID_HIP.x)
+	# бедро
+	var t := _holder(f.thigh, thigh_tr)
+	_box(t, Vector3(0.75, 0.95, 1.35), Vector3((x + 0.1) * s, 1.85, -0.2), m_armor)
+	_box(t, Vector3(0.7, 0.45, 0.5), Vector3((x + 0.1) * s, 1.48, -0.75), m_armor2, Vector3(-0.6, 0, 0))
+	_box(t, Vector3(0.66, 0.12, 1.1), Vector3((x + 0.1) * s, 2.36, -0.1), m_armor2)
+	_box(t, Vector3(0.12, 0.7, 1.0), Vector3((x + 0.5) * s, 1.85, -0.25), m_armor2)
+	_box(t, Vector3(0.42, 0.8, 0.42), Vector3((x + 0.05) * s, 1.65, 0.42), m_dark, Vector3(0.45, 0, 0))
+	_box(t, Vector3(0.3, 0.45, 0.45), Vector3((x - 0.2) * s, 2.05, 0), m_dark)
+	# колено
+	var k := _holder(f.knee, knee_tr)
+	_cyl(k, 0.22, 0.75, knee, m_dark, Vector3(0, 0, PI / 2))
+	_cyl(k, 0.26, 0.12, knee + Vector3(0.36 * s, 0, 0), m_armor2, Vector3(0, 0, PI / 2))
+	# голень
+	var sh := _holder(f.shin, shin_tr)
+	_box(sh, Vector3(0.7, 0.9, 0.7), Vector3(1.2 * s, 1.0, 0.25), m_armor2, Vector3(0.6, 0, 0))
+	_box(sh, Vector3(0.6, 0.8, 0.2), Vector3(1.22 * s, 1.0, -0.15), m_armor, Vector3(0.6, 0, 0))
+	_box(sh, Vector3(0.25, 0.7, 0.25), Vector3(1.15 * s, 1.0, 0.72), m_dark, Vector3(0.3, 0, 0))
+	# ступня
+	var ft := _holder(f.node, foot_tr)
+	var fx := absf(MID_ANKLE.x) + 0.05
+	_box(ft, Vector3(1.0, 0.25, 1.85), Vector3(fx * s, 0.13, 0.05), m_armor2)
+	_box(ft, Vector3(0.9, 0.35, 0.7), Vector3(fx * s, 0.35, -0.55), m_armor, Vector3(-0.25, 0, 0))
+	_box(ft, Vector3(0.75, 0.3, 0.55), Vector3(fx * s, 0.3, 0.7), m_armor2)
+	_box(ft, Vector3(0.65, 0.45, 0.6), Vector3(ankle.x, 0.5, 0.05), m_armor)
+	_cyl(ft, 0.18, 0.55, ankle, m_dark, Vector3(0, 0, PI / 2))
+
+
+# перевод из позы модели в координаты кости (как в tools/medium1_cut.py): ось Y вдоль кости,
+# длина кости растягивается до length (length < 0 — без растяжки, только поворот)
+func _bone_tr(top: Vector3, bottom: Vector3, length: float) -> Transform3D:
+	var yv := (top - bottom).normalized()
+	var zv := Vector3.RIGHT.cross(yv).normalized()
+	var xv := yv.cross(zv).normalized()
+	var b := Basis(xv, yv, zv).transposed()
+	if length > 0.0:
+		b = Basis.from_scale(Vector3(1, length / top.distance_to(bottom), 1)) * b
+	return Transform3D(b, b * -((top + bottom) * 0.5))
+
+
+# узел-держатель для деталей, заданных в позе модели
+func _holder(parent: Node3D, tr: Transform3D) -> Node3D:
+	var h := Node3D.new()
+	h.transform = tr
+	parent.add_child(h)
+	return h
+
+
+# часть 3D-модели medium1; её материалы заменяются на материалы меха (с затенением из цвета вершин)
+func _model(parent: Node3D, part: String) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	var mesh: Mesh = _model_mesh(part)
+	mi.mesh = mesh
+	for si in mesh.get_surface_count():
+		var src := mesh.surface_get_material(si)
+		var nm := src.resource_name if src != null else ""
+		mi.set_surface_override_material(si, m_dark_v if nm == "dark" else (m_armor2_v if nm == "armor2" else m_armor_v))
+	parent.add_child(mi)
+	return mi
+
+
+func _model_mesh(part: String) -> Mesh:
+	if not _model_meshes.has("_loaded"):
+		_model_meshes["_loaded"] = true
+		if ResourceLoader.exists(MEDIUM1):
+			var scene: PackedScene = load(MEDIUM1)
+			var root := scene.instantiate()
+			for n in root.find_children("*", "MeshInstance3D", true, false):
+				_model_meshes[String(n.name)] = (n as MeshInstance3D).mesh
+			root.free()
+	return _model_meshes.get(part)
+
+
+func _vcol(m: StandardMaterial3D) -> StandardMaterial3D:
+	var v: StandardMaterial3D = m.duplicate()
+	v.vertex_color_use_as_albedo = true
+	# верх (его и видно сверху) почти без затенения, а щели тёмные: чуть подсветим, чтобы яркость была как у коробок
+	var a := v.albedo_color.a
+	v.albedo_color = v.albedo_color * 1.1
+	v.albedo_color.a = a
+	return v
 
 
 # ------------------------------------------------------------------
@@ -763,6 +1007,9 @@ func update_visual(delta: float, body_pos: Vector3, vel: Vector3, legs_yaw: floa
 		glow = Color(0.1, 0.3, 0.8) * (0.6 + 0.4 * sin(Time.get_ticks_msec() * 0.025))
 	m_armor.emission = glow
 	m_armor2.emission = glow
+	if m_armor_v != null:
+		m_armor_v.emission = glow
+		m_armor2_v.emission = glow
 
 	if not _inited:
 		_inited = true
@@ -934,9 +1181,9 @@ func _land(f: Foot, ground: float) -> void:
 
 
 func _solve_leg(f: Foot, hip: Vector3, back: Vector3, right: Vector3) -> void:
-	var l1 := L1 * ls
-	var l2 := L2 * ls
-	var ankle := f.pos + Vector3.UP * ANKLE_H * ls
+	var l1 := _l1 * ls
+	var l2 := _l2 * ls
+	var ankle := f.pos + Vector3.UP * _ankle_h * ls
 	var d := ankle - hip
 	var dist := clampf(d.length(), 0.4 * ls, l1 + l2 - 0.02)
 	var dn := d.normalized()
@@ -952,7 +1199,7 @@ func _solve_leg(f: Foot, hip: Vector3, back: Vector3, right: Vector3) -> void:
 	_place_bone(f.shin, knee, ankle, right)
 	f.knee.global_transform = Transform3D(f.thigh.global_basis, knee)
 	var fb := Basis(Vector3.UP, f.yaw) * Basis(Vector3.RIGHT, -f.air * 0.3)
-	f.node.global_transform = Transform3D((fb * Basis.from_scale(Vector3.ONE * ls)), ankle - Vector3.UP * ANKLE_H * ls)
+	f.node.global_transform = Transform3D((fb * Basis.from_scale(Vector3.ONE * ls)), ankle - Vector3.UP * _ankle_h * ls)
 
 
 func _place_bone(node: Node3D, top: Vector3, bottom: Vector3, right: Vector3) -> void:

@@ -39,6 +39,7 @@ var _perf := false               # с mobatest: каждые 20 с скольк�
 var _moba_tp := Vector3.ZERO
 var _dump_path := ""
 var _hangartest := false
+var _mechexport := ""            # выгрузка средних мехов (все виды) в .glb для снимков в Блендере
 var _bots := 0
 var _frame := 0
 var _shots_left: Array = []
@@ -123,6 +124,8 @@ func setup(main_node: Node3D, args: PackedStringArray) -> void:
 			_hittest = true
 		elif a == "--hangartest":
 			_hangartest = true
+		elif a.begins_with("--mechexport="):
+			_mechexport = a.trim_prefix("--mechexport=")
 		elif a == "--bottest":
 			_bottest = true
 			_bots = 2
@@ -209,12 +212,14 @@ func _process(_delta: float) -> void:
 		Fx.explosion(main.mech.global_position + Vector3(-6, 1.8, -4), 3.0)
 	if _hangartest:
 		_run_hangartest()
+	if _mechexport != "":
+		_run_mechexport()
 	if _shot_dir != "" and _shots_left.has(_frame):
 		await RenderingServer.frame_post_draw
 		var img := get_viewport().get_texture().get_image()
 		img.save_png("%s/f%04d.png" % [_shot_dir, _frame])
 		_shots_left.erase(_frame)
-		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot:
+		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _mechexport == "":
 			get_tree().quit()
 
 
@@ -1062,6 +1067,68 @@ func _run_turrettest() -> void:
 			to.y = 0
 			print("[TUR] на дистанции %.0f м: смотрит на цель %.2f (1 = прямо), моё здоровье %.0f -> %.0f" % [to.length(), fwd.normalized().dot(to.normalized()), get_meta("hp0"), m.hp])
 			get_tree().quit()
+
+
+# средние мехи во всех трёх видах (Cfg.mid_look 0/1/2) выгружаются в .glb: ряд стоящих
+# с разным оружием и один на ходу. Снимки делает Блендер, окно игры не нужно
+func _run_mechexport() -> void:
+	if _frame != 3:
+		return
+	var MV := preload("res://scripts/mech_visual.gd")
+	var sets := [["mech_assault", "autocannon", "autocannon", true], ["mech_medic", "heavy_cannon", "shotgun", false],
+		["mech_ram", "laser", "railgun", false], ["mech_ray", "minigun", "grenade_launcher", true], ["mech_assault", "autocannon", "blaster", false]]
+	var keep: int = Cfg.mid_look
+	for look in 3:
+		Cfg.mid_look = look
+		var root := Node3D.new()
+		root.name = "look%d" % look
+		main.add_child(root)
+		for i in sets.size():
+			var e: Array = sets[i]
+			var r := Parts.compute({"mech": e[0], "core": "core_combat", "weapons": [e[1], e[2]], "modules": ["mod_rockets"] if e[3] else []})
+			var v = MV.new()
+			v.st = r["stats"]
+			root.add_child(v)
+			v.build(Cfg.player_color if i % 2 == 0 else Cfg.enemy_color, Color(1, 1, 1), {"legs_scale": r["stats"]["legs_scale"],
+				"hull_scale": r["stats"]["hull_scale"], "style": r["stats"]["style"],
+				"weapons": [r["weapons"][0]["look"], r["weapons"][1]["look"]], "rockets": e[3]})
+			var pos := Vector3(i * 9.0, 0, 0)
+			var walking := i == sets.size() - 1
+			for k in 50:
+				var vel := Vector3(0, 0, -9.0) if walking else Vector3.ZERO
+				if walking:
+					pos += vel / 60.0
+				v.update_visual(1.0 / 60.0, pos, vel, 0.0, 0.0, false)
+			print("[EXPORT] вид %d: %s (%s + %s) ног %s, треугольников ~%d" % [look, Parts.pname(e[0]), e[1], e[2], v.cls, _tris(v)])
+		# скрытое (вспышки, лучи, пламя) не выгружаем: Блендер не читает скрытые узлы
+		var hidden := root.find_children("*", "Node3D", true, false).filter(func(n): return not n.visible)
+		while not hidden.is_empty():
+			var n: Node = hidden[0]
+			n.get_parent().remove_child(n)
+			n.free()
+			hidden = root.find_children("*", "Node3D", true, false).filter(func(m): return not m.visible)
+		var doc := GLTFDocument.new()
+		var state := GLTFState.new()
+		doc.append_from_scene(root, state)
+		var path := "%s/mid_look%d.glb" % [_mechexport, look]
+		var err := doc.write_to_filesystem(state, path)
+		print("[EXPORT] %s -> %s" % [path, error_string(err)])
+	Cfg.mid_look = keep
+	get_tree().quit()
+
+
+func _tris(n: Node) -> int:
+	var t := 0
+	if n is MeshInstance3D and n.mesh != null:
+		for si in n.mesh.get_surface_count():
+			var arr: Array = n.mesh.surface_get_arrays(si)
+			if arr.size() > Mesh.ARRAY_INDEX and arr[Mesh.ARRAY_INDEX] != null and arr[Mesh.ARRAY_INDEX].size() > 0:
+				t += arr[Mesh.ARRAY_INDEX].size() / 3
+			elif arr.size() > 0 and arr[Mesh.ARRAY_VERTEX] != null:
+				t += arr[Mesh.ARRAY_VERTEX].size() / 3
+	for c in n.get_children():
+		t += _tris(c)
+	return t
 
 
 # все 10 мехов рядом с разным оружием (для снимков)
