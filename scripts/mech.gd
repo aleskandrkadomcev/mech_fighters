@@ -1,0 +1,1754 @@
+extends CharacterBody3D
+## Логика меха: движение, рывок, энергия, поворот корпуса, стрельба, разброс, абилки,
+## здоровье и смерть. Один и тот же мех используется и для игрока, и для ботов:
+## игроком управляют клавиатура и мышь, ботом управляет bot_brain.gd.
+##
+## Все числа меха берутся из его сборки (детали, parts.gd): ноги дают скорость,
+## корпус здоровье, ядро энергию, оружие свои числа, модули абилки и пассивки.
+## Общие правила (цена бега, камера, боты) лежат в settings.gd (в коде это Cfg).
+
+const MechVisual := preload("res://scripts/mech_visual.gd")
+const Projectile := preload("res://scripts/projectile.gd")
+const Rocket := preload("res://scripts/rocket.gd")
+const Art := preload("res://scripts/art.gd")
+const Mine := preload("res://scripts/mine.gd")
+const HpBar := preload("res://scripts/hp_bar.gd")
+const Hitbox := preload("res://scripts/hitbox.gd")
+const Lob := preload("res://scripts/lob.gd")
+
+signal fired(mount: int)
+signal dashed
+signal stepped
+signal ability_used(index: int)
+signal ability_denied(index: int, reason: String)   # reason: "energy" или "cooldown"
+signal damaged(amount: float)
+signal died(who: Node3D)
+signal build_changed
+signal landed                   # приземлился после высадки с неба
+signal teleported               # телепорт на базу завершён
+
+var team := 0                   # 0 = игрок, 1 = враги. Свои своих не бьют
+var is_player := false
+var brain = null                # мозги бота (если это бот)
+var camera: Camera3D
+var demo = null                 # для автопроверки: словарь с "нажатыми кнопками"
+
+var build := {}                 # из каких деталей собран
+var stats := {}                 # итоговые числа меха
+var weapons: Array = []         # числа оружия на левом и правом подвесе
+var abilities: Array = []       # абилки из модулей: [{type, name, params}]
+
+var hp := 100.0
+var dead := false
+var seen := true                # видит ли этого меха команда игрока (для врагов: вижен и туман)
+var ammo := [0.0, 0.0]          # сколько патронов осталось у ЛКМ и ПКМ
+var ability_charges: Array = [] # сколько зарядов осталось у абилок с зарядами
+var slow_left := 0.0            # замедление (мина): сколько ещё секунд
+var death_velocity := Vector3.ZERO
+var _slow_k := 0.0
+var stun_left := 0.0
+var shield_left := 0.0          # неуязвимость после возрождения
+var landing_left := 0.0         # высадка с неба: сколько ещё лететь (пока летит, неуязвим и не управляется)
+var _landing_total := 1.0
+var _landing_marker: Node3D
+var tp_left := 0.0              # телепорт на базу: сколько ещё стоять (канал)
+var tp_cd := 0.0                # перезарядка телепорта на базу
+var _tp_fx: Node3D
+var _tp_pressed := false
+var last_attacker: Node = null  # кто последним попал (для счёта убийств)
+var _since_damage := 99.0       # секунд с последнего урона (самопочинка)
+var _still_t := 0.0             # сколько стоит на месте (упор)
+var braced := false             # упор включён: бьёт дальше и точнее
+var dash_stock := 1.0           # сколько рывков готово (у Осы до двух)
+var _rammed := {}               # кого уже ударил этим рывком
+var _snap_next := true          # мех телепортировался или модель новая: не сглаживать переход между тиками
+
+var aim_point := Vector3(0, 0, -10)
+var ability_aim_override = null # бот может указать точку для ракет отдельно от прицела пушек
+var torso_yaw := 0.0
+var legs_yaw := 0.0
+var dash_left := 0.0
+var dash_cd := 0.0
+var dash_dir := Vector3.FORWARD
+var visual: Node3D
+var hitbox: Area3D              # цилиндр для попаданий (отдельно от капсулы для ходьбы)
+
+# энергия
+var energy := 100.0
+var running := false            # прямо сейчас бежит
+var run_locked := false         # выдохся: бег недоступен, пока энергия не наберётся до порога
+var no_regen_left := 0.0       # пока больше нуля, энергия не восстанавливается (импульс и подобное)
+
+# абилки
+var ability_cd: Array = []
+var _salvo_left := 0
+var _salvo_timer := 0.0
+var _salvo_target := Vector3.ZERO
+var _salvo_marker: Node3D
+var _salvo_index := 0
+var _salvo_params := {}
+var cloak_left := 0.0           # невидимость: сколько ещё секунд
+var _cloak_break := true        # снимается ли выстрелом
+var repair_left := 0.0          # наноремонт: сколько ещё секунд лечится
+var _repair_rate := 0.0
+var barrier_on := false         # щит включён
+var _barrier_i := -1
+var _barrier_hit := 0.0
+var _barrier: MeshInstance3D
+var _barrier_mat: ShaderMaterial
+var blink_left := 0.0           # блинк: сколько ещё стоять до прыжка
+var _blink_dest := Vector3.ZERO
+var _blink_marker: Node3D
+var _repair_fx: CPUParticles3D
+var _smoke_fx: CPUParticles3D    # дым из подбитого меха (мало здоровья)
+var _spark_t := 0.0
+var _fade := 0.0
+
+# состояние оружия по подвесам
+var _w_timer := [0.0, 0.0]
+var _w_bloom := [0.0, 0.0]
+var _w_spread := [0.0, 0.0]
+var _beam_on := [false, false]
+var _beam_fx_t := [0.0, 0.0]
+var _beam_exclude: Array[RID] = []
+var _beam_ex_t := 0.0
+var _w_spin := [0.0, 0.0]       # раскрутка Гатлинга 0..1
+var _w_charge := [0.0, 0.0]     # заряд рельсотрона 0..1
+var _energy_warned := [false, false]
+
+var _move := Vector2.ZERO
+var _run := false
+var _fire := false               # ЛКМ
+var _fire2 := false              # ПКМ
+var _fire_prev := [false, false]
+var _ammo_warned := [false, false]
+var _dash_pressed := false
+var _ability_pressed: Array = []
+var _col: CollisionShape3D
+var _bar: Node3D
+var _parts_version := -1
+var _look := {}
+
+
+func _ready() -> void:
+	collision_layer = 2
+	collision_mask = 1 | 2 | 16 | 32     # стены, другие мехи, обломки, постройки
+	add_to_group("mechs")
+	add_to_group("damageable")
+	# капсула только для ходьбы: узкая, чтобы не цепляться боками за стены. Снаряды её не видят
+	_col = CollisionShape3D.new()
+	var cap := CapsuleShape3D.new()
+	cap.radius = 1.25
+	cap.height = 3.6
+	_col.shape = cap
+	_col.position = Vector3(0, 1.8, 0)
+	add_child(_col)
+
+	hitbox = Hitbox.new()
+	hitbox.mech = self
+	add_child(hitbox)
+
+	if not is_player:
+		_bar = HpBar.new()
+		_bar.color = Color(0.4, 0.9, 0.4) if team == 0 else Color(0.95, 0.25, 0.2)
+		add_child(_bar)
+	_make_ability_fx()
+
+	if build.is_empty():
+		build = Parts.DEFAULT_BUILD.duplicate(true)
+	build = Parts.upgrade_build(build)
+	_apply_build()
+	hp = max_hp()
+	energy = energy_max()
+	dash_stock = stats.get("dash_charges", 1.0)
+	refill_all()
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not is_player:
+		return
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.physical_keycode == KEY_SPACE:
+			_dash_pressed = true
+			return
+		if event.physical_keycode == KEY_T:
+			_tp_pressed = true
+			return
+		for i in abilities.size():
+			if event.physical_keycode == Parts.ABILITY_KEYS[i]:
+				_ability_pressed[i] = true
+
+
+# ------------------------------------------------------------------
+#  СБОРКА
+# ------------------------------------------------------------------
+
+func set_build(b: Dictionary) -> void:
+	build = Parts.upgrade_build(b).duplicate(true)
+	if is_inside_tree():
+		_apply_build()
+		hp = max_hp()
+		energy = energy_max()
+		dash_stock = stats.get("dash_charges", 1.0)
+		refill_all()
+
+
+# пересчитать числа из деталей; модель пересобирается, только если поменялся внешний вид
+func _apply_build() -> void:
+	var r := Parts.compute(build)
+	stats = r["stats"]
+	weapons = r["weapons"]
+	abilities = r["abilities"]
+	_parts_version = Parts.version
+	while ability_cd.size() < abilities.size():
+		ability_cd.append(0.0)
+	ability_cd.resize(abilities.size())
+	var old_charges := ability_charges.duplicate()
+	ability_charges.resize(abilities.size())
+	for i in abilities.size():
+		var mx := ability_charges_max(i)
+		ability_charges[i] = mx if i >= old_charges.size() or old_charges[i] == null else minf(old_charges[i], mx)
+	_ability_pressed.resize(abilities.size())
+	for i in _ability_pressed.size():
+		_ability_pressed[i] = false
+
+	var look := look_of(stats, weapons, abilities)
+	if visual == null or look != _look:
+		_look = look
+		if visual != null:
+			visual.queue_free()
+		visual = MechVisual.new()
+		visual.st = stats
+		add_child(visual)
+		if team == 0:
+			visual.build(Cfg.player_color, Color(1, 1, 1), look)
+		else:
+			visual.build(Cfg.enemy_color, Color(1.0, 0.82, 0.8), look)
+		visual.footstep.connect(_on_footstep)
+		_fade = 0.0
+		_snap_next = true
+		dash_stock = minf(dash_stock, stats["dash_charges"])
+	else:
+		visual.st = stats
+	if _bar != null:
+		_bar.position = Vector3(0, 2.37 * stats["legs_scale"] + 1.7 * stats["hull_scale"] + 1.0, 0)
+	if _barrier != null:
+		var br: float = stats["hit_radius"] + 1.1
+		_barrier.scale = Vector3(br, br * 0.95, br)
+		_barrier.position = Vector3(0, 2.1 * stats["legs_scale"], 0)
+	if _barrier_i >= abilities.size() or (_barrier_i >= 0 and abilities[_barrier_i]["type"] != "shield"):
+		_set_barrier(false)
+	hp = minf(hp, max_hp())
+	build_changed.emit()
+
+
+# как выглядит мех (из этого собирается модель; одинаковый вид = модель не пересобирается)
+static func look_of(st: Dictionary, wl: Array, al: Array) -> Dictionary:
+	return {
+		"legs_scale": st["legs_scale"],
+		"hull_scale": st["hull_scale"],
+		"style": st.get("style", "mid"),
+		"weapons": [wl[0]["look"], wl[1]["look"]],
+		"rockets": al.any(func(a): return a["type"] == "rockets"),
+	}
+
+
+# игра идёт тиками (30 в секунду), картинка между тиками сглаживается.
+# После телепорта или новой модели сглаживать нельзя (мех "проедет" через полкарты): сбрасываем
+static func snap_interpolation(n: Node) -> void:
+	if n is Node3D:
+		n.reset_physics_interpolation()
+	for c in n.get_children():
+		snap_interpolation(c)
+
+
+# ------------------------------------------------------------------
+#  Справочные функции
+# ------------------------------------------------------------------
+
+func get_hit_radius() -> float:
+	return stats.get("hit_radius", 1.9)
+
+
+# игра плоская: хитбокс это высокий столб, чтобы любой ствол на любой высоте попадал
+func get_hit_height() -> float:
+	return Cfg.hitbox_height
+
+
+func max_hp() -> float:
+	return stats.get("hp", 300.0)
+
+
+func energy_max() -> float:
+	return stats.get("energy_max", 100.0)
+
+
+func walk_speed() -> float:
+	return stats["walk_speed"] * _speed_mult()
+
+
+func run_speed() -> float:
+	return stats["run_speed"] * _speed_mult()
+
+
+func _speed_mult() -> float:
+	var k := 1.0 if is_player else Cfg.bot_speed
+	if slow_left > 0.0:
+		k *= 1.0 - _slow_k
+	return k
+
+
+# урон: у ботов свой множитель, плюс бонус команды с точки «Арсенал»
+func damage_mult() -> float:
+	var k := 1.0 if is_player else Cfg.bot_damage
+	return k * _game_mult("damage")
+
+
+func _game_mult(kind: String) -> float:
+	var g = get_tree().current_scene if is_inside_tree() else null
+	if g != null and g.has_method("team_mult"):
+		return g.team_mult(team, kind)
+	return 1.0
+
+
+# ------------------------------------------------------------------
+#  Патроны и заряды
+# ------------------------------------------------------------------
+
+func ammo_max(i: int) -> float:
+	return weapons[i].get("ammo", 0.0) if i < weapons.size() else 0.0
+
+
+func ability_charges_max(i: int) -> float:
+	return ability_param(i, "charges")
+
+
+func refill_all() -> void:
+	for i in 2:
+		ammo[i] = ammo_max(i)
+	for i in abilities.size():
+		ability_charges[i] = ability_charges_max(i)
+
+
+# доля боезапаса обеих пушек; true, если что-то добавилось
+func add_ammo(frac: float) -> bool:
+	var got := false
+	for i in 2:
+		var mx := ammo_max(i)
+		if mx > 0.0 and ammo[i] < mx:
+			ammo[i] = minf(ammo[i] + mx * frac, mx)
+			got = true
+	return got
+
+
+func needs_ammo() -> bool:
+	for i in 2:
+		if ammo_max(i) > 0.0 and ammo[i] < ammo_max(i):
+			return true
+	return false
+
+
+func ammo_ratio() -> float:
+	var tot := 0.0
+	var cur := 0.0
+	for i in 2:
+		tot += ammo_max(i)
+		cur += ammo[i]
+	return 1.0 if tot <= 0.0 else cur / tot
+
+
+# заряд случайной абилке, у которой их не полно; true, если было куда
+func add_charge(n: int) -> bool:
+	var need: Array = []
+	for i in abilities.size():
+		var mx := ability_charges_max(i)
+		if mx > 0.0 and ability_charges[i] < mx:
+			need.append(i)
+	if need.is_empty():
+		return false
+	var i: int = need.pick_random()
+	ability_charges[i] = minf(ability_charges[i] + n, ability_charges_max(i))
+	return true
+
+
+func needs_charges() -> bool:
+	for i in abilities.size():
+		if ability_charges_max(i) > 0.0 and ability_charges[i] < ability_charges_max(i):
+			return true
+	return false
+
+
+func add_energy(v: float) -> bool:
+	if energy >= energy_max() - 0.5:
+		return false
+	energy = minf(energy + v, energy_max())
+	return true
+
+
+func heal(v: float) -> void:
+	hp = minf(hp + v, max_hp())
+
+
+func apply_slow(k: float, seconds: float) -> void:
+	if dead or shield_left > 0.0 or seconds <= 0.0:
+		return
+	_slow_k = maxf(_slow_k if slow_left > 0.0 else 0.0, k)
+	slow_left = maxf(slow_left, seconds)
+
+
+func is_dashing() -> bool:
+	return dash_left > 0.0
+
+
+func is_stunned() -> bool:
+	return stun_left > 0.0
+
+
+func is_cloaked() -> bool:
+	return cloak_left > 0.0
+
+
+# сколько ещё действует абилка (секунды); для щита 1, пока включён; 0 = не действует
+func ability_active(index: int) -> float:
+	match abilities[index]["type"]:
+		"cloak":
+			return cloak_left
+		"repair":
+			return repair_left
+		"shield":
+			return 1.0 if barrier_on and _barrier_i == index else 0.0
+		"blink":
+			return blink_left
+	return 0.0
+
+
+func is_beaming() -> bool:
+	return _beam_on[0] or _beam_on[1]
+
+
+func weapon_spread_deg(i: int) -> float:
+	return _w_spread[i] + _w_bloom[i]
+
+
+func get_spread_deg() -> float:
+	return maxf(weapon_spread_deg(0), weapon_spread_deg(1))
+
+
+# максимальная дальность из двух пушек
+func weapon_range() -> float:
+	return maxf(w_range(0), w_range(1))
+
+
+# дальность пушки с учётом упора
+func w_range(i: int) -> float:
+	var r: float = weapons[i]["range"]
+	if braced:
+		r *= 1.0 + stats.get("brace_bonus", 0.0)
+	return r
+
+
+func is_landing() -> bool:
+	return landing_left > 0.0
+
+
+func is_channeling() -> bool:
+	return tp_left > 0.0
+
+
+# скорость снаряда для упреждения (у лазера упреждение не нужно)
+func lead_speed() -> float:
+	var best := 0.0
+	for w in weapons:
+		if w["type"] == "bullet":
+			best = maxf(best, w["bullet_speed"])
+	return best
+
+
+func torso_forward() -> Vector3:
+	return Vector3(-sin(torso_yaw), 0, -cos(torso_yaw))
+
+
+func aim_distance() -> float:
+	var d := aim_point - global_position
+	d.y = 0
+	return maxf(d.length(), 4.0)
+
+
+func ability_index(type: String) -> int:
+	for i in abilities.size():
+		if abilities[i]["type"] == type:
+			return i
+	return -1
+
+
+func ability_param(index: int, key: String) -> float:
+	return abilities[index]["params"].get(key, 0.0)
+
+
+func ability_cooldown_max(index: int) -> float:
+	return ability_param(index, "cooldown") * stats.get("cd_mult", 1.0)
+
+
+func ability_cost(index: int) -> float:
+	return ability_param(index, "cost")
+
+
+func can_cast(index: int) -> bool:
+	if index < 0 or index >= abilities.size():
+		return false
+	var type: String = abilities[index]["type"]
+	if type == "shield" and barrier_on:
+		return not dead and not is_stunned()     # выключить щит можно всегда
+	if dead or is_stunned() or ability_cd[index] > 0.0 or energy < ability_cost(index):
+		return false
+	if ability_charges_max(index) > 0.0 and ability_charges[index] < 1.0:
+		return false
+	if type == "blink" and blink_left > 0.0:
+		return false
+	return not (type == "rockets" and _salvo_left > 0)
+
+
+# кнопки, которые "нажимает" бот
+func press_dash() -> void:
+	_dash_pressed = true
+
+
+func press_tp() -> void:
+	_tp_pressed = true
+
+
+func can_tp() -> bool:
+	return not dead and tp_cd <= 0.0 and tp_left <= 0.0 and not is_landing()
+
+
+func press_ability(index: int) -> void:
+	if index >= 0 and index < _ability_pressed.size():
+		_ability_pressed[index] = true
+
+
+# ------------------------------------------------------------------
+#  Главный цикл
+# ------------------------------------------------------------------
+
+func _physics_process(delta: float) -> void:
+	if dead:
+		return
+	# числа деталей поменяли в панели F2: пересчитываемся на лету
+	if _parts_version != Parts.version:
+		_apply_build()
+
+	if is_landing():
+		_update_landing(delta)
+		return
+	stun_left = maxf(stun_left - delta, 0.0)
+	shield_left = maxf(shield_left - delta, 0.0)
+	slow_left = maxf(slow_left - delta, 0.0)
+	tp_cd = maxf(tp_cd - delta, 0.0)
+	_since_damage += delta
+	var blink_vis := shield_left <= 0.0 or fmod(shield_left, 0.2) > 0.08   # мигает, пока неуязвим
+	visual.visible = blink_vis and seen
+	# самопочинка (Механик): давно не получал урон
+	if stats.get("regen_hp", 0.0) > 0.0 and _since_damage >= stats.get("regen_delay", 4.0) and hp < max_hp():
+		hp = minf(hp + stats["regen_hp"] * delta, max_hp())
+
+	if brain != null:
+		brain.think(delta)
+	elif demo != null:
+		_read_demo()
+	elif is_player:
+		_read_player()
+
+	if is_stunned():
+		# оглушён: стоит, не стреляет, не кастует, корпус не крутится
+		_move = Vector2.ZERO
+		_run = false
+		_fire = false
+		_fire2 = false
+		_dash_pressed = false
+		for i in _ability_pressed.size():
+			_ability_pressed[i] = false
+
+	if blink_left > 0.0:
+		# готовится к прыжку: стоит на месте
+		_move = Vector2.ZERO
+		_run = false
+		_dash_pressed = false
+
+	_update_tp(delta)
+	_update_move(delta)
+	_update_energy(delta)
+	if not is_stunned():
+		_update_aim(delta)
+	_update_spread(delta)
+	_update_fire(delta)
+	_update_abilities(delta)
+	visual.stunned = is_stunned()
+	visual.update_visual(delta, global_position, velocity, legs_yaw, torso_yaw, is_dashing())
+	if _snap_next:
+		_snap_next = false
+		snap_interpolation(self)
+	_update_ability_fx(delta)
+	visual.braced = braced
+	if _bar != null:
+		_bar.set_ratio(hp / maxf(max_hp(), 1.0))
+
+
+func _read_demo() -> void:
+	_move = demo.get("move", Vector2.ZERO)
+	_run = demo.get("run", false)
+	_fire = demo.get("fire", false)
+	_fire2 = demo.get("fire2", _fire)
+	if demo.get("dash", false):
+		_dash_pressed = true
+		demo["dash"] = false
+	if demo.get("tp", false):
+		_tp_pressed = true
+		demo["tp"] = false
+	if demo.get("q", false):
+		press_ability(0)
+		demo["q"] = false
+	if demo.get("e", false):
+		press_ability(1)
+		demo["e"] = false
+	if demo.has("aim"):
+		aim_point = demo["aim"]
+
+
+func _read_player() -> void:
+	var m := Vector2.ZERO
+	if Input.is_physical_key_pressed(KEY_A):
+		m.x -= 1.0
+	if Input.is_physical_key_pressed(KEY_D):
+		m.x += 1.0
+	if Input.is_physical_key_pressed(KEY_W):
+		m.y -= 1.0
+	if Input.is_physical_key_pressed(KEY_S):
+		m.y += 1.0
+	_move = m.normalized() if m.length() > 1.0 else m
+	_run = Input.is_physical_key_pressed(KEY_SHIFT)
+	_fire = Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and not Cfg.ui_hover and not Input.is_key_pressed(KEY_ALT)
+	_fire2 = Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) and not Cfg.ui_hover
+
+	if camera != null and not Cfg.ui_hover:
+		var mp := get_viewport().get_mouse_position()
+		var o := camera.project_ray_origin(mp)
+		var d := camera.project_ray_normal(mp)
+		var hit = Plane(Vector3.UP, Cfg.aim_height).intersects_ray(o, d)
+		if hit != null:
+			aim_point = hit
+
+
+# ------------------------------------------------------------------
+#  ЗДОРОВЬЕ
+# ------------------------------------------------------------------
+
+# kind: "" обычный урон, "explosion" взрыв (режется защитой от взрывов), "beam" луч (каждый кадр понемногу).
+# src: кто стрелял (для счёта)
+func take_damage(amount: float, pos: Vector3, _dir: Vector3, kind := "", src: Node = null) -> void:
+	if dead or amount <= 0.0 or shield_left > 0.0 or is_landing():
+		return
+	if kind == "explosion":
+		amount *= 1.0 - stats.get("resist_explosion", 0.0)
+	# бронеплиты Бастиона: каждое попадание слабее (лучи не режут), но не меньше 30%
+	var plate: float = stats.get("armor_flat", 0.0)
+	if plate > 0.0 and kind != "beam":
+		amount = maxf(amount - plate, amount * 0.3)
+	_since_damage = 0.0
+	if src != null and is_instance_valid(src) and src != self:
+		last_attacker = src
+	if barrier_on:
+		amount = _barrier_absorb(amount)
+		if amount <= 0.0:
+			if brain != null:
+				brain.on_damaged()
+			return
+	amount = minf(amount, hp)
+	hp -= amount
+	visual.flash()
+	damaged.emit(amount)
+	Battle.on_damage(src, self, amount, pos)
+	if brain != null:
+		brain.on_damaged()
+	if hp <= 0.0:
+		die()
+
+
+func stun(seconds: float) -> void:
+	if dead or shield_left > 0.0:
+		return
+	seconds *= 1.0 - stats.get("resist_stun", 0.0)
+	stun_left = maxf(stun_left, seconds)
+	if seconds > 0.0 and blink_left > 0.0:
+		_cancel_blink()     # оглушение сбивает подготовку блинка
+
+
+func die() -> void:
+	if dead:
+		return
+	dead = true
+	hp = 0.0
+	visible = false
+	_cancel_tp()
+	Battle.on_kill(last_attacker, self)
+	_col.set_deferred("disabled", true)
+	hitbox.set_active(false)
+	_salvo_left = 0
+	_beam_on = [false, false]
+	_reset_ability_states()
+	slow_left = 0.0
+	death_velocity = Vector3(velocity.x, 0, velocity.z)
+	velocity = Vector3.ZERO
+	Fx.explosion(global_position + Vector3.UP * 1.8, 3.5)
+	Sfx.play_at("boom", global_position, 0.0, 0.08)
+	died.emit(self)
+
+
+# отдать модель обломку (main.gd) и собрать себе новую к возрождению
+func detach_visual() -> Node3D:
+	var v := visual
+	for i in 2:
+		v.set_beam(i, false)
+	v.set_fade(0.0)       # обломок невидимки видно всем
+	v.visible = true
+	_fade = 0.0
+	visual = null
+	_look = {}
+	_apply_build()
+	return v
+
+
+# drop: прилететь с неба (как ступень ракеты), иначе просто встать на место
+func respawn(pos: Vector3, drop := true) -> void:
+	global_position = pos
+	_snap_next = true
+	velocity = Vector3.ZERO
+	hp = max_hp()
+	energy = energy_max()
+	refill_all()
+	no_regen_left = 0.0
+	slow_left = 0.0
+	run_locked = false
+	stun_left = 0.0
+	dash_left = 0.0
+	dash_cd = 0.0
+	dash_stock = stats.get("dash_charges", 1.0)
+	_since_damage = 99.0
+	last_attacker = null
+	_cancel_tp()
+	tp_cd = 0.0
+	_w_spin = [0.0, 0.0]
+	_w_charge = [0.0, 0.0]
+	for i in ability_cd.size():
+		ability_cd[i] = 0.0
+	_reset_ability_states()
+	_w_spread = [0.0, 0.0]
+	_w_bloom = [0.0, 0.0]
+	_w_timer = [0.0, 0.0]
+	_beam_on = [false, false]
+	_dash_pressed = false
+	for i in _ability_pressed.size():
+		_ability_pressed[i] = false
+	dead = false
+	visible = true
+	shield_left = Cfg.spawn_shield
+	_col.set_deferred("disabled", false)
+	hitbox.set_active(true)
+	visual.reset()
+	if brain != null:
+		brain.reset()
+	if drop:
+		start_landing()
+
+
+# ------------------------------------------------------------------
+#  ВЫСАДКА С НЕБА: мех падает быстро, у земли включает тормозные двигатели и мягко садится
+# ------------------------------------------------------------------
+
+func start_landing() -> void:
+	if Cfg.drop_time <= 0.05:
+		return
+	_landing_total = Cfg.drop_time
+	landing_left = _landing_total
+	velocity = Vector3.ZERO
+	_col.set_deferred("disabled", true)
+	hitbox.set_active(false)
+	if _landing_marker != null and is_instance_valid(_landing_marker):
+		_landing_marker.queue_free()
+	var col := Color(0.45, 0.8, 1.0) if team == 0 else Color(1.0, 0.3, 0.25)
+	_landing_marker = Fx.ground_marker(global_position, get_hit_radius() + 0.6, col, team, _landing_total + 0.2, false, true)
+	_update_landing(0.0)
+
+
+func _update_landing(delta: float) -> void:
+	landing_left = maxf(landing_left - delta, 0.0)
+	var u := 1.0 - landing_left / maxf(_landing_total, 0.01)
+	# высота: кубическая кривая, быстро падает и плавно подходит к земле
+	var h := Cfg.drop_height * pow(1.0 - u, 3.0)
+	visual.visible = seen
+	visual.airborne = true
+	visual.update_visual(delta, global_position + Vector3.UP * h, Vector3.ZERO, legs_yaw, torso_yaw, true)
+	if _snap_next:
+		_snap_next = false
+		snap_interpolation(self)
+	# тормозные двигатели работают на последних двух третях спуска
+	visual.set_jets(clampf((u - 0.3) / 0.2, 0.0, 1.0) * (1.0 - clampf((u - 0.97) / 0.03, 0.0, 1.0)) if seen else 0.0)
+	if landing_left <= 0.0:
+		_finish_landing()
+
+
+func _finish_landing() -> void:
+	landing_left = 0.0
+	visual.airborne = false
+	visual.set_jets(0.0)
+	visual.reset()
+	_col.set_deferred("disabled", false)
+	hitbox.set_active(true)
+	shield_left = Cfg.spawn_shield
+	if _landing_marker != null and is_instance_valid(_landing_marker):
+		_landing_marker.queue_free()
+	_landing_marker = null
+	if seen:
+		Fx.dust_ring(global_position, get_hit_radius() * 3.0)
+	Sfx.play_at("land", global_position, -4.0, 0.06)
+	landed.emit()
+
+
+# ------------------------------------------------------------------
+#  ТЕЛЕПОРТ НА БАЗУ (клавиша T): постоять на месте несколько секунд, движение или выстрел отменяют
+# ------------------------------------------------------------------
+
+func _update_tp(delta: float) -> void:
+	if _tp_pressed:
+		_tp_pressed = false
+		if tp_left > 0.0:
+			_cancel_tp()
+		elif can_tp() and not is_stunned():
+			tp_left = Cfg.tp_channel
+			_tp_fx = Fx.tp_column(self, team)
+			Sfx.play_at("tp", global_position, -6.0, 0.0)
+		else:
+			ability_denied.emit(-5, "cooldown")
+	if tp_left <= 0.0:
+		return
+	if _move.length() > 0.1 or _fire or _fire2 or _dash_pressed or is_stunned() or _ability_pressed.has(true):
+		_cancel_tp()
+		return
+	tp_left -= delta
+	if tp_left <= 0.0:
+		var g = get_tree().current_scene
+		var dest: Vector3 = g.spawn_point(team) if g != null and g.has_method("spawn_point") else global_position
+		if seen:
+			Fx.burst(global_position + Vector3.UP * 2.0, Color(0.5, 0.85, 1.0), 4.0)
+		global_position = dest
+		velocity = Vector3.ZERO
+		visual.reset()
+		_snap_next = true
+		Fx.burst(global_position + Vector3.UP * 2.0, Color(0.5, 0.85, 1.0), 4.0)
+		Sfx.play_at("dash", global_position, -2.0, 0.05)
+		_cancel_tp()
+		tp_cd = Cfg.tp_cooldown
+		teleported.emit()
+
+
+func _cancel_tp() -> void:
+	tp_left = 0.0
+	if _tp_fx != null and is_instance_valid(_tp_fx):
+		_tp_fx.queue_free()
+	_tp_fx = null
+
+
+# ------------------------------------------------------------------
+#  ЭНЕРГИЯ
+# ------------------------------------------------------------------
+
+func spend_energy(amount: float) -> bool:
+	if amount <= 0.0:
+		return true
+	if energy < amount:
+		return false
+	energy -= amount
+	return true
+
+
+# восстановление идёт всегда, даже пока тратишь: бег 10/с при восстановлении 4/с = минус 6/с.
+# Остановить его может только чужая способность (импульс).
+func _update_energy(delta: float) -> void:
+	var regen: float = stats["energy_regen"] * _game_mult("regen")
+	if no_regen_left > 0.0:
+		no_regen_left -= delta
+		regen = 0.0
+	energy = minf(energy + regen * delta, energy_max())
+	if barrier_on:
+		energy -= ability_param(_barrier_i, "upkeep") * delta
+		if energy <= 0.0:
+			energy = 0.0
+			_set_barrier(false)
+	if running:
+		energy -= Cfg.run_energy_cost * delta
+		if energy <= 0.0:
+			energy = 0.0
+			run_locked = true
+	if run_locked and energy >= minf(Cfg.run_min_energy, energy_max()):
+		run_locked = false
+
+
+func block_regen(seconds: float) -> void:
+	if dead or shield_left > 0.0:
+		return
+	no_regen_left = maxf(no_regen_left, seconds)
+
+
+# ------------------------------------------------------------------
+#  ДВИЖЕНИЕ
+# ------------------------------------------------------------------
+
+func _update_move(delta: float) -> void:
+	var wish := Vector3(_move.x, 0, _move.y)
+	var has_wish := wish.length() > 0.01
+	# бежать можно, только если есть энергия (или бег бесплатный)
+	var can_run := not run_locked or Cfg.run_energy_cost <= 0.0
+	running = _run and has_wish and can_run and dash_left <= 0.0
+	var max_speed := run_speed() if running else walk_speed()
+
+	# рывки копятся: один заряд за перезарядку (у большинства мехов заряд один)
+	var charges_max: float = maxf(stats.get("dash_charges", 1.0), 1.0)
+	if dash_stock < charges_max:
+		dash_cd = maxf(dash_cd - delta, 0.0)
+		if dash_cd <= 0.0:
+			dash_stock += 1.0
+			if dash_stock < charges_max:
+				dash_cd = stats["dash_cooldown"]
+	else:
+		dash_cd = 0.0
+	if _dash_pressed:
+		_dash_pressed = false
+		if dash_stock >= 1.0 and dash_left <= 0.0:
+			if spend_energy(Cfg.dash_energy_cost):
+				dash_dir = wish.normalized() if has_wish else torso_forward()
+				dash_left = stats["dash_time"]
+				if dash_stock >= charges_max:
+					dash_cd = stats["dash_cooldown"]
+				dash_stock -= 1.0
+				_rammed.clear()
+				dashed.emit()
+			else:
+				ability_denied.emit(-1, "energy")
+		else:
+			ability_denied.emit(-1, "cooldown")
+
+	var hv := Vector3(velocity.x, 0, velocity.z)
+	if dash_left > 0.0:
+		dash_left -= delta
+		hv = dash_dir * stats["dash_speed"]
+		if stats.get("ram_damage", 0.0) > 0.0:
+			_ram()
+	else:
+		var target := wish * max_speed
+		var rate: float = stats["accel"]
+		if hv.length() > run_speed() + 0.5:
+			rate = stats["dash_brake"]      # гасим скорость после рывка
+		elif not has_wish or hv.length() > max_speed + 0.2:
+			rate = stats["decel"]
+		hv = hv.move_toward(target, rate * delta)
+
+	var vy := velocity.y
+	if is_on_floor():
+		vy = -1.0
+	else:
+		vy -= 30.0 * delta
+	velocity = Vector3(hv.x, vy, hv.z)
+	_push_wrecks(wish * max_speed if dash_left <= 0.0 else hv, delta)
+	move_and_slide()
+
+	# упор: стоит на месте достаточно долго
+	var real := Vector3(velocity.x, 0, velocity.z)
+	if real.length() < 0.6 and dash_left <= 0.0:
+		_still_t += delta
+	else:
+		_still_t = 0.0
+	braced = stats.get("brace_bonus", 0.0) > 0.0 and _still_t >= stats.get("brace_time", 0.6)
+
+	# ноги разворачиваются туда, куда идём
+	if real.length() > 0.8:
+		var want_yaw := atan2(-real.x, -real.z)
+		legs_yaw = rotate_toward(legs_yaw, want_yaw, deg_to_rad(stats["legs_turn_speed"]) * delta)
+
+
+# таран (рывком врезался во врага): урон, оглушение, отбрасывание. Каждого один раз за рывок
+func _ram() -> void:
+	var r := get_hit_radius() + 0.6
+	for n in get_tree().get_nodes_in_group("damageable"):
+		if not (n is Node3D) or n == self or n.get("team") == team or n.get("team") == null or int(n.get("team")) < 0:
+			continue
+		if not (n.is_in_group("mechs") or n.is_in_group("creeps")):
+			continue
+		if n.get("dead") or _rammed.has(n.get_instance_id()):
+			continue
+		var d: Vector3 = n.global_position - global_position
+		d.y = 0
+		var size: float = n.get_hit_radius() if n.has_method("get_hit_radius") else 1.0
+		if d.length() > r + size or d.normalized().dot(dash_dir) < 0.2:
+			continue
+		_rammed[n.get_instance_id()] = true
+		n.take_damage(stats["ram_damage"] * damage_mult(), n.global_position + Vector3.UP * 2.0, dash_dir, "", self)
+		if n.has_method("stun"):
+			n.stun(stats.get("ram_stun", 0.0))
+		if n.has_method("knock"):
+			n.knock(dash_dir * 16.0)
+		Fx.spark(global_position + dash_dir * r + Vector3.UP * 2.0, -dash_dir, true)
+		Fx.shake_at.emit(global_position, Cfg.shake_explosion * 0.6)
+		Sfx.play_at("cannon", global_position, -2.0, 0.1)
+
+
+# толчок со стороны (таран): скорость, которая гаснет сама
+func knock(v: Vector3) -> void:
+	if dead or is_landing() or shield_left > 0.0:
+		return
+	velocity.x += v.x
+	velocity.z += v.z
+
+
+# упираемся в обломок: сначала двигаем его, потом идём сами.
+# Чем тяжелее мех относительно обломка, тем быстрее тот едет (тяжёлый толкает почти на полной скорости)
+func _push_wrecks(want: Vector3, delta: float) -> void:
+	want.y = 0
+	var spd := want.length()
+	if spd < 0.3:
+		return
+	var motion := want * delta * 1.5
+	var col := KinematicCollision3D.new()
+	if not test_move(global_transform, motion, col):
+		return
+	for i in col.get_collision_count():
+		var w = col.get_collider(i)
+		if w == null or not w.is_in_group("wrecks"):
+			continue
+		var dir: Vector3 = w.global_position - global_position
+		dir.y = 0
+		if dir.length() < 0.01 or dir.normalized().dot(want.normalized()) < 0.2:
+			continue
+		var k := clampf(stats.get("weight", 60.0) / maxf(w.weight, 1.0), 0.1, 1.0) * Cfg.wreck_push
+		var want_move := spd * minf(k, 1.0) * delta
+		var moved: float = w.shove(dir.normalized() * want_move)
+		# обломок упёрся (в стену, постройку): не стоим, а обходим его боком
+		if moved < want_move * 0.3:
+			continue
+		# мех не останавливается об обломок, а идёт с той скоростью, с какой едет обломок
+		var keep := minf(k, 1.0)
+		velocity.x = want.x * keep
+		velocity.z = want.z * keep
+
+
+func _update_aim(delta: float) -> void:
+	var d := aim_point - global_position
+	d.y = 0
+	if d.length() > 0.8:
+		var want_yaw := atan2(-d.x, -d.z)
+		torso_yaw = rotate_toward(torso_yaw, want_yaw, deg_to_rad(stats["torso_turn_speed"]) * delta)
+
+
+# 0 = стоит, 1 = идёт, 2 = бежит, 3 = рывок (плавно между ними)
+func _move_level() -> float:
+	if is_dashing():
+		return 3.0
+	var speed := Vector2(velocity.x, velocity.z).length()
+	var walk := maxf(walk_speed(), 0.1)
+	if speed <= walk:
+		return speed / walk
+	return 1.0 + clampf((speed - walk) / maxf(run_speed() - walk, 0.1), 0.0, 1.0)
+
+
+func _update_spread(delta: float) -> void:
+	var lvl := _move_level()
+	var brace_k := 1.0 - clampf(stats.get("brace_bonus", 0.0) * 2.0, 0.0, 0.7) if braced else 1.0
+	for i in weapons.size():
+		var w: Dictionary = weapons[i]
+		var target: float
+		if lvl <= 1.0:
+			target = lerpf(w["spread_stand"], w["spread_walk"], lvl)
+		elif lvl <= 2.0:
+			target = lerpf(w["spread_walk"], w["spread_run"], lvl - 1.0)
+		else:
+			target = w["spread_dash"]
+		target *= brace_k
+		var rate: float = w["spread_grow"] if target > _w_spread[i] else w["spread_shrink"]
+		_w_spread[i] = move_toward(_w_spread[i], target, rate * delta)
+		_w_bloom[i] = move_toward(_w_bloom[i], 0.0, w["spread_shrink"] * 0.5 * delta)
+
+
+# ------------------------------------------------------------------
+#  ОРУЖИЕ (оба подвеса стреляют на ЛКМ)
+# ------------------------------------------------------------------
+
+func _update_fire(delta: float) -> void:
+	for i in weapons.size():
+		var w: Dictionary = weapons[i]
+		var pressed := _fire if i == 0 else _fire2
+		var start: bool = pressed and not _fire_prev[i]
+		_fire_prev[i] = pressed
+		if start:
+			_energy_warned[i] = false
+		match w["type"]:
+			"beam":
+				_update_beam(i, w, delta, pressed)
+				continue
+			"rail":
+				_update_rail(i, w, delta, pressed, start)
+				continue
+		# Гатлинг раскручивается, пока держишь кнопку, и медленнее замедляется
+		var rate: float = w["fire_rate"]
+		if w["spin_up"] > 0.0:
+			var spin_to := 1.0 if pressed else 0.0
+			var spd: float = 1.0 / maxf(w["spin_up"], 0.05)
+			_w_spin[i] = move_toward(_w_spin[i], spin_to, delta * (spd if pressed else spd * 0.7))
+			rate *= lerpf(0.2, 1.0, _w_spin[i])
+			visual.spin(i, _w_spin[i], delta)
+		_w_timer[i] -= delta
+		# одинаковые пушки на обеих кнопках: при общей стрельбе бьют по очереди, а не залпом
+		if start and i == 1 and _fire and weapons[0]["id"] == w["id"]:
+			_w_timer[1] = maxf(_w_timer[1], 0.5 / maxf(rate, 0.1))
+		if not pressed or _w_timer[i] > 0.0:
+			continue
+		if not _can_shoot(i, w, start):
+			continue
+		_w_timer[i] = 1.0 / maxf(rate, 0.1)
+		_pay_shot(i, w)
+		if w["type"] == "lob":
+			_fire_lob(i, w)
+		else:
+			_fire_bullet(i, w)
+
+
+# хватает ли патронов и энергии на выстрел; если нет, щелчок один раз на нажатие
+func _can_shoot(i: int, w: Dictionary, start: bool) -> bool:
+	if ammo_max(i) > 0.0 and ammo[i] < 1.0:
+		if start or not _ammo_warned[i]:
+			_ammo_warned[i] = true
+			ability_denied.emit(-2 - i, "ammo")
+		return false
+	_ammo_warned[i] = false
+	if w["energy_per_shot"] > 0.0 and energy < w["energy_per_shot"]:
+		if not _energy_warned[i]:
+			_energy_warned[i] = true
+			ability_denied.emit(-2 - i, "energy")
+		return false
+	return true
+
+
+func _pay_shot(i: int, w: Dictionary) -> void:
+	if ammo_max(i) > 0.0:
+		ammo[i] -= 1.0
+	if w["energy_per_shot"] > 0.0:
+		energy = maxf(energy - w["energy_per_shot"], 0.0)
+
+
+func _aim_dir(origin: Vector3, spread_deg: float, random := true) -> Vector3:
+	# оба ствола сводятся в точку, куда смотрит корпус
+	var conv := global_position + torso_forward() * aim_distance()
+	var dir := conv - origin
+	dir.y = 0
+	dir = dir.normalized()
+	var s := deg_to_rad(spread_deg)
+	if random:
+		return dir.rotated(Vector3.UP, (randf() + randf() - 1.0) * s)
+	return dir
+
+
+# если ствол упёрся в стену, выстрел не должен пройти сквозь неё
+func _muzzle_blocked(origin: Vector3) -> Dictionary:
+	var chest := Vector3(global_position.x, origin.y, global_position.z)
+	var q := PhysicsRayQueryParameters3D.create(chest, origin, 1)
+	return get_world_3d().direct_space_state.intersect_ray(q)
+
+
+func _fire_bullet(i: int, w: Dictionary) -> void:
+	var origin: Vector3 = visual.get_muzzle(i)
+	var blocked := _muzzle_blocked(origin)
+	if not blocked.is_empty():
+		Fx.spark(blocked["position"], blocked["normal"], false)
+	else:
+		# дробовик: несколько дробин веером; у остального одна пуля
+		var n := int(w["pellets"])
+		for k in n:
+			var spread: float = weapon_spread_deg(i)
+			if n > 1:
+				spread += w["pellet_spread"]
+			var dir := _aim_dir(origin, spread)
+			var p := Projectile.new()
+			p.setup(origin, dir * w["bullet_speed"], w["damage"] * damage_mult(), w_range(i), self)
+			p.tracer = w["tracer"]
+			p.falloff = w["falloff"] if w["falloff"] > 0.0 else 1.0
+			p.style = "plasma" if w["look"] == "blaster" else "tracer"
+			get_tree().current_scene.add_child(p)
+		_eject_casing(i, w, origin)
+	_after_shot(i, w)
+
+
+# гильза из автопушки, Гатлинга и тяжёлого орудия: вылетает наружу от корпуса
+func _eject_casing(i: int, w: Dictionary, origin: Vector3) -> void:
+	var look: String = w["look"]
+	if not seen or Cfg.casings <= 0 or not (look in ["twin", "minigun", "heavy"]):
+		return
+	var b := Basis(Vector3.UP, torso_yaw)
+	var right := b.x
+	var side := right if right.dot(origin - global_position) >= 0.0 else -right
+	var port := origin + b.z * 1.0          # окно выброса чуть позади дула
+	# у Гатлинга звенит не каждая, иначе сплошной звон
+	Fx.casing(port, side, look == "heavy", look != "minigun" or randf() < 0.3)
+
+
+func _after_shot(i: int, w: Dictionary) -> void:
+	_break_cloak()
+	visual.kick(i, w["recoil"])
+	_w_bloom[i] = minf(_w_bloom[i] + w["spread_per_shot"], w["spread_shot_max"])
+	fired.emit(i)
+
+
+# гранатомёт: граната летит навесом через укрытия и падает туда, куда смотрит прицел
+func _fire_lob(i: int, w: Dictionary) -> void:
+	var origin: Vector3 = visual.get_muzzle(i)
+	var dist := clampf(aim_distance(), w["min_range"], w_range(i))
+	var target := Vector3(global_position.x, 0, global_position.z) + torso_forward() * dist
+	# разброс: точка падения гуляет тем сильнее, чем дальше и чем больше разброс
+	var off := tan(deg_to_rad(weapon_spread_deg(i))) * dist
+	var a := randf() * TAU
+	target += Vector3(cos(a), 0, sin(a)) * off * sqrt(randf())
+	target.y = 0.0
+	var flat := Vector2(target.x - origin.x, target.z - origin.z).length()
+	var lob := Lob.new()
+	lob.setup(origin, target, flat / maxf(w["bullet_speed"], 1.0), w["arc"], self, {
+		"kind": "explosive", "damage": w["damage"] * damage_mult(), "radius": w["radius"], "edge_damage": w["edge_damage"]})
+	get_tree().current_scene.add_child(lob)
+	_after_shot(i, w)
+
+
+# рельсотрон: держишь кнопку, он заряжается и сам стреляет, когда заряд полный.
+# Отпустил раньше: заряд быстро спадает. Луч прошивает мехов и крипов насквозь, стены держат
+func _update_rail(i: int, w: Dictionary, delta: float, pressed: bool, start: bool) -> void:
+	_w_timer[i] -= delta
+	var ct: float = maxf(w["charge_time"], 0.05)
+	if pressed and _w_timer[i] <= 0.0 and _can_shoot(i, w, start):
+		_w_charge[i] = minf(_w_charge[i] + delta / ct, 1.0)
+		if _w_charge[i] >= 1.0:
+			_w_charge[i] = 0.0
+			_w_timer[i] = 1.0 / maxf(w["fire_rate"], 0.05)
+			_pay_shot(i, w)
+			_fire_rail(i, w)
+	else:
+		_w_charge[i] = move_toward(_w_charge[i], 0.0, delta * 2.0 / ct)
+	visual.set_charge(i, _w_charge[i])
+
+
+func rail_charge(i: int) -> float:
+	return _w_charge[i]
+
+
+func _fire_rail(i: int, w: Dictionary) -> void:
+	var origin: Vector3 = visual.get_muzzle(i)
+	var dir := _aim_dir(origin, weapon_spread_deg(i))
+	var end := origin + dir * w_range(i)
+	var blocked := _muzzle_blocked(origin)
+	if not blocked.is_empty():
+		end = blocked["position"]
+	else:
+		var space := get_world_3d().direct_space_state
+		var ex: Array[RID] = Fx.team_rids(team)
+		var from := origin
+		var dmg: float = w["damage"] * damage_mult()
+		for step in 10:
+			var q := PhysicsRayQueryParameters3D.create(from, end, 1 | 4 | 16)
+			q.collide_with_areas = true
+			q.exclude = ex
+			var hit := space.intersect_ray(q)
+			if hit.is_empty():
+				break
+			var col = hit["collider"]
+			if col != null and col.has_method("take_damage"):
+				col.take_damage(dmg, hit["position"], dir, "", self)
+			Fx.spark(hit["position"], hit["normal"], col is Area3D)
+			# насквозь только через мехов и крипов (хитбоксы); стена или обломок останавливают
+			if col is Area3D and w["pierce"] > 0.5:
+				ex.append(hit["rid"])
+				from = hit["position"]
+				continue
+			end = hit["position"]
+			break
+	Fx.rail_beam(origin, end, team)
+	_after_shot(i, w)
+
+
+# лазер: пока зажата ЛКМ и есть энергия, луч бьёт мгновенно и ест энергию
+func _update_beam(i: int, w: Dictionary, delta: float, pressed: bool) -> void:
+	var on := pressed and energy > 0.5
+	_beam_on[i] = on
+	if not on:
+		visual.set_beam(i, false)
+		return
+	energy = maxf(energy - w["energy_per_sec"] * delta, 0.0)
+	_break_cloak()
+
+	var origin: Vector3 = visual.get_muzzle(i)
+	# луч слегка гуляет: на ходу сильнее
+	var wobble := deg_to_rad(weapon_spread_deg(i)) * sin(Time.get_ticks_msec() * 0.007 + i * 1.7)
+	var dir := _aim_dir(origin, 0.0, false).rotated(Vector3.UP, wobble)
+	var end: Vector3 = origin + dir * w_range(i)
+	var normal: Vector3 = -dir
+	var target = null
+
+	var blocked := _muzzle_blocked(origin)
+	if not blocked.is_empty():
+		end = blocked["position"]
+		normal = blocked["normal"]
+	else:
+		_beam_ex_t -= delta
+		if _beam_ex_t <= 0.0:
+			_beam_ex_t = 0.5
+			_beam_exclude = Fx.team_rids(team)
+		var q := PhysicsRayQueryParameters3D.create(origin, end, 1 | 4 | 16)
+		q.collide_with_areas = true
+		q.exclude = _beam_exclude
+		var hit := get_world_3d().direct_space_state.intersect_ray(q)
+		if not hit.is_empty():
+			end = hit["position"]
+			normal = hit["normal"]
+			var col = hit["collider"]
+			if col != null and col.has_method("take_damage"):
+				target = col
+				col.take_damage(w["dps"] * damage_mult() * delta, end, dir, "beam", self)
+
+	visual.set_beam(i, true, origin, end)
+	_beam_fx_t[i] -= delta
+	if _beam_fx_t[i] <= 0.0 and end.distance_to(origin) < w_range(i) - 0.1:
+		_beam_fx_t[i] = 0.09
+		Fx.spark(end, normal, target != null, false)
+
+
+# ------------------------------------------------------------------
+#  АБИЛКИ (из модулей; клавиши по порядку модулей: Q, E, F, C, V, G)
+# ------------------------------------------------------------------
+
+func _update_abilities(delta: float) -> void:
+	for i in abilities.size():
+		ability_cd[i] = maxf(ability_cd[i] - delta, 0.0)
+		if _ability_pressed[i]:
+			_ability_pressed[i] = false
+			_try_ability(i)
+
+	# невидимость, ремонт, блинк: отсчёт времени
+	if cloak_left > 0.0:
+		cloak_left = maxf(cloak_left - delta, 0.0)
+	if repair_left > 0.0:
+		repair_left = maxf(repair_left - delta, 0.0)
+		hp = minf(hp + _repair_rate * delta, max_hp())
+	if blink_left > 0.0:
+		blink_left -= delta
+		if blink_left <= 0.0:
+			_finish_blink()
+
+	# залп: ракеты вылетают по одной с паузой
+	if _salvo_left > 0:
+		_salvo_timer -= delta
+		if _salvo_timer <= 0.0:
+			_launch_rocket()
+			_salvo_left -= 1
+			_salvo_timer = _salvo_params.get("salvo_delay", 0.1)
+
+
+func _try_ability(index: int) -> void:
+	var type: String = abilities[index]["type"]
+	# щит включается и выключается одной кнопкой; перезарядка начинается после выключения
+	if type == "shield" and barrier_on:
+		_set_barrier(false)
+		return
+	if ability_cd[index] > 0.0 or (type == "rockets" and _salvo_left > 0) or (type == "blink" and blink_left > 0.0):
+		ability_denied.emit(index, "cooldown")
+		return
+	if ability_charges_max(index) > 0.0 and ability_charges[index] < 1.0:
+		ability_denied.emit(index, "charges")
+		return
+	if not spend_energy(ability_cost(index)):
+		ability_denied.emit(index, "energy")
+		return
+	if ability_charges_max(index) > 0.0:
+		ability_charges[index] -= 1.0
+	if type != "cloak":
+		_break_cloak()
+	if type != "shield":
+		ability_cd[index] = ability_cooldown_max(index)
+	var p: Dictionary = abilities[index]["params"]
+	match type:
+		"rockets":
+			_start_salvo(index)
+		"emp":
+			_cast_emp(index)
+		"cloak":
+			cloak_left = p["duration"]
+			_cloak_break = p.get("break_on_fire", 1.0) > 0.5
+			if team == _player_team():     # вспышку видят только свои, иначе она выдаёт невидимку
+				Fx.burst(global_position + Vector3.UP * 2.0, Color(0.6, 0.7, 0.9), 3.0)
+		"repair":
+			repair_left = p["duration"]
+			_repair_rate = p["heal_per_sec"]
+		"airstrike":
+			_cast_airstrike(index)
+		"shield":
+			_barrier_i = index
+			_set_barrier(true)
+		"blink":
+			_start_blink(index)
+		"mine":
+			_cast_mine(index)
+	ability_used.emit(index)
+
+
+# ракеты: залп по точке под прицелом. Ракеты летят медленно, от них можно уйти.
+func _start_salvo(index: int) -> void:
+	_salvo_params = abilities[index]["params"]
+	var point := aim_point
+	if ability_aim_override != null:
+		point = ability_aim_override
+		ability_aim_override = null
+	var to := point - global_position
+	to.y = 0
+	var dist := clampf(to.length(), 5.0, _salvo_params["range"])
+	var dir := to.normalized() if to.length() > 0.1 else torso_forward()
+	_salvo_target = global_position + dir * dist
+	_salvo_target.y = 0.0
+	_salvo_left = int(_salvo_params["count"])
+	_salvo_timer = 0.0
+	_salvo_index = 0
+	# метка на земле: куда прилетит. Свои ракеты оранжевые, вражеские красные
+	var mark_r: float = _salvo_params["radius"] + (_salvo_params["scatter"] if _salvo_left > 1 else 0.0)
+	var col := Color(1.0, 0.45, 0.15) if team == 0 else Color(1.0, 0.12, 0.1)
+	_salvo_marker = Fx.ground_marker(_salvo_target, mark_r, col, team, 6.0, true, true)
+
+
+func _launch_rocket() -> void:
+	var port: Vector3 = visual.get_missile_port(_salvo_index % 2)
+	var target := _salvo_target
+	if _salvo_index > 0 and _salvo_params["scatter"] > 0.0:
+		var a := randf() * TAU
+		var r := sqrt(randf()) * float(_salvo_params["scatter"])
+		target += Vector3(cos(a) * r, 0, sin(a) * r)
+	var rk := Rocket.new()
+	rk.setup(port, target, self, _salvo_marker if _salvo_left == 1 else null, _salvo_params)
+	get_tree().current_scene.add_child(rk)
+	visual.kick_missile(_salvo_index % 2)
+	Sfx.play_at("launch", global_position, -6.0, 0.08)
+	_salvo_index += 1
+
+
+# импульс: волна вокруг меха. Бьёт врагов в радиусе и оглушает.
+func _cast_emp(index: int) -> void:
+	var p: Dictionary = abilities[index]["params"]
+	var center := global_position
+	Fx.pulse(center + Vector3.UP * 1.2, p["radius"])
+	Sfx.play_at("emp", global_position, -3.0, 0.04)
+	for n in get_tree().get_nodes_in_group("damageable"):
+		if n == self or not (n is Node3D) or n.is_in_group("walls"):
+			continue
+		if n.get("team") == team:
+			continue
+		var d: Vector3 = n.global_position - center
+		d.y = 0
+		var size: float = n.get_hit_radius() if n.has_method("get_hit_radius") else 1.0
+		if d.length() <= p["radius"] + size:
+			if n.has_method("stun"):
+				n.stun(p["stun_time"])
+			if n.has_method("block_regen") and p.get("no_regen_time", 0.0) > 0.0:
+				n.block_regen(p["no_regen_time"])
+			if n.has_method("take_damage") and p["damage"] > 0.0:
+				n.take_damage(p["damage"] * damage_mult(), n.global_position + Vector3.UP * 2.0, d.normalized(), "", self)
+
+
+func _on_footstep(pos: Vector3) -> void:
+	stepped.emit(pos)
+	# пыль от шага: только у видимых мехов и не у невидимок
+	if seen and not is_cloaked() and Cfg.step_dust > 0:
+		Fx.step_dust(pos, {"light": 0.7, "mid": 1.0, "heavy": 1.4}.get(visual.cls, 1.0))
+
+
+# ------------------------------------------------------------------
+#  Невидимость, ремонт, щит, блинк, авиаудар
+# ------------------------------------------------------------------
+
+func _reset_ability_states() -> void:
+	cloak_left = 0.0
+	repair_left = 0.0
+	_set_barrier(false)
+	_cancel_blink()
+
+
+func _break_cloak() -> void:
+	if cloak_left > 0.0 and _cloak_break:
+		cloak_left = 0.0
+
+
+# щит: сфера вокруг меха (цвет и прозрачность в шейдере ниже), плюс зелёные искры ремонта
+func _make_ability_fx() -> void:
+	var sh := Shader.new()
+	sh.code = """
+shader_type spatial;
+render_mode unshaded, cull_back, depth_draw_never, shadows_disabled;
+uniform vec4 col : source_color = vec4(0.35, 0.78, 1.0, 1.0);
+uniform float hit = 0.0;
+uniform float fade = 1.0;
+void fragment() {
+	float rim = pow(1.0 - abs(dot(NORMAL, VIEW)), 2.2);
+	ALBEDO = mix(col.rgb, vec3(0.85, 0.95, 1.0), hit);
+	ALPHA = clamp(0.08 + rim * 0.7 + hit * 0.35, 0.0, 1.0) * fade;
+}
+"""
+	_barrier_mat = ShaderMaterial.new()
+	_barrier_mat.shader = sh
+	var sm := SphereMesh.new()
+	sm.radius = 1.0
+	sm.height = 2.0
+	sm.radial_segments = 32
+	sm.rings = 16
+	_barrier = MeshInstance3D.new()
+	_barrier.mesh = sm
+	_barrier.material_override = _barrier_mat
+	_barrier.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_barrier.visible = false
+	add_child(_barrier)
+
+	_repair_fx = CPUParticles3D.new()
+	var pm := BoxMesh.new()
+	pm.size = Vector3(0.18, 0.18, 0.18)
+	_repair_fx.mesh = pm
+	var gm := StandardMaterial3D.new()
+	gm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	gm.albedo_color = Color(0.4, 1.0, 0.5)
+	_repair_fx.material_override = gm
+	_repair_fx.amount = 24
+	_repair_fx.lifetime = 0.8
+	_repair_fx.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+	_repair_fx.emission_sphere_radius = 2.0
+	_repair_fx.direction = Vector3.UP
+	_repair_fx.spread = 20.0
+	_repair_fx.initial_velocity_min = 1.5
+	_repair_fx.initial_velocity_max = 3.5
+	_repair_fx.gravity = Vector3.ZERO
+	_repair_fx.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_repair_fx.position = Vector3(0, 2.5, 0)
+	_repair_fx.emitting = false
+	add_child(_repair_fx)
+
+	# дым из подбитого меха: тёмные клубы из корпуса, плюс редкие искры (в _update_ability_fx)
+	_smoke_fx = CPUParticles3D.new()
+	var smat := StandardMaterial3D.new()
+	smat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	smat.vertex_color_use_as_albedo = true
+	smat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	smat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	var stex := Art.fx_tex("smoke_07")
+	if stex != null:
+		var qm := QuadMesh.new()
+		qm.size = Vector2(1.6, 1.6)
+		_smoke_fx.mesh = qm
+		smat.albedo_texture = stex
+		smat.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+		_smoke_fx.angle_max = 360.0
+	else:
+		var ssm := SphereMesh.new()
+		ssm.radius = 0.5
+		ssm.height = 1.0
+		ssm.radial_segments = 6
+		ssm.rings = 3
+		_smoke_fx.mesh = ssm
+	_smoke_fx.material_override = smat
+	var sramp := Gradient.new()
+	sramp.set_color(0, Color(0.12, 0.11, 0.1, 0.75))
+	sramp.set_color(1, Color(0.25, 0.25, 0.27, 0.0))
+	_smoke_fx.color_ramp = sramp
+	_smoke_fx.local_coords = false
+	_smoke_fx.amount = 18
+	_smoke_fx.lifetime = 1.6
+	_smoke_fx.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+	_smoke_fx.emission_sphere_radius = 0.6
+	_smoke_fx.direction = Vector3.UP
+	_smoke_fx.spread = 15.0
+	_smoke_fx.initial_velocity_min = 1.5
+	_smoke_fx.initial_velocity_max = 3.0
+	_smoke_fx.gravity = Vector3(0.6, 0.8, 0)
+	_smoke_fx.scale_amount_min = 0.8
+	_smoke_fx.scale_amount_max = 1.8
+	_smoke_fx.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_smoke_fx.position = Vector3(0, 3.2, 0.4)
+	_smoke_fx.emitting = false
+	add_child(_smoke_fx)
+
+
+func _update_ability_fx(delta: float) -> void:
+	# невидимость: свой мех полупрозрачный, чужой почти не виден
+	# своя команда видит своего невидимку полупрозрачным; врага видно, только если его раскрыл омни-сенсор
+	var want := 0.0
+	if is_cloaked():
+		want = 0.6 if team == _player_team() else Cfg.cloak_revealed
+	if not is_equal_approx(_fade, want):
+		_fade = move_toward(_fade, want, delta * 4.0)
+		visual.set_fade(_fade)
+	_repair_fx.emitting = repair_left > 0.0 and seen
+	# мало здоровья: мех дымит и искрит, чтобы было видно, кого добивать
+	var hurt := not dead and landing_left <= 0.0 and hp < max_hp() * Cfg.smoke_hp and seen and not is_cloaked()
+	_smoke_fx.emitting = hurt
+	# оглушение: по корпусу бегают мелкие молнии
+	if is_stunned() and seen and not dead and Cfg.stun_zaps > 0:
+		var zr: float = {"light": 1.6, "mid": 2.3, "heavy": 2.8}.get(visual.cls, 2.3)
+		var zh: float = {"light": 3.4, "mid": 4.4, "heavy": 4.8}.get(visual.cls, 4.4)
+		for z in (1 if randf() < 0.6 else 0):
+			Fx.zap(global_position, zr, zh)
+	if hurt:
+		_spark_t -= delta
+		if _spark_t <= 0.0:
+			_spark_t = randf_range(0.5, 1.3)
+			var sp := global_position + Vector3(randf_range(-1.0, 1.0), randf_range(2.2, 3.4), randf_range(-1.0, 1.0))
+			Fx.spark(sp, Vector3(randf_range(-0.5, 0.5), 1.0, randf_range(-0.5, 0.5)).normalized(), true, false)
+	_barrier.visible = barrier_on and seen
+	if _bar != null:
+		_bar.visible = seen
+	if barrier_on:
+		_barrier_hit = maxf(_barrier_hit - delta * 4.0, 0.0)
+		_barrier_mat.set_shader_parameter("hit", _barrier_hit)
+		_barrier_mat.set_shader_parameter("fade", 1.0 - _fade)
+
+
+func _player_team() -> int:
+	var g = get_tree().current_scene if is_inside_tree() else null
+	if g != null and "vision" in g and g.vision != null:
+		return g.vision.player_team
+	return 0
+
+
+func _set_barrier(on: bool) -> void:
+	if barrier_on and not on and _barrier_i >= 0 and _barrier_i < ability_cd.size():
+		ability_cd[_barrier_i] = ability_cooldown_max(_barrier_i)
+	barrier_on = on
+	if _barrier != null:
+		_barrier.visible = on
+	if on:
+		_barrier_hit = 1.0
+
+
+# щит принимает урон на себя и платит за него энергией; когда энергия кончилась, щит падает
+func _barrier_absorb(amount: float) -> float:
+	var take := amount * clampf(ability_param(_barrier_i, "absorb"), 0.0, 1.0)
+	var per := ability_param(_barrier_i, "energy_per_damage")
+	var cost := take * per
+	_barrier_hit = 1.0
+	if cost <= energy:
+		energy -= cost
+		return amount - take
+	var can_take := energy / maxf(per, 0.0001)
+	energy = 0.0
+	_set_barrier(false)
+	return amount - can_take
+
+
+# блинк: выбираем точку, ставим метку, стоим delay секунд, прыгаем
+func _start_blink(index: int) -> void:
+	var p: Dictionary = abilities[index]["params"]
+	var point := _ability_point()
+	var to := point - global_position
+	to.y = 0
+	if to.length() > p["range"]:
+		to = to.normalized() * p["range"]
+	_blink_dest = _free_spot(global_position + to)
+	blink_left = maxf(p["delay"], 0.01)
+	_blink_marker = Fx.ground_marker(_blink_dest, get_hit_radius(), Color(0.45, 0.75, 1.0), team, blink_left + 0.5, false, true)
+	Fx.burst(global_position + Vector3.UP * 2.0, Color(0.45, 0.75, 1.0), 2.5)
+
+
+func _finish_blink() -> void:
+	blink_left = 0.0
+	var dest := _free_spot(_blink_dest)      # пока стоял, туда могли зайти
+	if _blink_marker != null and is_instance_valid(_blink_marker):
+		_blink_marker.queue_free()
+	_blink_marker = null
+	Fx.burst(global_position + Vector3.UP * 2.0, Color(0.45, 0.75, 1.0), 3.5)
+	global_position = Vector3(dest.x, global_position.y, dest.z)
+	_snap_next = true
+	velocity = Vector3.ZERO
+	Fx.burst(global_position + Vector3.UP * 2.0, Color(0.45, 0.75, 1.0), 3.5)
+	Sfx.play_at("dash", global_position, -2.0, 0.05)
+
+
+func _cancel_blink() -> void:
+	blink_left = 0.0
+	if _blink_marker != null and is_instance_valid(_blink_marker):
+		_blink_marker.queue_free()
+	_blink_marker = null
+
+
+# ближайшая к цели точка на линии от меха, где мех помещается (не в стене и не в другом мехе)
+func _free_spot(target: Vector3) -> Vector3:
+	var from := Vector3(global_position.x, 0, global_position.z)
+	var to := Vector3(target.x, 0, target.z) - from
+	var dist := to.length()
+	var dir := to / maxf(dist, 0.001)
+	var shape := SphereShape3D.new()
+	shape.radius = 1.4
+	var q := PhysicsShapeQueryParameters3D.new()
+	q.shape = shape
+	q.collision_mask = 1 | 2
+	q.exclude = [get_rid()]
+	var space := get_world_3d().direct_space_state
+	var d := dist
+	while d > 0.0:
+		var p := from + dir * d
+		q.transform = Transform3D(Basis(), p + Vector3.UP * 1.9)
+		if space.intersect_shape(q, 1).is_empty():
+			return p
+		d -= 0.5
+	return from
+
+
+# точка под прицелом (или та, что указал бот)
+func _ability_point() -> Vector3:
+	var point := aim_point
+	if ability_aim_override != null:
+		point = ability_aim_override
+		ability_aim_override = null
+	return point
+
+
+# мина: ставится под себя
+func _cast_mine(index: int) -> void:
+	var mn := Mine.new()
+	mn.team = team
+	mn.owner_mech = self
+	mn.p = abilities[index]["params"]
+	get_tree().current_scene.add_child(mn)
+	mn.global_position = Vector3(global_position.x, 0.0, global_position.z)
+	mn.reset_physics_interpolation()
+	Sfx.play_at("step", global_position, -4.0, 0.1)
+
+
+# авиаудар: метка на земле, через delay секунд сверху падает ракета
+func _cast_airstrike(index: int) -> void:
+	var p: Dictionary = abilities[index]["params"].duplicate()
+	var point := _ability_point()
+	var to := point - global_position
+	to.y = 0
+	if to.length() > p["range"]:
+		to = to.normalized() * p["range"]
+	var target := global_position + to
+	target.y = 0.0
+	var delay: float = maxf(p["delay"], 0.05)
+	var col := Color(1.0, 0.45, 0.15) if team == 0 else Color(1.0, 0.12, 0.1)
+	var marker := Fx.ground_marker(target, p["radius"], col, team, delay + 1.0, true, true)
+	var fall := minf(0.45, delay)
+	p["fall"] = true
+	var start := target + Vector3(4.0, 34.0, 3.0)
+	p["speed"] = start.distance_to(target) / fall
+	var who := self
+	get_tree().create_timer(delay - fall, false).timeout.connect(func() -> void:
+		if not is_instance_valid(who):
+			if is_instance_valid(marker):
+				marker.queue_free()
+			return
+		var rk := Rocket.new()
+		rk.setup(start, target, who, marker, p)
+		who.get_tree().current_scene.add_child(rk)
+		Sfx.play_at("launch", start, -4.0, 0.05))

@@ -1,0 +1,411 @@
+extends Node3D
+## Внешний вид карты: скалы, низкие постройки, мачты с проводами, фонари, трава и мелкие камни,
+## тёмные пятна-тени под объектами. Разрушаемые стены и барьеры рисует wall.gd (у каждой свой вид).
+## Игровую часть (столкновения укрытий) делает main.gd; здесь только вид
+## и столкновения низких построек (их не видно сквозь, но через них видно и стреляется).
+## Где лежат постройки, мачты и фонари, берётся из файла карты.
+
+const Art := preload("res://scripts/art.gd")
+const WorldShader := preload("res://shaders/world.gdshader")
+const GrassShader := preload("res://shaders/grass.gdshader")
+
+const DECOR_KINDS := {"container": "Контейнер", "generator": "Генератор", "tank": "Цистерна", "terminal": "Терминал",
+	"crates": "Ящики", "antenna": "Антенна"}
+
+var vision: Node
+var ground_mask: Image           # где дороги и площадки (из main.gd): трава там не растёт
+var mask_rect := Rect2()
+var decor_boxes: Array = []      # [x, z, ширина, высота, глубина] для карты проходимости ботов
+var _mats := {}
+var _rng := RandomNumberGenerator.new()
+
+
+func _mat(key: String, col: Color, mode: int, rough := 0.85, metal := 0.0, glow := Color.BLACK, glow_pow := 0.0, tex := "", tex_scale := 0.25, use_normal := true) -> ShaderMaterial:
+	if _mats.has(key):
+		return _mats[key]
+	var m := new_mat(col, mode, rough, metal, glow, glow_pow, tex, tex_scale, use_normal)
+	_mats[key] = m
+	return m
+
+
+# новый материал карты (с туманом войны); tex: имя набора текстур из assets/textures
+func new_mat(col: Color, mode: int, rough := 0.85, metal := 0.0, glow := Color.BLACK, glow_pow := 0.0, tex := "", tex_scale := 0.25, use_normal := true) -> ShaderMaterial:
+	var m := ShaderMaterial.new()
+	m.shader = WorldShader
+	m.set_shader_parameter("albedo", col)
+	m.set_shader_parameter("mode", mode)
+	m.set_shader_parameter("roughness", rough)
+	m.set_shader_parameter("metallic", metal)
+	m.set_shader_parameter("glow", glow)
+	m.set_shader_parameter("glow_power", glow_pow)
+	if tex != "":
+		var t := Art.textures(tex)
+		if not t.is_empty():
+			m.set_shader_parameter("use_tex", 1.0)
+			m.set_shader_parameter("tex_albedo", t["albedo"])
+			if t.has("normal"):
+				m.set_shader_parameter("tex_normal", t["normal"])
+			if t.has("rough"):
+				m.set_shader_parameter("tex_rough", t["rough"])
+			m.set_shader_parameter("tex_scale", tex_scale)
+			m.set_shader_parameter("use_normal", 1.0 if use_normal else 0.0)
+	if vision != null:
+		vision.register_material(m)
+	return m
+
+
+func concrete() -> ShaderMaterial:
+	return _mat("concrete", Color(0.42, 0.42, 0.42), 0, 0.85, 0.0, Color.BLACK, 0.0, "concrete", 0.22)
+
+
+func dark_metal() -> ShaderMaterial:
+	return _mat("dmetal", Color(0.16, 0.17, 0.19), 2, 0.55, 0.5, Color.BLACK, 0.0, "darkmetal", 0.4)
+
+
+func metal() -> ShaderMaterial:
+	return _mat("metal", Color(0.36, 0.38, 0.41), 2, 0.5, 0.45, Color.BLACK, 0.0, "plates", 0.3)
+
+
+func rock() -> ShaderMaterial:
+	var m := _mat("rock", Color(0.36, 0.34, 0.31), 1, 0.95, 0.0, Color.BLACK, 0.0, "rock2", 0.18, false)
+	m.set_shader_parameter("tex_tint", Color(0.85, 0.82, 0.78))
+	return m
+
+
+func light_strip(col: Color) -> ShaderMaterial:
+	return _mat("glow_%s" % col.to_html(), col, 3, 0.5, 0.0, col, 2.2)
+
+
+func hazard() -> ShaderMaterial:
+	return _mat("hazard", Color(0.75, 0.55, 0.12), 2, 0.6, 0.2, Color.BLACK, 0.0, "paint_yellow", 0.5)
+
+
+# Всё неподвижное складывается в общие пачки по материалу и в конце сливается в одну сетку
+# на материал: так видеокарте рисовать в сотни раз меньше отдельных предметов.
+var _batches := {}     # ключ -> {mat, shadow, st}
+
+
+func _add(mesh: Mesh, xf: Transform3D, mat: Material, shadow: bool) -> void:
+	var key := "%d_%s" % [mat.get_instance_id(), shadow]
+	if not _batches.has(key):
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		_batches[key] = {"mat": mat, "shadow": shadow, "st": st}
+	_batches[key]["st"].append_from(mesh, 0, xf)
+
+
+func _flush() -> void:
+	for key in _batches:
+		var b: Dictionary = _batches[key]
+		var mi := MeshInstance3D.new()
+		mi.mesh = b["st"].commit()
+		mi.material_override = b["mat"]
+		if not b["shadow"]:
+			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(mi)
+	_batches.clear()
+
+
+func _box(parent: Transform3D, size: Vector3, pos: Vector3, mat: Material, rot := Vector3.ZERO, shadow := true) -> void:
+	var bm := BoxMesh.new()
+	bm.size = size
+	_add(bm, parent * Transform3D(Basis.from_euler(rot), pos), mat, shadow)
+
+
+func _cyl(parent: Transform3D, r: float, h: float, pos: Vector3, mat: Material, rot := Vector3.ZERO, segs := 12) -> void:
+	var cm := CylinderMesh.new()
+	cm.top_radius = r
+	cm.bottom_radius = r
+	cm.height = h
+	cm.radial_segments = segs
+	cm.rings = 1
+	_add(cm, parent * Transform3D(Basis.from_euler(rot), pos), mat, true)
+
+
+# ------------------------------------------------------------------
+#  Главная сборка
+# ------------------------------------------------------------------
+
+# covers: укрытия [x, z, ширина, высота, глубина, вид]; edges: стены по краю карты [центр, размер];
+# map: данные карты (украшения, фонари, мачты)
+func build(covers: Array, edges: Array, map_rect: Rect2, no_grass: Array, map: Dictionary) -> void:
+	_rng.seed = 1234
+	for c in covers:
+		var kind: String = c[5] if c.size() > 5 else "wall"
+		if kind == "rock":
+			_rock_cluster(c)
+		_blob(Vector3(c[0], 0, c[1]), Vector2(c[2] + 2.5, c[4] + 2.5))
+	for e in edges:
+		_edge_wall(e[0], e[1])
+	for d in map.get("decor", []):
+		_decor(d[0], Vector3(float(d[1]), 0, float(d[2])), deg_to_rad(float(d[3]) if d.size() > 3 else 0.0))
+	for chain in map.get("pylons", []):
+		var tops: Array = []
+		for p in chain:
+			tops.append(_pylon(Vector3(float(p[0]), 0, float(p[1]))))
+		for i in tops.size() - 1:
+			for off in [-0.9, 0.9]:
+				var o := Vector3(off, 0, 0)
+				_cable(tops[i] + o, tops[i + 1] + o, 1.6)
+	for l in map.get("lamps", []):
+		_lamp(Vector3(float(l[0]), 0, float(l[1])))
+	_scatter(map_rect, covers, no_grass)
+	_flush()
+
+
+# ------------------------------------------------------------------
+#  Укрытия
+# ------------------------------------------------------------------
+
+# скала: несколько валунов, заполняющих площадь укрытия
+func _rock_cluster(c: Array) -> void:
+	var w: float = c[2]
+	var h: float = c[3]
+	var d: float = c[4]
+	var count := clampi(int(w * d / 6.0), 3, 9)
+	for i in count:
+		var mesh := Art.rock_mesh(_rng.randi_range(0, 5))
+		var sx := _rng.randf_range(0.85, 1.05) * maxf(w, d) * 0.95
+		var sy := _rng.randf_range(0.85, 1.15) * h * 1.7
+		var sz := _rng.randf_range(0.85, 1.05) * minf(w, d) * 1.1
+		if i > 0:
+			sx *= 0.65
+			sy *= _rng.randf_range(0.5, 0.85)
+			sz *= 0.65
+		var pos := Vector3(c[0] + _rng.randf_range(-w, w) * 0.3 * float(i > 0), 0.0, c[1] + _rng.randf_range(-d, d) * 0.3 * float(i > 0))
+		_add(mesh, Transform3D(Basis(Vector3.UP, _rng.randf() * TAU).scaled(Vector3(sx, sy, sz)), pos), rock(), true)
+
+
+# стена по краю карты
+func _edge_wall(center: Vector3, size: Vector3) -> void:
+	var root := Transform3D(Basis(), center)
+	_box(root, size, Vector3.ZERO, concrete())
+	_box(root, Vector3(size.x + 0.3, 0.4, size.z + 0.3), Vector3(0, size.y * 0.5, 0), dark_metal())
+	var long_x := size.x > size.z
+	var length := size.x if long_x else size.z
+	var n := int(length / 6.0)
+	for i in n + 1:
+		var t := -length * 0.5 + length * float(i) / float(n)
+		var pos := Vector3(t, 0, 0) if long_x else Vector3(0, 0, t)
+		var sz := Vector3(0.7, size.y + 0.6, size.z + 0.5) if long_x else Vector3(size.x + 0.5, size.y + 0.6, 0.7)
+		_box(root, sz, pos + Vector3(0, 0.3, 0), metal())
+
+
+# мягкое тёмное пятно на земле под объектом (заменяет затенение в углах)
+func _blob(pos: Vector3, size: Vector2) -> void:
+	if not _mats.has("blob"):
+		var sh := Shader.new()
+		sh.code = """shader_type spatial;
+render_mode unshaded, depth_draw_never, shadows_disabled, cull_disabled;
+uniform float strength = 0.5;
+void fragment() {
+	vec2 q = abs(UV - 0.5) * 2.0;
+	float d = max(q.x, q.y);
+	ALBEDO = vec3(0.0);
+	ALPHA = (1.0 - smoothstep(0.55, 1.0, d)) * strength;
+}
+"""
+		var m := ShaderMaterial.new()
+		m.shader = sh
+		_mats["blob"] = m
+	var pm := PlaneMesh.new()
+	pm.size = size
+	_add(pm, Transform3D(Basis(), pos + Vector3.UP * 0.03), _mats["blob"], false)
+
+
+# ------------------------------------------------------------------
+#  Низкие постройки (сквозь них видно и стреляется, но мехи о них упираются)
+# ------------------------------------------------------------------
+
+func _decor(kind: String, pos: Vector3, rot: float) -> void:
+	var root := Transform3D(Basis(Vector3.UP, rot), pos)
+	var foot := Vector2(3, 3)
+	var height := 2.4
+	match kind:
+		"container":
+			foot = Vector2(2.6, 6.2)
+			height = 2.6
+			var col: Color = [Color(0.55, 0.22, 0.12), Color(0.18, 0.32, 0.45), Color(0.4, 0.42, 0.2)][_rng.randi_range(0, 2)]
+			var body := _mat("cont_%s" % col.to_html(), col, 2, 0.6, 0.3)
+			_box(root, Vector3(2.5, 2.5, 6.0), Vector3(0, 1.25, 0), body)
+			for i in 7:
+				_box(root, Vector3(2.62, 2.3, 0.08), Vector3(0, 1.25, -2.7 + i * 0.9), body)
+			_box(root, Vector3(2.6, 0.12, 6.1), Vector3(0, 2.55, 0), dark_metal())
+		"generator":
+			foot = Vector2(3.4, 2.4)
+			height = 2.2
+			_box(root, Vector3(3.2, 1.6, 2.2), Vector3(0, 0.8, 0), metal())
+			_box(root, Vector3(2.6, 0.6, 1.6), Vector3(0, 1.9, 0), dark_metal())
+			for i in 4:
+				_box(root, Vector3(0.08, 1.1, 2.24), Vector3(-1.1 + i * 0.35, 0.8, 0), dark_metal())
+			_box(root, Vector3(0.5, 0.12, 0.12), Vector3(1.0, 1.65, 1.12), light_strip(Color(0.3, 1.0, 0.45)), Vector3.ZERO, false)
+			_cyl(root, 0.18, 1.4, Vector3(-1.2, 2.3, 0.6), dark_metal())
+		"tank":
+			foot = Vector2(3.6, 3.6)
+			height = 2.8
+			_cyl(root, 1.7, 2.6, Vector3(0, 1.3, 0), metal(), Vector3.ZERO, 20)
+			_cyl(root, 1.8, 0.2, Vector3(0, 0.5, 0), dark_metal(), Vector3.ZERO, 20)
+			_cyl(root, 1.8, 0.2, Vector3(0, 2.2, 0), dark_metal(), Vector3.ZERO, 20)
+			_box(root, Vector3(0.6, 0.15, 0.6), Vector3(0, 2.65, 0), hazard())
+		"terminal":
+			foot = Vector2(1.6, 1.2)
+			height = 1.8
+			_box(root, Vector3(1.4, 1.2, 0.9), Vector3(0, 0.6, 0), metal())
+			_box(root, Vector3(1.2, 0.7, 0.2), Vector3(0, 1.4, -0.2), dark_metal(), Vector3(-0.4, 0, 0))
+			_box(root, Vector3(0.9, 0.45, 0.04), Vector3(0, 1.42, -0.32), light_strip(Color(0.3, 0.85, 1.0)), Vector3(-0.4, 0, 0), false)
+		"crates":
+			foot = Vector2(3.2, 2.6)
+			height = 2.0
+			var cm := _mat("crate", Color(0.36, 0.33, 0.22), 2, 0.8, 0.1)
+			_box(root, Vector3(1.4, 1.2, 1.2), Vector3(-0.7, 0.6, 0), cm, Vector3(0, 0.2, 0))
+			_box(root, Vector3(1.2, 1.0, 1.2), Vector3(0.8, 0.5, 0.3), cm, Vector3(0, -0.3, 0))
+			_box(root, Vector3(1.0, 0.8, 1.0), Vector3(-0.5, 1.6, 0.1), cm, Vector3(0, 0.6, 0))
+		"antenna":
+			foot = Vector2(2.2, 2.2)
+			height = 2.0
+			_box(root, Vector3(2.0, 1.0, 2.0), Vector3(0, 0.5, 0), metal())
+			_cyl(root, 0.08, 6.0, Vector3(0, 4.0, 0), dark_metal(), Vector3.ZERO, 6)
+			_box(root, Vector3(1.4, 0.06, 0.06), Vector3(0, 6.0, 0), dark_metal())
+			_box(root, Vector3(0.18, 0.18, 0.18), Vector3(0, 7.05, 0), light_strip(Color(1.0, 0.2, 0.15)), Vector3.ZERO, false)
+	# столкновение: мехи упираются, вижен и выстрелы проходят (слой построек)
+	var body2 := StaticBody3D.new()
+	body2.collision_layer = 32
+	body2.collision_mask = 0
+	body2.position = pos
+	body2.rotation.y = rot
+	add_child(body2)
+	var cs := CollisionShape3D.new()
+	var bs := BoxShape3D.new()
+	bs.size = Vector3(foot.x, height, foot.y)
+	cs.shape = bs
+	cs.position = Vector3(0, height * 0.5, 0)
+	body2.add_child(cs)
+	var fx: float = foot.x if absf(sin(rot)) < 0.5 else foot.y
+	var fz: float = foot.y if absf(sin(rot)) < 0.5 else foot.x
+	_blob(pos, Vector2(fx + 1.8, fz + 1.8))
+	decor_boxes.append([pos.x, pos.z, fx, height, fz])
+
+
+# ------------------------------------------------------------------
+#  Мачты с проводами и фонари
+# ------------------------------------------------------------------
+
+func _pylon(pos: Vector3) -> Vector3:
+	var root := Transform3D(Basis(), pos)
+	var body := StaticBody3D.new()
+	body.position = pos
+	body.collision_layer = 32
+	body.collision_mask = 0
+	add_child(body)
+	var cs := CollisionShape3D.new()
+	var bs := BoxShape3D.new()
+	bs.size = Vector3(1.0, 3.0, 1.0)
+	cs.shape = bs
+	cs.position = Vector3(0, 1.5, 0)
+	body.add_child(cs)
+	decor_boxes.append([pos.x, pos.z, 1.0, 3.0, 1.0])
+	_box(root, Vector3(1.0, 0.4, 1.0), Vector3(0, 0.2, 0), concrete())
+	_box(root, Vector3(0.35, 7.5, 0.35), Vector3(0, 3.95, 0), dark_metal())
+	_box(root, Vector3(2.2, 0.15, 0.15), Vector3(0, 7.4, 0), dark_metal())
+	_box(root, Vector3(0.14, 0.14, 0.14), Vector3(0, 7.9, 0), light_strip(Color(1.0, 0.25, 0.15)), Vector3.ZERO, false)
+	return pos + Vector3(0, 7.35, 0)
+
+
+func _cable(a: Vector3, b: Vector3, sag: float) -> void:
+	var mat := dark_metal()
+	var seg := 10
+	var prev := a
+	for i in range(1, seg + 1):
+		var t := float(i) / seg
+		var p := a.lerp(b, t)
+		p.y -= sin(t * PI) * sag
+		var mid := (prev + p) * 0.5
+		var bm := BoxMesh.new()
+		bm.size = Vector3(0.06, 0.06, prev.distance_to(p))
+		_add(bm, Transform3D(Basis.looking_at(p - prev, Vector3.UP), mid), mat, true)
+		prev = p
+
+
+func _lamp(pos: Vector3) -> void:
+	var root := Transform3D(Basis(), pos)
+	_box(root, Vector3(0.6, 0.3, 0.6), Vector3(0, 0.15, 0), concrete())
+	_box(root, Vector3(0.18, 4.5, 0.18), Vector3(0, 2.4, 0), dark_metal())
+	_box(root, Vector3(1.0, 0.14, 0.3), Vector3(0.35, 4.6, 0), dark_metal())
+	_box(root, Vector3(0.6, 0.06, 0.24), Vector3(0.5, 4.52, 0), light_strip(Color(1.0, 0.85, 0.55)), Vector3.ZERO, false)
+
+
+# ------------------------------------------------------------------
+#  Трава и мелкие камни
+# ------------------------------------------------------------------
+
+# на дороге, площадке или в укрытии траву не сажаем (по той же картинке, что и шейдер земли)
+func _grass_ok(x: float, z: float, covers: Array, no_grass: Array) -> bool:
+	if ground_mask != null:
+		var px := int((x - mask_rect.position.x) / mask_rect.size.x * ground_mask.get_width())
+		var pz := int((z - mask_rect.position.y) / mask_rect.size.y * ground_mask.get_height())
+		if px >= 0 and pz >= 0 and px < ground_mask.get_width() and pz < ground_mask.get_height():
+			var c := ground_mask.get_pixel(px, pz)
+			if c.r > 0.25 or c.g > 0.2 or c.b > 0.2:
+				return false
+	for c in covers:
+		if absf(x - c[0]) < c[2] * 0.5 + 0.6 and absf(z - c[1]) < c[4] * 0.5 + 0.6:
+			return false
+	for b in decor_boxes:
+		if absf(x - b[0]) < b[2] * 0.5 + 0.4 and absf(z - b[1]) < b[4] * 0.5 + 0.4:
+			return false
+	for p in no_grass:
+		if Vector2(x - p.x, z - p.z).length() < 4.0:
+			return false
+	return true
+
+
+func _scatter(rect: Rect2, covers: Array, no_grass: Array) -> void:
+	var gm := ShaderMaterial.new()
+	gm.shader = GrassShader
+	vision.register_material(gm)
+	var xforms: Array = []
+	var tries := int(26000.0 * rect.get_area() / 33600.0)
+	for i in tries:
+		var x := _rng.randf_range(rect.position.x + 2.0, rect.end.x - 2.0)
+		var z := _rng.randf_range(rect.position.y + 2.0, rect.end.y - 2.0)
+		if not _grass_ok(x, z, covers, no_grass):
+			continue
+		var b := Basis(Vector3.UP, _rng.randf() * TAU).scaled(Vector3.ONE * _rng.randf_range(0.7, 1.35))
+		xforms.append(Transform3D(b, Vector3(x, 0, z)))
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.mesh = Art.grass_mesh()
+	mm.instance_count = xforms.size()
+	for i in xforms.size():
+		mm.set_instance_transform(i, xforms[i])
+	var mmi := MultiMeshInstance3D.new()
+	mmi.multimesh = mm
+	mmi.material_override = gm
+	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(mmi)
+
+	# мелкие камни по траве и обочинам
+	for v in 3:
+		var rx: Array = []
+		for i in 120:
+			var x2 := _rng.randf_range(rect.position.x + 3.0, rect.end.x - 3.0)
+			var z2 := _rng.randf_range(rect.position.y + 3.0, rect.end.y - 3.0)
+			var ok := true
+			for c in covers:
+				if absf(x2 - c[0]) < c[2] * 0.5 + 1.0 and absf(z2 - c[1]) < c[4] * 0.5 + 1.0:
+					ok = false
+			if not ok:
+				continue
+			var s := _rng.randf_range(0.25, 0.8)
+			var b2 := Basis(Vector3.UP, _rng.randf() * TAU).scaled(Vector3(s * 1.3, s * 0.8, s))
+			rx.append(Transform3D(b2, Vector3(x2, 0, z2)))
+		var mm2 := MultiMesh.new()
+		mm2.transform_format = MultiMesh.TRANSFORM_3D
+		mm2.mesh = Art.rock_mesh(v)
+		mm2.instance_count = rx.size()
+		for i in rx.size():
+			mm2.set_instance_transform(i, rx[i])
+		var mmi2 := MultiMeshInstance3D.new()
+		mmi2.multimesh = mm2
+		mmi2.material_override = rock()
+		add_child(mmi2)
