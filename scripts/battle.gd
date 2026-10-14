@@ -39,6 +39,8 @@ func register(m: Node, title: String) -> void:
 		_player_id = id
 	rows[id] = {"name": title, "team": m.team, "player": m.get("is_player") == true, "mech": "",
 		"kills": 0, "deaths": 0, "damage": 0.0, "structures": 0.0, "creeps": 0, "towers": 0}
+	if m.has_method("set_title"):
+		m.set_title(title)     # ник над мехом
 
 
 func set_mech(m: Node, mech_name: String) -> void:

@@ -793,7 +793,7 @@ func _update_preview(r: Dictionary) -> void:
 	_preview_mech = MechVisual.new()
 	_preview_mech.st = st
 	_preview_root.add_child(_preview_mech)
-	_preview_mech.build(Cfg.player_color, Color(1, 1, 1), look)
+	_preview_mech.build(Cfg.mech_accent, Color(1, 1, 1), look)
 	_preview_mech.position.y = 0.3
 
 

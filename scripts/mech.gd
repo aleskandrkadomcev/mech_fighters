@@ -148,10 +148,9 @@ func _ready() -> void:
 	hitbox.mech = self
 	add_child(hitbox)
 
-	if not is_player:
-		_bar = HpBar.new()
-		_bar.color = Color(0.4, 0.9, 0.4) if team == 0 else Color(0.95, 0.25, 0.2)
-		add_child(_bar)
+	_bar = HpBar.new()
+	_bar.color = Cfg.bar_self if is_player else (Cfg.bar_ally if team == 0 else Cfg.bar_enemy)
+	add_child(_bar)
 	_make_ability_fx()
 
 	if build.is_empty():
@@ -220,10 +219,8 @@ func _apply_build() -> void:
 		visual = MechVisual.new()
 		visual.st = stats
 		add_child(visual)
-		if team == 0:
-			visual.build(Cfg.player_color, Color(1, 1, 1), look)
-		else:
-			visual.build(Cfg.enemy_color, Color(1.0, 0.82, 0.8), look)
+		# мехи без краски команды: свой/чужой видно по полоске здоровья и нику над мехом
+		visual.build(Cfg.mech_accent, Color(1, 1, 1), look, team == 0)
 		visual.footstep.connect(_on_footstep)
 		_fade = 0.0
 		_snap_next = true
@@ -1238,6 +1235,12 @@ func _update_rail(i: int, w: Dictionary, delta: float, pressed: bool, start: boo
 	else:
 		_w_charge[i] = move_toward(_w_charge[i], 0.0, delta * 2.0 / ct)
 	visual.set_charge(i, _w_charge[i])
+
+
+# ник над полоской здоровья (Battle.register)
+func set_title(t: String) -> void:
+	if _bar != null:
+		_bar.set_title(t)
 
 
 func rail_charge(i: int) -> float:

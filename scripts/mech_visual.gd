@@ -97,7 +97,7 @@ var m_accent: StandardMaterial3D
 var m_glow: StandardMaterial3D
 var m_beam: StandardMaterial3D
 var m_light: StandardMaterial3D
-var _team_paint := Color(1, 1, 1)   # чем красится текстура 3D-модели (цвет команды)
+var _team_paint := Color(1, 1, 1)   # чем красится текстура 3D-модели (сейчас ничем: мехи в своих цветах)
 
 const Art := preload("res://scripts/art.gd")
 
@@ -107,7 +107,9 @@ const Art := preload("res://scripts/art.gd")
 # ------------------------------------------------------------------
 
 # look: {legs_scale, hull_scale, weapons: [вид левого, вид правого], rockets: bool}
-func build(team_color: Color, tint: Color, look: Dictionary) -> void:
+# accent: цвет полос и огней на мехе (пока у всех нейтральный — свой/чужой видно по полоске здоровья и нику);
+# friend: свой или чужой — от этого только цвет луча лазера
+func build(accent: Color, tint: Color, look: Dictionary, friend := true) -> void:
 	ls = look.get("legs_scale", 1.0)
 	hs = look.get("hull_scale", 1.0)
 	style = look.get("style", "mid")
@@ -119,10 +121,9 @@ func build(team_color: Color, tint: Color, look: Dictionary) -> void:
 		model = ""     # файла нет: мех из коробок
 	if model != "":
 		_setup_model_legs()
-	_team_paint = Color(1, 1, 1).lerp(team_color, 0.2) * tint
+	_team_paint = tint
 	_team_paint.a = 1.0
-	# броня слегка окрашена в цвет команды, чтобы мехи отличались не только полосками
-	var paint := Color(0.42, 0.43, 0.44).lerp(team_color, 0.12) * tint
+	var paint := Color(0.42, 0.43, 0.44) * tint
 	m_armor = _mat(paint, 0.35, 0.5)
 	m_armor.emission_enabled = true
 	m_armor.emission = Color(0, 0, 0)
@@ -130,13 +131,13 @@ func build(team_color: Color, tint: Color, look: Dictionary) -> void:
 	m_armor2.emission_enabled = true
 	m_armor2.emission = Color(0, 0, 0)
 	m_dark = _mat(Color(0.2, 0.2, 0.21), 0.5, 0.5)
-	m_accent = _mat(team_color.darkened(0.15), 0.1, 0.6)
+	m_accent = _mat(accent.darkened(0.15), 0.1, 0.6)
 	m_glow = StandardMaterial3D.new()
-	m_glow.albedo_color = team_color
+	m_glow.albedo_color = accent
 	m_glow.emission_enabled = true
-	m_glow.emission = team_color
+	m_glow.emission = accent
 	m_glow.emission_energy_multiplier = 1.4
-	m_beam = _unshaded((Color(0.55, 0.95, 1.0) if team_color == Cfg.player_color else Color(1.0, 0.35, 0.35)) * 2.2)
+	m_beam = _unshaded((Color(0.55, 0.95, 1.0) if friend else Color(1.0, 0.35, 0.35)) * 2.2)
 	# фактура брони: панели, швы, болты (или текстуры из assets/textures)
 	Art.apply_panels(m_armor, 0.7, "armor")
 	Art.apply_panels(m_armor2, 0.9, "armor")
@@ -749,7 +750,8 @@ func _setup_model_legs() -> void:
 	_hip_h = hip.y
 	_hip_x = absf(hip.x)
 	_hip_z = hip.z
-	_foot_x = absf(ankle.x)
+	# ступни можно свести к бёдрам (число «stance» у меха): у некоторых моделей ноги расставлены слишком широко
+	_foot_x = lerpf(_hip_x, absf(ankle.x), _s("stance", 1.0))
 	_foot_z = ankle.z
 	_ankle_h = ankle.y
 	# колено сзади линии бедро-щиколотка (птичья нога) или впереди (человеческая)

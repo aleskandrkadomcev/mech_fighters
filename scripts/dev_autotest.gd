@@ -36,6 +36,7 @@ var _target := ""                # --targetshot=fight|base|calm: постано�
 var _nohud := false              # без интерфейса и прицела на земле: чистый кадр
 var _actors: Array = []          # мехи постановки targetshot: [мех, в кого он стреляет]
 var _stuckcheck := false
+var _railtest := false           # рельсотрон: луч должен лежать вдоль выстрела (баг «полоса поперёк карты»)
 var _boom := false               # взрыв рядом с игроком на 5-м кадре (проверка следа гари)
 var _moba_secs := 60
 var _perf := false               # с mobatest: каждые 20 с сколько узлов, объектов, ресурсов и время кадра
@@ -84,6 +85,8 @@ func setup(main_node: Node3D, args: PackedStringArray) -> void:
 			_zap = true
 		elif a == "--wallshot":
 			_wallshot = true
+		elif a == "--railtest":
+			_railtest = true
 		elif a.begins_with("--targetshot="):
 			_target = a.trim_prefix("--targetshot=")
 		elif a == "--nohud":
@@ -218,6 +221,8 @@ func _process(_delta: float) -> void:
 		_run_resultshot()
 	if _target != "":
 		_run_targetshot()
+	if _railtest:
+		_run_railtest()
 	if _boom and _frame == 5:
 		Fx.explosion(main.mech.global_position + Vector3(7, 1.8, 3), 4.5)
 		Fx.explosion(main.mech.global_position + Vector3(-6, 1.8, -4), 3.0)
@@ -231,7 +236,7 @@ func _process(_delta: float) -> void:
 		var img := get_viewport().get_texture().get_image()
 		img.save_png("%s/f%04d.png" % [_shot_dir, shot_f])
 		_shots_left.erase(shot_f)
-		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and _mechexport == "":
+		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and _mechexport == "":
 			get_tree().quit()
 
 
@@ -1101,7 +1106,7 @@ func _run_mechexport() -> void:
 			var v = MV.new()
 			v.st = r["stats"]
 			root.add_child(v)
-			v.build(Cfg.player_color if i % 2 == 0 else Cfg.enemy_color, Color(1, 1, 1) if i % 2 == 0 else Color(1.0, 0.82, 0.8),
+			v.build(Cfg.mech_accent, Color(1, 1, 1),
 				{"legs_scale": r["stats"]["legs_scale"], "hull_scale": r["stats"]["hull_scale"], "style": r["stats"]["style"],
 				"model": r["stats"].get("model", ""), "weapons": [r["weapons"][0]["look"], r["weapons"][1]["look"]], "rockets": e[3]})
 			var pos := Vector3(i * 10.0, 0, row * 14.0)
@@ -1448,6 +1453,37 @@ func _stage_calm(m) -> void:
 	m.snap_interpolation(m)
 	m.demo = {"move": Vector2.ZERO, "fire": false, "aim": s[1]}
 	main.cam._started = false
+
+
+# рельсотрон стреляет вдоль линии (X), поперёк (Z) и по диагонали; меряем, куда вытянут нарисованный луч.
+# Длинная сторона луча должна совпадать с направлением выстрела
+var _rail_dirs := [Vector3(1, 0, 0), Vector3(0, 0, -1), Vector3(1, 0, 1).normalized()]
+var _rail_seen := {}
+
+
+func _run_railtest() -> void:
+	var m = main.mech
+	var k := _frame / 180
+	if _frame == 3:
+		Cfg.creeps_enabled = 0
+		m.set_build({"mech": "mech_fortress", "core": "core_combat", "weapons": ["railgun", "railgun"], "modules": []})
+		m.global_position = Vector3(-8, 0.05, 10)
+		m.shield_left = 0.0
+		m.snap_interpolation(m)
+	if _frame >= 5 and k < _rail_dirs.size():
+		var dir: Vector3 = _rail_dirs[k]
+		m.demo = {"move": Vector2.ZERO, "fire": _frame % 180 > 50, "fire2": false, "aim": m.global_position + dir * 30.0 + Vector3.UP * 1.5}
+	for c in get_tree().current_scene.get_children():
+		if c is MeshInstance3D and c.mesh is BoxMesh and not _rail_seen.has(c.get_instance_id()):
+			_rail_seen[c.get_instance_id()] = true
+			var bb: AABB = c.global_transform * c.get_aabb()
+			var want: Vector3 = _rail_dirs[mini(k, _rail_dirs.size() - 1)]
+			# луч длинный и лежит под тем же углом, что выстрел (до 12°: пушка сбоку корпуса, сведение на прицел)
+			var ang := rad_to_deg(absf(atan2(bb.size.z, bb.size.x) - atan2(absf(want.z), absf(want.x))))
+			var ok := Vector2(bb.size.x, bb.size.z).length() > 1.0 and ang < 12.0
+			print("[RAIL] f=%d выстрел %s размер луча=(%.1f, %.1f, %.1f) %s" % [_frame, want.snapped(Vector3.ONE * 0.01), bb.size.x, bb.size.y, bb.size.z, "ВЕРНО" if ok else "НЕ ТУДА"])
+	if _frame >= 180 * _rail_dirs.size() + 10:
+		get_tree().quit()
 
 
 # что копится в сцене: всего узлов/объектов/ресурсов, время кадра, и какие узлы верхнего уровня самые частые

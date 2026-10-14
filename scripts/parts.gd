@@ -93,7 +93,7 @@ const DATA := {
 		"walk_speed": 5.2, "run_speed": 10.0, "accel": 10.0, "decel": 27.0,
 		"dash_speed": 36.0, "dash_time": 0.28, "dash_cooldown": 3.4, "dash_brake": 90.0, "dash_charges": 1,
 		"legs_turn_speed": 150.0, "torso_turn_speed": 170.0, "resist_explosion": 0.25, "resist_stun": 0.3,
-		"stride_walk": 6.0, "stride_run": 6.4, "legs_scale": 1.18, "hull_scale": 1.2},
+		"stride_walk": 6.0, "stride_run": 6.4, "legs_scale": 1.18, "hull_scale": 1.2, "stance": 0.35},
 
 	# ---------------- ЯДРА ----------------
 	"core_battery": {"slot": "core", "name": "Ядро-батарея",
@@ -231,6 +231,7 @@ const FIELDS := {
 	"stride_run": ["Длина шага (бег)", 1, 10, 0.1, "только вид"],
 	"legs_scale": ["Размер ног", 0.5, 1.6, 0.01, "только вид"],
 	"hull_scale": ["Размер корпуса", 0.5, 1.6, 0.01, "только вид"],
+	"stance": ["Ширина постановки ног", 0, 1, 0.05, "только вид, мехи из 3D-моделей: 1 = как в модели, меньше = ступни ближе к бёдрам"],
 	"hp": ["Здоровье", 50, 10000, 10, ""],
 	"hit_radius": ["Радиус хитбокса", 0.5, 10, 0.05, "метров"],
 	"vision": ["Обзор", 5, 80, 1, "метров: сколько видит вокруг себя, укрытия закрывают обзор"],
@@ -334,7 +335,7 @@ const FIELDS := {
 
 const MECH_STATS := ["capacity", "hp", "hit_radius", "vision", "omni", "torso_turn_speed", "resist_explosion", "resist_stun",
 	"walk_speed", "run_speed", "accel", "decel", "dash_speed", "dash_time",
-	"dash_cooldown", "dash_brake", "dash_charges", "legs_turn_speed", "stride_walk", "stride_run", "legs_scale", "hull_scale",
+	"dash_cooldown", "dash_brake", "dash_charges", "legs_turn_speed", "stride_walk", "stride_run", "legs_scale", "hull_scale", "stance",
 	"armor_flat", "regen_hp", "regen_delay", "brace_bonus", "brace_time", "ram_damage", "ram_stun"]
 const WEAPON_STATS := ["ammo", "fire_rate", "damage", "bullet_speed", "range", "spread_stand", "spread_walk", "spread_run",
 	"spread_dash", "spread_per_shot", "spread_shot_max", "spread_grow", "spread_shrink", "recoil", "tracer",
@@ -345,7 +346,7 @@ const ABILITY_STATS := ["cost", "cooldown", "count", "salvo_delay", "speed", "ra
 	"duration", "break_on_fire", "charges", "trigger_radius", "arm_time", "slow", "slow_time", "heal_per_sec", "delay", "upkeep", "energy_per_damage", "absorb"]
 # значения, если у меха такого числа нет
 const MECH_DEFAULTS := {"dash_charges": 1.0, "moving_spread": 1.0, "energy_regen_mult": 1.0, "cd_mult": 1.0, "brace_time": 0.6,
-	"regen_delay": 4.0, "legs_scale": 1.0, "hull_scale": 1.0}
+	"regen_delay": 4.0, "legs_scale": 1.0, "hull_scale": 1.0, "stance": 1.0}
 
 const DEFAULT_BUILD := {
 	"mech": "mech_assault", "core": "core_combat",

@@ -1,9 +1,11 @@
 extends Node3D
-## Полоска здоровья над мехом. Повёрнута лицом к камере.
+## Полоска здоровья над мехом, над ней ник. Повёрнута лицом к камере. Цвет: свой мех, союзник или враг.
 
 const W := 3.2
 
 var color := Color(0.95, 0.25, 0.2)
+var title := ""
+var _label: Label3D
 var _bar: MeshInstance3D
 var _mat: StandardMaterial3D
 var _back: MeshInstance3D
@@ -29,6 +31,19 @@ func _ready() -> void:
 	_bar.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_back.add_child(_bar)
 
+	_label = Label3D.new()
+	_label.text = title
+	_label.modulate = color
+	_label.outline_modulate = Color(0, 0, 0, 0.85)
+	_label.font_size = 44
+	_label.outline_size = 10
+	_label.pixel_size = 0.013
+	_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	_label.no_depth_test = true
+	_label.render_priority = 2
+	_label.position = Vector3(0, 0.62, 0)
+	add_child(_label)
+
 
 func _process(_delta: float) -> void:
 	# всегда лицом к камере, даже если родитель развёрнут (вражеские турели повёрнуты на 180°)
@@ -43,6 +58,12 @@ func _flat(c: Color) -> StandardMaterial3D:
 	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	m.no_depth_test = true
 	return m
+
+
+func set_title(t: String) -> void:
+	title = t
+	if _label != null:
+		_label.text = t
 
 
 func set_ratio(k: float) -> void:

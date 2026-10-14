@@ -484,13 +484,17 @@ func rail_beam(from: Vector3, to: Vector3, team: int) -> void:
 	var c := Color(0.5, 0.9, 1.0) if friend else Color(1.0, 0.4, 0.4)
 	var d := to - from
 	var len := maxf(d.length(), 0.1)
+	var dir := d / len
+	# ящик растягиваем по его собственным осям (умножение справа). Basis.scaled() тянет по осям МИРА:
+	# выстрел вдоль X рисовался полосой длиной во весь выстрел поперёк, по Z, «через всю карту»
+	var look := Basis.looking_at(dir, Vector3.UP if absf(dir.y) < 0.99 else Vector3.RIGHT)
 	for layer in 2:
 		var mat := _unshaded(Color(c.r * 3.0, c.g * 3.0, c.b * 3.0, 0.9) if layer == 0 else Color(1, 1, 1, 0.95), true)
 		var bm := BoxMesh.new()
 		bm.size = Vector3(1, 1, 1)
 		var mi := _mesh_node(bm, mat, from + d * 0.5)
 		var w := 0.32 if layer == 0 else 0.1
-		mi.global_transform = Transform3D(Basis.looking_at(d.normalized(), Vector3.UP).scaled(Vector3(w, w, len)), from + d * 0.5)
+		mi.global_transform = Transform3D(look * Basis.from_scale(Vector3(w, w, len)), from + d * 0.5)
 		var tw := mi.create_tween()
 		tw.tween_property(mat, "albedo_color:a", 0.0, 0.35).set_ease(Tween.EASE_IN)
 		tw.tween_callback(mi.queue_free)

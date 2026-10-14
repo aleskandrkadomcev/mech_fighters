@@ -809,7 +809,7 @@ func _build_environment() -> void:
 	env.background_color = Color(0.05, 0.06, 0.07)
 	# мягкий рассеянный свет: сверху холодный, как от неба (тени холодные, солнце тёплое)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.45, 0.52, 0.68)
+	env.ambient_light_color = Color(0.52, 0.54, 0.6)    # солнце сзади: стороны к камере освещает небо, не слишком синее
 	env.ambient_light_energy = 1.6     # киношная цветопередача сильно давит тёмное: без этого тени чёрные
 	# затенение в углах и под предметами: всё «стоит» на земле
 	env.ssao_enabled = true
@@ -850,8 +850,8 @@ func _build_environment() -> void:
 	# слабая подсветка с противоположной стороны, чтобы тени не были чёрными
 	var fill := DirectionalLight3D.new()
 	fill.rotation_degrees = Vector3(-35, -30, 0)
-	fill.light_energy = 0.35
-	fill.light_color = Color(0.62, 0.64, 0.72)
+	fill.light_energy = 0.4
+	fill.light_color = Color(0.72, 0.7, 0.68)
 	add_child(fill)
 
 

@@ -89,7 +89,7 @@ func _build_background() -> void:
 	var r := Parts.compute(b)
 	_preview.st = r["stats"]
 	root.add_child(_preview)
-	_preview.build(Cfg.player_color, Color(1, 1, 1), {"legs_scale": r["stats"]["legs_scale"], "hull_scale": r["stats"]["hull_scale"],
+	_preview.build(Cfg.mech_accent, Color(1, 1, 1), {"legs_scale": r["stats"]["legs_scale"], "hull_scale": r["stats"]["hull_scale"],
 		"style": r["stats"]["style"], "model": r["stats"].get("model", ""), "weapons": [r["weapons"][0]["look"], r["weapons"][1]["look"]],
 		"rockets": r["abilities"].any(func(a): return a["type"] == "rockets")})
 	_cam = Camera3D.new()
