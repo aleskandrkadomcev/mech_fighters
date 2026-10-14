@@ -37,6 +37,7 @@ var _nohud := false              # без интерфейса и прицела
 var _actors: Array = []          # мехи постановки targetshot: [мех, в кого он стреляет]
 var _stuckcheck := false
 var _railtest := false           # рельсотрон: луч должен лежать вдоль выстрела (баг «полоса поперёк карты»)
+var _gfxbench := false           # графика: драка у турели на каждом пресете подряд (бой перезапускается), снимок и замер кадров
 var _boom := false               # взрыв рядом с игроком на 5-м кадре (проверка следа гари)
 var _moba_secs := 60
 var _perf := false               # с mobatest: каждые 20 с сколько узлов, объектов, ресурсов и время кадра
@@ -87,6 +88,9 @@ func setup(main_node: Node3D, args: PackedStringArray) -> void:
 			_wallshot = true
 		elif a == "--railtest":
 			_railtest = true
+		elif a == "--gfxbench":
+			_gfxbench = true
+			Cfg.graphics = BENCH[_bench_i][1]     # setup идёт до постройки карты: бой строится уже с этой графикой
 		elif a.begins_with("--targetshot="):
 			_target = a.trim_prefix("--targetshot=")
 		elif a == "--nohud":
@@ -223,6 +227,8 @@ func _process(_delta: float) -> void:
 		_run_targetshot()
 	if _railtest:
 		_run_railtest()
+	if _gfxbench:
+		_run_gfxbench()
 	if _boom and _frame == 5:
 		Fx.explosion(main.mech.global_position + Vector3(7, 1.8, 3), 4.5)
 		Fx.explosion(main.mech.global_position + Vector3(-6, 1.8, -4), 3.0)
@@ -236,7 +242,7 @@ func _process(_delta: float) -> void:
 		var img := get_viewport().get_texture().get_image()
 		img.save_png("%s/f%04d.png" % [_shot_dir, shot_f])
 		_shots_left.erase(shot_f)
-		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and _mechexport == "":
+		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and _mechexport == "" and not _gfxbench:
 			get_tree().quit()
 
 
@@ -1453,6 +1459,87 @@ func _stage_calm(m) -> void:
 	m.snap_interpolation(m)
 	m.demo = {"move": Vector2.ZERO, "fire": false, "aim": s[1]}
 	main.cam._started = false
+
+
+# ------------------------------------------------------------------
+#  Замер графики (--gfxbench, запуск в окне с --disable-vsync): постановка драки из --targetshot=fight
+#  на каждом пресете. Через 3 с снимок gfx_<пресет>.png в --shot-dir, с 4-й по 14-ю секунду замер кадров
+#  (среднее, 1% худших, время видеокарты, треугольники и вызовы отрисовки), потом бой перезапускается
+#  со следующим пресетом. Последний прогон — низкие без теней солнца, только для сравнения.
+# ------------------------------------------------------------------
+
+const BENCH := [["low", 0, true], ["mid", 1, true], ["high", 2, true], ["low_noshadow", 0, false]]
+static var _bench_i := 0
+static var _bench_out: Array = []
+var _bench_t0 := 0
+var _bench_last := 0
+var _bench_ms: Array = []
+var _bench_gpu := 0.0
+var _bench_prims := 0.0
+var _bench_calls := 0.0
+var _bench_shot := false
+
+
+func _run_gfxbench() -> void:
+	var m = main.mech
+	var vp_rid := get_viewport().get_viewport_rid()
+	if _frame == 3:
+		Cfg.creeps_enabled = 0
+		m.shield_left = 0.0
+		if _nohud:
+			main.hud.visible = false
+			for c in main.get_children():
+				if c.get_script() == main.Crosshair:
+					c.visible = false
+		_stage_fight(m)
+		if not BENCH[_bench_i][2]:
+			for c in main.get_children():
+				if c is DirectionalLight3D:
+					c.shadow_enabled = false
+		RenderingServer.viewport_set_measure_render_time(vp_rid, true)
+		_bench_t0 = Time.get_ticks_usec()
+		_bench_last = _bench_t0
+	if _frame < 3:
+		return
+	for a in _actors:
+		a[0].hp = maxf(a[0].hp, a[0].max_hp() * 0.6)
+		var t = a[1]
+		if t != null and is_instance_valid(t) and not t.dead:
+			a[0].demo["aim"] = t.global_position + Vector3.UP * 1.5
+	var now := Time.get_ticks_usec()
+	var secs := (now - _bench_t0) / 1e6
+	var label: String = BENCH[_bench_i][0]
+	if secs >= 3.0 and not _bench_shot and _shot_dir != "":
+		_bench_shot = true
+		await RenderingServer.frame_post_draw
+		get_viewport().get_texture().get_image().save_png("%s/gfx_%s.png" % [_shot_dir, label])
+		return
+	if secs >= 4.0 and secs < 14.0:
+		_bench_ms.append((now - _bench_last) / 1000.0)
+		_bench_gpu += RenderingServer.viewport_get_measured_render_time_gpu(vp_rid)
+		_bench_prims += Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME)
+		_bench_calls += Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)
+	_bench_last = now
+	if secs < 14.0 or _bench_ms.is_empty():
+		return
+	var n := _bench_ms.size()
+	var sorted_ms := _bench_ms.duplicate()
+	sorted_ms.sort()
+	var worst: Array = sorted_ms.slice(int(n * 0.99))
+	var avg_ms: float = sorted_ms.reduce(func(acc, x): return acc + x, 0.0) / n
+	var low1: float = worst.reduce(func(acc, x): return acc + x, 0.0) / maxf(worst.size(), 1.0)
+	var line := "[GFX] %-12s %4d кадр/с (%.2f мс), 1%% худших %4d кадр/с (%.1f мс), видеокарта %.2f мс, треугольников %d тыс., вызовов %d" % [
+		label, int(1000.0 / avg_ms), avg_ms, int(1000.0 / low1), low1, _bench_gpu / n, int(_bench_prims / n / 1000.0), int(_bench_calls / n)]
+	print(line)
+	_bench_out.append(line)
+	_bench_i += 1
+	if _bench_i < BENCH.size():
+		get_tree().reload_current_scene()
+		return
+	print("[GFX] ---- итог (%s) ----" % [str(DisplayServer.window_get_size())])
+	for l in _bench_out:
+		print(l)
+	get_tree().quit()
 
 
 # рельсотрон стреляет вдоль линии (X), поперёк (Z) и по диагонали; меряем, куда вытянут нарисованный луч.

@@ -343,7 +343,7 @@ func _lamp(pos: Vector3) -> void:
 
 # на дороге, площадке или в укрытии траву не сажаем (по той же картинке, что и шейдер земли)
 const GRASS_CHUNK := 16          # трава режется на куски 16×16 м: рисуются только куски в кадре
-const GRASS_PER_M2 := 5.0        # кустов на квадратный метр там, где трава гуще всего
+const GRASS_PER_M2 := 5.0        # кустов на квадратный метр там, где трава гуще всего (высокая графика)
 
 
 # густая трава кустами (Art.grass_bush_mesh). Где расти нельзя (дороги, площадки, укрытия, постройки),
@@ -380,6 +380,9 @@ func _grass(rect: Rect2, covers: Array, no_grass: Array) -> void:
 	var clump := FastNoiseLite.new()
 	clump.seed = 5
 	clump.frequency = 0.15
+	# густота и травинок в кусте по графике (Cfg.graphics): низкие, средние, высокие
+	var per_m2: float = Cfg.gfx(1.5, 3.0, GRASS_PER_M2)
+	var bush := Art.grass_bush_mesh(Cfg.gfx(10, 16, 24))
 	var chunks := {}
 	for y in range(1, h - 1):
 		for x in range(1, w - 1):
@@ -388,7 +391,7 @@ func _grass(rect: Rect2, covers: Array, no_grass: Array) -> void:
 			var wx := rect.position.x + x
 			var wz := rect.position.y + y
 			var dens := _grass_density(wx + 0.5, wz + 0.5) * (0.2 + 0.8 * smoothstep(-0.3, 0.3, clump.get_noise_2d(wx, wz)))
-			var n := int(GRASS_PER_M2 * dens + _rng.randf())
+			var n := int(per_m2 * dens + _rng.randf())
 			if n == 0:
 				continue
 			var key := Vector2i(int(x / GRASS_CHUNK), int(y / GRASS_CHUNK))
@@ -409,7 +412,7 @@ func _grass(rect: Rect2, covers: Array, no_grass: Array) -> void:
 		var mm := MultiMesh.new()
 		mm.transform_format = MultiMesh.TRANSFORM_3D
 		mm.use_colors = true
-		mm.mesh = Art.grass_bush_mesh()
+		mm.mesh = bush
 		mm.instance_count = list.size()
 		for i in list.size():
 			mm.set_instance_transform(i, list[i][0])

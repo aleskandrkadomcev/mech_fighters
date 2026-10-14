@@ -269,15 +269,16 @@ func scorch(pos: Vector3, radius: float) -> void:
 
 
 # короткая вспышка настоящего света (освещает землю и стены вокруг взрыва).
-# Одновременно не больше нескольких, чтобы не тормозило
+# Одновременно не больше нескольких, чтобы не тормозило: на высокой графике 6, на средней 3, на низкой нет
 var _lights := 0
 
 
 func _flash_light(pos: Vector3, col: Color, rng: float, time: float) -> void:
-	if _lights >= 6 or get_tree().current_scene == null:
+	if _lights >= Cfg.gfx(0, 3, 6) or get_tree().current_scene == null:
 		return
 	_lights += 1
 	var l := OmniLight3D.new()
+	l.tree_exiting.connect(func() -> void: _lights -= 1)     # и когда бой закрыли посреди вспышки
 	l.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	l.light_color = col
 	l.light_energy = 5.0
@@ -287,9 +288,7 @@ func _flash_light(pos: Vector3, col: Color, rng: float, time: float) -> void:
 	l.global_position = pos
 	var tw := l.create_tween()
 	tw.tween_property(l, "light_energy", 0.0, time).set_ease(Tween.EASE_OUT)
-	tw.tween_callback(func() -> void:
-		_lights -= 1
-		l.queue_free())
+	tw.tween_callback(l.queue_free)
 
 
 # ------------------------------------------------------------------

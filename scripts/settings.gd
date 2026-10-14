@@ -148,6 +148,13 @@ var bar_self := Color(0.2, 0.45, 1.0)
 var bar_ally := Color(0.4, 0.9, 0.4)
 var bar_enemy := Color(0.95, 0.25, 0.2)
 
+# Графика: 0 низкие, 1 средние, 2 высокие (как задумано). Выбирается в меню «Настройки»,
+# хранится отдельно от tuning.cfg (в graphics.cfg в папке игры у пользователя),
+# применяется при старте боя: трава (map_art), земля, свет и тени (main), вспышки (fx)
+const GFX_NAMES := ["Низкие", "Средние", "Высокие"]
+const GFX_PATH := "user://graphics.cfg"
+var graphics := 2
+
 
 # ============================================================
 #  Дальше служебный код: он собирает список чисел для панели F2
@@ -171,6 +178,11 @@ func _ready() -> void:
 	_persist = args.is_empty() or args.has("--tuning-test")
 	if _persist:
 		_load_tuning()
+		_load_graphics()
+	# проверки и замеры: --gfx=low|mid|high
+	for a in args:
+		if a.begins_with("--gfx="):
+			graphics = maxi(["low", "mid", "high"].find(a.trim_prefix("--gfx=")), 0)
 
 
 func persist_enabled() -> bool:
@@ -239,6 +251,26 @@ func reset_all() -> void:
 
 func _tuning_path() -> String:
 	return "res://tuning.cfg" if OS.has_feature("editor") else "user://tuning.cfg"
+
+
+# число по пресету графики: gfx(низкие, средние, высокие)
+func gfx(low, mid, high):
+	return [low, mid, high][clampi(graphics, 0, 2)]
+
+
+func set_graphics(q: int) -> void:
+	graphics = clampi(q, 0, 2)
+	if not _persist:
+		return
+	var cf := ConfigFile.new()
+	cf.set_value("graphics", "preset", graphics)
+	cf.save(GFX_PATH)
+
+
+func _load_graphics() -> void:
+	var cf := ConfigFile.new()
+	if cf.load(GFX_PATH) == OK:
+		graphics = clampi(int(cf.get_value("graphics", "preset", 2)), 0, 2)
 
 
 func _collect_items() -> void:

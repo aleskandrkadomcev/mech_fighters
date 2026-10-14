@@ -232,9 +232,10 @@ func _check_row(parent: Control, text: String, key: String) -> void:
 
 
 func _build_settings() -> void:
-	var col := _panel_box(Vector2(720, 160), Vector2(760, 560))
+	var col := _panel_box(Vector2(720, 160), Vector2(760, 640))
 	_settings = col.get_parent()
 	_title(col, "НАСТРОЙКИ")
+	_graphics_row(col)
 	_slider_row(col, "Громкость", "sound_volume", 0, 1)
 	_slider_row(col, "Тряска камеры", "shake", 0, 3)
 	_slider_row(col, "Темнота тумана", "fog_darkness", 0, 1)
@@ -248,6 +249,36 @@ func _build_settings() -> void:
 	var back := GameMenu.big_button("Назад", 180)
 	back.pressed.connect(func() -> void: _settings.visible = false)
 	col.add_child(back)
+
+
+# графика: три кнопки, нажата одна. Сохраняется сразу, в бою применяется со следующего боя
+func _graphics_row(parent: Control) -> void:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 12)
+	parent.add_child(row)
+	var l := Label.new()
+	l.text = "Графика"
+	l.custom_minimum_size = Vector2(240, 0)
+	l.add_theme_font_size_override("font_size", 19)
+	row.add_child(l)
+	var group := ButtonGroup.new()
+	for q in 3:
+		var b := Button.new()
+		b.text = Cfg.GFX_NAMES[q]
+		b.toggle_mode = true
+		b.button_group = group
+		b.button_pressed = Cfg.graphics == q
+		b.focus_mode = Control.FOCUS_NONE
+		b.custom_minimum_size = Vector2(140, 44)
+		b.add_theme_font_size_override("font_size", 19)
+		b.pressed.connect(func() -> void: Cfg.set_graphics(q))
+		row.add_child(b)
+	var note := Label.new()
+	note.text = "Низкие — для слабых видеокарт: меньше травы, проще земля, тени и свет. Меняется со следующего боя."
+	note.add_theme_font_size_override("font_size", 15)
+	note.add_theme_color_override("font_color", Color(1, 1, 1, 0.5))
+	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	parent.add_child(note)
 
 
 func _open_play() -> void:

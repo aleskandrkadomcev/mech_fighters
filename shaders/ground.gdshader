@@ -6,6 +6,15 @@ shader_type spatial;
 //   ruts_tex:   красный = колеи вдоль линий, зелёный = лужи.
 // Бегущие тени облаков считаются здесь же. Цвета подогнаны под цель (docs/targets).
 // Если текстур нет (проверки без окна), земля рисуется формулами. В тумане войны темнеет.
+//
+// Графика (Cfg.graphics): main.gd при старте боя вставляет после первой строки
+//   GFX_MID — средние: один масштаб текстур, лужи без ряби и бликов, рельеф только крупный;
+//   GFX_LOW — низкие: то же, плюс без рельефа (и карт нормалей), без теней облаков, небо в лужах не плывёт.
+// Без них (высокие) всё как задумано.
+#if defined(GFX_MID) || defined(GFX_LOW)
+#define GFX_ONE_SCALE
+#define GFX_NO_RIPPLE
+#endif
 
 uniform sampler2D fog_tex : filter_linear, repeat_disable;
 uniform vec4 fog_rect = vec4(-120.0, -70.0, 240.0, 140.0);
@@ -94,7 +103,11 @@ float panels(vec2 p, vec2 cell) {
 // высота земли (м) для рельефа: бугры ~8 м, кочки ~1 м, мелкая неровность. Сама земля плоская,
 // по высоте считается только наклон: низкое солнце освещает склоны и кладёт тень на обратные
 float relief_h(vec2 q) {
+#ifdef GFX_MID
+	return (vnoise(q * 0.13) - 0.5) * 0.9 + (vnoise(q * 0.9) - 0.5) * 0.18;
+#else
 	return (fbm3(q * 0.13) - 0.5) * 0.9 + (vnoise(q * 0.9) - 0.5) * 0.18 + (vnoise(q * 3.1) - 0.5) * 0.05;
+#endif
 }
 
 // слой текстуры: tile = сколько метров на один повтор. Там, где k = 1, берётся второй, крупный масштаб
@@ -102,15 +115,30 @@ float relief_h(vec2 q) {
 vec4 layer_tex(sampler2DArray t, vec2 p, float tile, float id, float k, vec2 dx, vec2 dy) {
 	vec2 uv = p / tile;
 	vec4 a = textureGrad(t, vec3(uv, id), dx / tile, dy / tile);
+#ifdef GFX_ONE_SCALE
+	return a;
+#else
 	vec4 b = textureGrad(t, vec3(uv * 0.57 + vec2(0.31, 0.77), id), dx * 0.57 / tile, dy * 0.57 / tile);
 	return mix(a, b, k);
+#endif
 }
+
+// карта нормалей слоя (на низкой графике её нет: земля без мелкого рельефа)
+#ifdef GFX_LOW
+#define NORMAL_TEX(tile, id) vec3(0.5, 0.5, 1.0)
+#else
+#define NORMAL_TEX(tile, id) layer_tex(tex_normal, p, tile, id, k, dx, dy).rgb
+#endif
 
 void fragment() {
 	vec2 p = wpos.xz;
 	vec2 muv = (p - fog_rect.xy) / fog_rect.zw;
 	vec4 gm = texture(ground_tex, muv);
+#ifdef GFX_LOW
+	float mid = fbm3(p * 0.18 + 7.0);
+#else
 	float mid = fbm(p * 0.18 + 7.0);
+#endif
 	float edge_noise = (mid - 0.5) * 2.0;
 	float road_k = smoothstep(0.32, 0.62, gm.r + edge_noise * 0.12);
 	float pad = smoothstep(0.3, 0.6, gm.g + edge_noise * 0.08);
@@ -138,20 +166,20 @@ void fragment() {
 		// трава — основа
 		vec4 a = layer_tex(tex_albedo, p, 9.0, 0.0, k, dx, dy);
 		col = a.rgb * tint_grass;
-		nmap = layer_tex(tex_normal, p, 9.0, 0.0, k, dx, dy).rgb;
+		nmap = NORMAL_TEX(9.0, 0.0);
 		if (w_dirt > 0.002) {
 			col = mix(col, layer_tex(tex_albedo, p, 8.0, 1.0, k, dx, dy).rgb * tint_dirt, w_dirt);
-			nmap = mix(nmap, layer_tex(tex_normal, p, 8.0, 1.0, k, dx, dy).rgb, w_dirt);
+			nmap = mix(nmap, NORMAL_TEX(8.0, 1.0), w_dirt);
 		}
 		if (w_dry > 0.002) {
 			col = mix(col, layer_tex(tex_albedo, p, 11.0, 3.0, k, dx, dy).rgb * tint_dry, w_dry);
-			nmap = mix(nmap, layer_tex(tex_normal, p, 11.0, 3.0, k, dx, dy).rgb, w_dry);
+			nmap = mix(nmap, NORMAL_TEX(11.0, 3.0), w_dry);
 		}
 		if (w_rock > 0.002) {
 			vec3 rk = layer_tex(tex_albedo, p, 8.0, 4.0, k, dx, dy).rgb;
 			rk = mix(vec3(dot(rk, vec3(0.3, 0.59, 0.11))), rk, 0.45);     // мох на фото слишком зелёный
 			col = mix(col, rk * tint_rock, w_rock);
-			nmap = mix(nmap, layer_tex(tex_normal, p, 8.0, 4.0, k, dx, dy).rgb, w_rock);
+			nmap = mix(nmap, NORMAL_TEX(8.0, 4.0), w_rock);
 		}
 		// дорога: светлая укатанная сухая грязь со следами техники, немного разбитой грязи с протекторами,
 		// тёмные колеи
@@ -160,7 +188,7 @@ void fragment() {
 			vec3 track = layer_tex(tex_albedo, p, 12.0, 3.0, k, dx, dy).rgb * tint_dry * 1.15;
 			col = mix(col, mix(track, mud, 0.3), road_k);
 			rough = mix(rough, 0.72, road_k);     // укатанная дорога глаже травы: ловит солнце
-			nmap = mix(nmap, layer_tex(tex_normal, p, 12.0, 3.0, k, dx, dy).rgb, road_k);
+			nmap = mix(nmap, NORMAL_TEX(12.0, 3.0), road_k);
 			float rr = rut * road_k;
 			col *= 1.0 - rr * 0.38;
 			rough = mix(rough, 0.6, rr);
@@ -175,7 +203,12 @@ void fragment() {
 		// в воде отражается небо: светится само, тень на него не влияет (неба в сцене нет — подделываем)
 		// облака отражаются пятнами, к краю лужи отражение слабее (там мелко и грязно)
 		float core = smoothstep(0.45, 0.8, pm + pe);
-		sky = sky_reflect * sky_reflect_power * puddle * (0.45 + 0.8 * fbm3(p * 0.25 + TIME * 0.015)) * (0.55 + 0.45 * core);
+#ifdef GFX_LOW
+		float clouds_in_water = 0.4;
+#else
+		float clouds_in_water = fbm3(p * 0.25 + TIME * 0.015);
+#endif
+		sky = sky_reflect * sky_reflect_power * puddle * (0.45 + 0.8 * clouds_in_water) * (0.55 + 0.45 * core);
 		nmap = mix(nmap, vec3(0.5, 0.5, 1.0), puddle);
 		rough = mix(rough, 0.5, damp * 0.7);
 		rough = mix(rough, 0.08, puddle);
@@ -189,11 +222,12 @@ void fragment() {
 			conc = mix(conc, layer_tex(tex_albedo, p, 6.0, 2.0, 0.0, dx, dy).rgb * tint_mud * 0.8,
 				smoothstep(0.55, 0.75, fbm3(p * 0.12 + 9.0)) * 0.6);
 			col = mix(col, conc, pad);
-			nmap = mix(nmap, layer_tex(tex_normal, p, 4.5, 5.0, k, dx, dy).rgb, pad);
+			nmap = mix(nmap, NORMAL_TEX(4.5, 5.0), pad);
 			rough = mix(rough, 0.82, pad);
 		}
 		// наклон земли: рельеф по шуму (кроме площадок) и колеи-жёлоба на дороге,
 		// плюс рельеф фото-текстур. Лужи гладкие
+#ifndef GFX_LOW
 		float flat_k = max(pad, ppad);
 		float h0 = relief_h(p);
 		vec2 grad = vec2(relief_h(p + vec2(0.15, 0.0)) - h0, relief_h(p + vec2(0.0, 0.15)) - h0) / 0.15 * (1.0 - flat_k);
@@ -203,6 +237,10 @@ void fragment() {
 		grad *= relief;
 		vec3 tn = nmap * 2.0 - 1.0;
 		nw = normalize(vec3(-grad.x + tn.x * normal_depth, 1.0, -grad.y - tn.y * normal_depth));
+#endif
+#ifdef GFX_NO_RIPPLE
+		nw = normalize(mix(nw, vec3(0.0, 1.0, 0.0), puddle));       // вода ровная
+#else
 		vec2 rip = vec2(vnoise(p * 7.0 + TIME * 0.4) - 0.5, vnoise(p * 7.0 + 31.0 - TIME * 0.3) - 0.5) * 0.12
 			+ vec2(vnoise(p * 23.0 - TIME * 0.9) - 0.5, vnoise(p * 23.0 + 7.0 + TIME * 0.7) - 0.5) * 0.1;
 		nw = normalize(mix(nw, vec3(rip.x, 1.0, rip.y), puddle));     // вода ровная, только рябь
@@ -210,6 +248,7 @@ void fragment() {
 		vec3 vw = normalize((INV_VIEW_MATRIX * vec4(VIEW, 0.0)).xyz);
 		float g = pow(max(dot(reflect(-vw, nw), normalize(sun_dir)), 0.0), 48.0);
 		sky += glint_col * glint * g * (puddle + damp * 0.15);
+#endif
 		col *= gain;
 	} else {
 		float big = fbm(p * 0.035);
@@ -233,8 +272,10 @@ void fragment() {
 	nw = normalize(mix(nw, vec3(0.0, 1.0, 0.0), ppad));
 
 	// тени облаков медленно плывут по земле
+#ifndef GFX_LOW
 	float cl = smoothstep(0.45, 0.68, fbm3(p * 0.011 + TIME * vec2(0.010, 0.004)));
 	col *= 1.0 - cl * cloud_shadow * use_tex;
+#endif
 
 	// туман войны
 	float vis = texture(fog_tex, muv).r;

@@ -259,19 +259,20 @@ static func rock_mesh(variant: int) -> ArrayMesh:
 	return _rocks[variant]
 
 
-static var _grass_bush: ArrayMesh
+static var _grass_bush := {}     # число травинок -> модель куста
 
 
 # куст травы: 24 изогнутые травинки разной высоты, расходятся из одной кочки (~0,7 м в поперечнике).
+# На средней и низкой графике травинок меньше (берутся первые из тех же 24).
 # Высота травинки (0..1) лежит в UV.y: шейдер травы красит корень тёмным, кончик светлым
-static func grass_bush_mesh() -> ArrayMesh:
-	if _grass_bush != null:
-		return _grass_bush
+static func grass_bush_mesh(blades := 24) -> ArrayMesh:
+	if _grass_bush.has(blades):
+		return _grass_bush[blades]
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 9
-	for b in 24:
+	for b in blades:
 		var a := rng.randf() * TAU
 		var dir := Vector3(cos(a), 0, sin(a))
 		var side := Vector3(-dir.z, 0, dir.x)
@@ -301,8 +302,8 @@ static func grass_bush_mesh() -> ArrayMesh:
 			st.set_normal(Vector3.UP)
 			st.set_uv(Vector2(0, q[1]))
 			st.add_vertex(q[0])
-	_grass_bush = st.commit()
-	return _grass_bush
+	_grass_bush[blades] = st.commit()
+	return _grass_bush[blades]
 
 
 # Склейка деталей: все неподвижные детали внутри одного узла с одинаковым материалом

@@ -811,8 +811,8 @@ func _build_environment() -> void:
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = Color(0.52, 0.54, 0.6)    # солнце сзади: стороны к камере освещает небо, не слишком синее
 	env.ambient_light_energy = 1.6     # киношная цветопередача сильно давит тёмное: без этого тени чёрные
-	# затенение в углах и под предметами: всё «стоит» на земле
-	env.ssao_enabled = true
+	# затенение в углах и под предметами: всё «стоит» на земле (только на высокой графике)
+	env.ssao_enabled = Cfg.graphics == 2
 	env.ssao_radius = 1.6
 	env.ssao_intensity = 1.2
 	env.ssao_power = 1.4
@@ -820,7 +820,7 @@ func _build_environment() -> void:
 	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	env.tonemap_exposure = 1.15
 	env.tonemap_white = 6.0
-	env.glow_enabled = true
+	env.glow_enabled = Cfg.graphics >= 1     # на низкой графике свечения нет
 	env.glow_intensity = 0.7
 	env.glow_strength = 1.0
 	env.glow_bloom = 0.04
@@ -845,6 +845,14 @@ func _build_environment() -> void:
 	sun.shadow_blur = 1.5
 	sun.shadow_opacity = 0.78     # тень не чёрная: в ней видно землю и траву
 	sun.directional_shadow_max_distance = 160.0
+	# средняя графика: 2 слоя теней до 120 м, низкая: 1 слой до 100 м (высокая — 4 слоя и 160 м, как решил Саня)
+	if Cfg.graphics == 1:
+		sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
+		sun.directional_shadow_split_1 = 0.5
+		sun.directional_shadow_max_distance = 120.0
+	elif Cfg.graphics == 0:
+		sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
+		sun.directional_shadow_max_distance = 100.0
 	add_child(sun)
 	sun_dir = sun.global_transform.basis.z.normalized()
 	# слабая подсветка с противоположной стороны, чтобы тени не были чёрными
@@ -1046,7 +1054,7 @@ func _build_ground() -> void:
 	mi.mesh = pm
 	mi.position = Vector3(r.get_center().x, 0, r.get_center().y)
 	var sm := ShaderMaterial.new()
-	sm.shader = GroundShader
+	sm.shader = _ground_shader()
 	sm.set_shader_parameter("ground_tex", ImageTexture.create_from_image(mask))
 	var biome := _ground_biome()
 	set_meta("ground_biome", biome)
@@ -1080,6 +1088,22 @@ func _build_ground() -> void:
 		ring.scale = Vector3(Cfg.base_radius, 0.2, Cfg.base_radius)
 		ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(ring)
+
+
+# шейдер земли под графику: на средней и низкой он проще (см. начало ground.gdshader).
+# Варианты собираются один раз за запуск игры
+static var _ground_shaders := {}
+
+
+func _ground_shader() -> Shader:
+	var define: String = Cfg.gfx("GFX_LOW", "GFX_MID", "")
+	if define == "":
+		return GroundShader
+	if not _ground_shaders.has(define):
+		var sh := Shader.new()
+		sh.code = GroundShader.code.insert(GroundShader.code.find("\n") + 1, "#define %s\n" % define)
+		_ground_shaders[define] = sh
+	return _ground_shaders[define]
 
 
 # столкновения стен и укрытий; как они выглядят, строят map_art.gd (скалы, края) и wall.gd (стены)
