@@ -221,10 +221,13 @@ func _add_row(box: VBoxContainer, g: Dictionary, key: String, label: String, hin
 	name_label.add_theme_font_size_override("font_size", 16)
 	row.add_child(name_label)
 
+	# расстояния и скорости (пояснение начинается с «метров» или «м/с») показываем в настоящих метрах:
+	# игра считает в единицах, 1 единица = Cfg.METERS_PER_UNIT м. Игра от этого не меняется
+	var k: float = Cfg.METERS_PER_UNIT if (hint.begins_with("метр") or hint.begins_with("м/с")) else 1.0
 	var slider := HSlider.new()
 	slider.focus_mode = Control.FOCUS_NONE
-	slider.min_value = vmin
-	slider.max_value = vmax
+	slider.min_value = vmin * k
+	slider.max_value = vmax * k
 	slider.step = step
 	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
@@ -248,11 +251,11 @@ func _add_row(box: VBoxContainer, g: Dictionary, key: String, label: String, hin
 	slider.value_changed.connect(func(val: float) -> void:
 		if _updating:
 			return
-		setter.call(val)
+		setter.call(val / k)
 		_refresh_row(key))
 
 	_rows[key] = {"slider": slider, "value": value_label, "reset": reset, "name": name_label,
-		"step": step, "is_int": is_int, "get": getter, "changed": changed, "group": g}
+		"step": step, "is_int": is_int and k == 1.0, "get": getter, "changed": changed, "group": g, "k": k}
 	g["keys"].append(key)
 	_refresh_row(key)
 
@@ -279,9 +282,9 @@ func _refresh_row(key: String, force := true) -> void:
 	r["last"] = v
 	r["last_changed"] = changed_now
 	_updating = true
-	r["slider"].set_value_no_signal(v)
+	r["slider"].set_value_no_signal(v * r["k"])
 	_updating = false
-	r["value"].text = _format(r, v)
+	r["value"].text = _format(r, v * r["k"])
 	r["reset"].modulate = Color(1, 1, 1, 1.0 if changed_now else 0.0)
 	r["reset"].disabled = not changed_now
 	r["name"].add_theme_color_override("font_color", Color(1.0, 0.8, 0.35) if changed_now else Color(1, 1, 1, 0.9))

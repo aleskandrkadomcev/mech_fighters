@@ -398,11 +398,12 @@ func _process(delta: float) -> void:
 	_deny_t = maxf(_deny_t - delta, 0.0)
 	_ammo_deny = maxf(_ammo_deny - delta, 0.0)
 
-	# патроны: ЛКМ и ПКМ
+	# патроны: ЛКМ и ПКМ (две одинаковые пушки при настройке «на ЛКМ» обе подписаны ЛКМ)
 	var parts: Array = []
+	var linked: bool = Cfg.link_guns > 0 and mech.weapons[0]["id"] == mech.weapons[1]["id"]
 	for i in 2:
 		var w: Dictionary = mech.weapons[i]
-		var key := "ЛКМ" if i == 0 else "ПКМ"
+		var key := "ЛКМ" if i == 0 or linked else "ПКМ"
 		var mx: float = mech.ammo_max(i)
 		if mx > 0.0:
 			parts.append("%s  %s  %d / %d" % [key, w["name"], int(mech.ammo[i]), int(mx)])

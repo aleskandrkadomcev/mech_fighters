@@ -240,6 +240,7 @@ func _build_settings() -> void:
 	_slider_row(col, "Тряска камеры", "shake", 0, 3)
 	_slider_row(col, "Темнота тумана", "fog_darkness", 0, 1)
 	_check_row(col, "Цифры урона", "damage_numbers")
+	_check_row(col, "Две одинаковые пушки — обе на ЛКМ (по очереди, рельсы залпом)", "link_guns")
 	var note := Label.new()
 	note.text = "Все остальные числа игры (мехи, оружие, турели, крипы, боты) — в бою на F2."
 	note.add_theme_font_size_override("font_size", 16)

@@ -3,6 +3,8 @@ extends Node3D
 ## пока её не засечёт омни-сенсор или пока она не сработала.
 ## Враг подходит ближе радиуса срабатывания: мина пищит и мигает, через задержку взрывается.
 ## Взрыв бьёт врагов (с замедлением) и обломки в радиусе.
+## Свои и вражеские мины выглядят по-разному: своя — гладкая шайба с зелёным огоньком,
+## вражеская — ржавая, с четырьмя штырями-взрывателями и красным огоньком. Огонёк есть и на антенне над травой.
 
 var team := 0
 var owner_mech: Node
@@ -13,11 +15,17 @@ var _arm := 0.0
 var _boom_in := 0.0
 var _light_mat: StandardMaterial3D
 var _t := 0.0
+var _on := Color(1, 0.2, 0.15)          # огонёк мигает этим цветом
+var _off := Color(0.35, 0.06, 0.05)
 
 
 func _ready() -> void:
 	add_to_group("mines")
 	_arm = p.get("arm_time", 1.0)
+	var friend: bool = team == Fx.player_team
+	if friend:
+		_on = Color(0.3, 1.0, 0.4)
+		_off = Color(0.05, 0.25, 0.08)
 	var body := MeshInstance3D.new()
 	var cm := CylinderMesh.new()
 	cm.top_radius = 0.7
@@ -26,11 +34,25 @@ func _ready() -> void:
 	cm.radial_segments = 16
 	body.mesh = cm
 	var bm := StandardMaterial3D.new()
-	bm.albedo_color = Color(0.2, 0.21, 0.2)
+	bm.albedo_color = Color(0.2, 0.22, 0.2) if friend else Color(0.27, 0.17, 0.12)
 	bm.roughness = 0.6
 	body.material_override = bm
 	body.position.y = 0.11
 	add_child(body)
+	if not friend:
+		# штыри-взрыватели: вражескую мину видно по силуэту, а не только по цвету
+		var pm := CylinderMesh.new()
+		pm.top_radius = 0.05
+		pm.bottom_radius = 0.07
+		pm.height = 0.32
+		pm.radial_segments = 6
+		for k in 4:
+			var prong := MeshInstance3D.new()
+			prong.mesh = pm
+			prong.material_override = bm
+			var a := TAU * k / 4.0 + PI / 4.0
+			prong.position = Vector3(cos(a) * 0.45, 0.32, sin(a) * 0.45)
+			add_child(prong)
 	var light := MeshInstance3D.new()
 	var lm := CylinderMesh.new()
 	lm.top_radius = 0.22
@@ -39,10 +61,31 @@ func _ready() -> void:
 	light.mesh = lm
 	_light_mat = StandardMaterial3D.new()
 	_light_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	_light_mat.albedo_color = Color(1.0, 0.2, 0.15)
+	_light_mat.albedo_color = _on
 	light.material_override = _light_mat
 	light.position.y = 0.26
 	add_child(light)
+	# антенна с огоньком над травой: иначе мину в густой траве не видно
+	var mast := MeshInstance3D.new()
+	var mm := CylinderMesh.new()
+	mm.top_radius = 0.025
+	mm.bottom_radius = 0.035
+	mm.height = 0.7
+	mm.radial_segments = 6
+	mast.mesh = mm
+	mast.material_override = bm
+	mast.position = Vector3(0.3, 0.55, 0.0)
+	add_child(mast)
+	var bulb := MeshInstance3D.new()
+	var sm := SphereMesh.new()
+	sm.radius = 0.09
+	sm.height = 0.18
+	sm.radial_segments = 8
+	sm.rings = 4
+	bulb.mesh = sm
+	bulb.material_override = _light_mat
+	bulb.position = Vector3(0.3, 0.92, 0.0)
+	add_child(bulb)
 
 
 func _physics_process(delta: float) -> void:
@@ -59,7 +102,7 @@ func _physics_process(delta: float) -> void:
 		_light_mat.albedo_color = Color(0.4, 0.4, 0.4)
 		return
 	# медленно мигает, пока ждёт
-	_light_mat.albedo_color = Color(1, 0.2, 0.15) if fmod(_t, 1.2) < 0.15 else Color(0.35, 0.06, 0.05)
+	_light_mat.albedo_color = _on if fmod(_t, 1.2) < 0.15 else _off
 	var tr: float = p.get("trigger_radius", 3.5)
 	for m in get_tree().get_nodes_in_group("mechs"):
 		if m.dead or m.team == team:

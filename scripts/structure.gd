@@ -496,14 +496,15 @@ func _fire() -> void:
 	Fx.spark(origin, dir, false, false)
 
 
-# снаряд навесом в точку, куда цель придёт (с лёгким упреждением); метку на земле видят все
-func _lob_at(m: Node3D, flight: float, radius: float, arc: float, payload: Dictionary, col: Color) -> void:
-	var to: Vector3 = m.global_position + m.velocity * flight * 0.5
-	to.y = 0.0
+# снаряд навесом в точку, куда цель придёт (с лёгким упреждением). Меток на земле нет:
+# подсказок в игре нет, снаряд видно только в полёте
+func _lob_at(m: Node3D, arc: float, payload: Dictionary) -> void:
 	var from := global_position + Vector3.UP * 6.0
+	var to: Vector3 = m.global_position
+	to.y = 0.0
+	to += m.velocity * Lob.flight_time(from, to, arc) * 0.5
 	var lob := Lob.new()
-	lob.setup(from, to, flight, arc, self, payload)
-	lob.marker = Fx.ground_marker(to, radius, col, team, flight + 0.5, true, false)
+	lob.setup(from, to, arc, self, payload)
 	get_tree().current_scene.add_child(lob)
 
 
@@ -513,8 +514,8 @@ func _try_emp() -> void:
 		return
 	_emp_cd = Parts.v(id, "emp_cooldown")
 	var r := Parts.v(id, "emp_radius")
-	_lob_at(m, Parts.v(id, "emp_flight"), r, 7.0, {"kind": "emp", "radius": r, "stun": Parts.v(id, "emp_stun"),
-		"no_regen": 2.0, "damage": Parts.v(id, "emp_damage")}, Color(0.4, 0.8, 1.0))
+	_lob_at(m, Parts.v(id, "emp_arc"), {"kind": "emp", "radius": r, "stun": Parts.v(id, "emp_stun"),
+		"no_regen": 2.0, "damage": Parts.v(id, "emp_damage")})
 	Sfx.play_at("launch", global_position, -4.0, 0.05)
 
 
@@ -524,8 +525,8 @@ func _try_mortar() -> void:
 		return
 	_mortar_cd = Parts.v(id, "mortar_cooldown")
 	var r := Parts.v(id, "mortar_radius")
-	_lob_at(m, Parts.v(id, "mortar_flight"), r, 22.0, {"kind": "explosive", "radius": r,
-		"damage": Parts.v(id, "mortar_damage"), "edge_damage": 0.3}, Color(1.0, 0.3, 0.15))
+	_lob_at(m, Parts.v(id, "mortar_arc"), {"kind": "explosive", "radius": r,
+		"damage": Parts.v(id, "mortar_damage"), "edge_damage": 0.3})
 	Sfx.play_at("mortar", global_position, 0.0, 0.05)
 	Fx.shake_at.emit(global_position, Cfg.shake_explosion * 0.3)
 	if _mortar != null:

@@ -1,6 +1,8 @@
 extends Node3D
 ## Снаряд навесом: граната гранатомёта, ЭМИ-граната турели 2 уровня, снаряд осадного орудия турели 3 уровня.
 ## Летит по дуге над укрытиями и срабатывает в точке падения. Ни обо что по пути не цепляется.
+## Баллистика настоящая: гравитация Cfg.gravity() (земная при масштабе Cfg.METERS_PER_UNIT),
+## время полёта считается из высоты дуги, поэтому граната и снаряд падают как настоящие.
 ## payload: kind "explosive" (урон по площади) или "emp" (урон + оглушение + энергия не растёт).
 
 var team := 0
@@ -9,7 +11,8 @@ var marker: Node3D             # метка на земле (у турелей),
 var _from := Vector3.ZERO
 var _to := Vector3.ZERO
 var _time := 1.0
-var _arc := 6.0
+var _vy := 0.0                 # скорость вверх при вылете
+var _g := 6.6
 var _t := 0.0
 var _p := {}
 var _body: MeshInstance3D
@@ -18,12 +21,21 @@ var _trail: CPUParticles3D
 static var _mats := {}
 
 
-# from: откуда, to: точка на земле, flight: секунд полёта, arc: высота дуги над прямой
-func setup(from: Vector3, to: Vector3, flight: float, arc: float, who: Node, payload: Dictionary) -> void:
+# сколько секунд летит снаряд из from в to, если в верхней точке он на arc выше более высокой из двух точек
+static func flight_time(from: Vector3, to: Vector3, arc: float) -> float:
+	var g: float = Cfg.gravity()
+	var top := maxf(from.y, to.y) + maxf(arc, 0.1)
+	return (sqrt(2.0 * g * (top - from.y)) + sqrt(2.0 * g * (top - to.y))) / g
+
+
+# from: откуда, to: точка на земле, arc: на сколько верхняя точка полёта выше более высокой из двух точек
+func setup(from: Vector3, to: Vector3, arc: float, who: Node, payload: Dictionary) -> void:
 	_from = from
 	_to = to
-	_time = maxf(flight, 0.15)
-	_arc = arc
+	_g = Cfg.gravity()
+	var top := maxf(from.y, to.y) + maxf(arc, 0.1)
+	_vy = sqrt(2.0 * _g * (top - from.y))
+	_time = flight_time(from, to, arc)
 	shooter = who
 	_p = payload
 	if who != null and "team" in who:
@@ -101,9 +113,9 @@ func _ready() -> void:
 
 
 func _pos_at(t: float) -> Vector3:
-	var k := clampf(t / _time, 0.0, 1.0)
-	var p := _from.lerp(_to, k)
-	p.y += 4.0 * _arc * k * (1.0 - k)
+	t = clampf(t, 0.0, _time)
+	var p := _from.lerp(_to, t / _time)     # по земле летит равномерно
+	p.y = _from.y + _vy * t - 0.5 * _g * t * t
 	return p
 
 

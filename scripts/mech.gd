@@ -1079,9 +1079,11 @@ func _update_spread(delta: float) -> void:
 # ------------------------------------------------------------------
 
 func _update_fire(delta: float) -> void:
+	# две одинаковые пушки (настройка «Одинаковые пушки на ЛКМ»): обе стреляют на любую кнопку мыши
+	var linked: bool = Cfg.link_guns > 0 and weapons.size() == 2 and weapons[0]["id"] == weapons[1]["id"]
 	for i in weapons.size():
 		var w: Dictionary = weapons[i]
-		var pressed := _fire if i == 0 else _fire2
+		var pressed := (_fire or _fire2) if linked else (_fire if i == 0 else _fire2)
 		var start: bool = pressed and not _fire_prev[i]
 		_fire_prev[i] = pressed
 		if start:
@@ -1102,8 +1104,8 @@ func _update_fire(delta: float) -> void:
 			rate *= lerpf(0.2, 1.0, _w_spin[i])
 			visual.spin(i, _w_spin[i], delta)
 		_w_timer[i] -= delta
-		# одинаковые пушки на обеих кнопках: при общей стрельбе бьют по очереди, а не залпом
-		if start and i == 1 and _fire and weapons[0]["id"] == w["id"]:
+		# одинаковые пушки стреляют по очереди (левая, правая), а не залпом; рельсы — залпом (выше, свой расчёт)
+		if start and i == 1 and (linked or _fire) and weapons[0]["id"] == w["id"]:
 			_w_timer[1] = maxf(_w_timer[1], 0.5 / maxf(rate, 0.1))
 		if not pressed or _w_timer[i] > 0.0:
 			continue
@@ -1212,9 +1214,10 @@ func _fire_lob(i: int, w: Dictionary) -> void:
 	var a := randf() * TAU
 	target += Vector3(cos(a), 0, sin(a)) * off * sqrt(randf())
 	target.y = 0.0
-	var flat := Vector2(target.x - origin.x, target.z - origin.z).length()
+	# близко — бросок пологий и быстрый, на полную дальность — дуга высотой arc
+	var arc: float = maxf(1.2, w["arc"] * dist / maxf(w_range(i), 1.0))
 	var lob := Lob.new()
-	lob.setup(origin, target, flat / maxf(w["bullet_speed"], 1.0), w["arc"], self, {
+	lob.setup(origin, target, arc, self, {
 		"kind": "explosive", "damage": w["damage"] * damage_mult(), "radius": w["radius"], "edge_damage": w["edge_damage"]})
 	get_tree().current_scene.add_child(lob)
 	_after_shot(i, w)

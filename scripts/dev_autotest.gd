@@ -36,6 +36,7 @@ var _target := ""                # --targetshot=fight|base|calm: постано�
 var _nohud := false              # без интерфейса и прицела на земле: чистый кадр
 var _actors: Array = []          # мехи постановки targetshot: [мех, в кого он стреляет]
 var _stuckcheck := false
+var _linktest := false           # две одинаковые пушки на ЛКМ: стреляют обе, по очереди; выключено — только левая
 var _railtest := false           # рельсотрон: луч должен лежать вдоль выстрела (баг «полоса поперёк карты»)
 var _gfxbench := false           # графика: драка у турели на каждом пресете подряд (бой перезапускается), снимок и замер кадров
 var _boom := false               # взрыв рядом с игроком на 5-м кадре (проверка следа гари)
@@ -88,6 +89,8 @@ func setup(main_node: Node3D, args: PackedStringArray) -> void:
 			_wallshot = true
 		elif a == "--railtest":
 			_railtest = true
+		elif a == "--linktest":
+			_linktest = true
 		elif a == "--gfxbench":
 			_gfxbench = true
 			Cfg.graphics = BENCH[_bench_i][1]     # setup идёт до постройки карты: бой строится уже с этой графикой
@@ -227,6 +230,8 @@ func _process(_delta: float) -> void:
 		_run_targetshot()
 	if _railtest:
 		_run_railtest()
+	if _linktest:
+		_run_linktest()
 	if _gfxbench:
 		_run_gfxbench()
 	if _boom and _frame == 5:
@@ -242,7 +247,7 @@ func _process(_delta: float) -> void:
 		var img := get_viewport().get_texture().get_image()
 		img.save_png("%s/f%04d.png" % [_shot_dir, shot_f])
 		_shots_left.erase(shot_f)
-		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and _mechexport == "" and not _gfxbench:
+		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and not _linktest and _mechexport == "" and not _gfxbench:
 			get_tree().quit()
 
 
@@ -416,7 +421,7 @@ func _run_paneltest() -> void:
 					g["box"].visible = true
 			panel._refresh_all()
 		20:
-			panel._rows["part:mech_assault:walk_speed"]["slider"].value = 8.3
+			panel._rows["part:mech_assault:walk_speed"]["slider"].value = 8.3 * Cfg.METERS_PER_UNIT   # ползунок в метрах
 			panel._rows["part:mod_rockets:count"]["slider"].value = 5
 			panel._rows["cfg:cam_distance"]["slider"].value = 44
 		25:
@@ -1366,6 +1371,8 @@ func _run_targetshot() -> void:
 			_stage_fight(m)
 		elif _target == "base":
 			_stage_base(m)
+		elif _target == "mines":
+			_stage_mines(m)
 	if _target == "calm":
 		_stage_calm(m)
 	# все стреляют в свои цели и не умирают, пока идёт съёмка
@@ -1445,6 +1452,22 @@ func _stage_base(m) -> void:
 	var hound = _stage_mech(main._spawn_bot(1), "mech_hound", ["shotgun", "grenade_launcher"], Vector3(100, 0.05, -5))
 	_actors = [[p, hq], [ally, hound], [hound, ally]]
 	_stage_creeps(0, 4, 94.0, -9.0)
+
+
+# мины: слева своя, справа вражеская (её «засёк» омни-сенсор), камера близко
+func _stage_mines(m) -> void:
+	m.global_position = Vector3(-46, 0.05, -30)
+	m.snap_interpolation(m)
+	m.demo = {"move": Vector2.ZERO, "fire": false, "aim": Vector3(-30, 1.5, -30)}
+	m.stats["omni"] = 20.0      # омни-сенсор засекает вражескую мину рядом
+	main.cam._started = false
+	for k in 2:
+		var mn = preload("res://scripts/mine.gd").new()
+		mn.team = k
+		mn.p = {"arm_time": 0.0, "trigger_radius": 0.1}
+		get_tree().current_scene.add_child(mn)
+		mn.global_position = Vector3(-54.0 + k * 4.0, 0.0, -31.0)
+		mn.seen = true
 
 
 # три спокойных места; камеру сразу ставим на меха, без доводки
@@ -1540,6 +1563,35 @@ func _run_gfxbench() -> void:
 	for l in _bench_out:
 		print(l)
 	get_tree().quit()
+
+
+# две автопушки, зажата только ЛКМ. С настройкой «на ЛКМ» стреляют обе, по очереди; без неё — только левая
+var _link_shots := [[], []]
+
+
+func _run_linktest() -> void:
+	var m = main.mech
+	if _frame == 3:
+		Cfg.creeps_enabled = 0
+		Cfg.link_guns = 1
+		m.set_build({"mech": "mech_assault", "core": "core_combat", "weapons": ["autocannon", "autocannon"], "modules": []})
+		m.global_position = Vector3(-8, 0.05, 10)
+		m.fired.connect(func(i: int) -> void: _link_shots[i].append(_frame))
+	if _frame >= 5:
+		m.demo = {"move": Vector2.ZERO, "fire": _frame < 125 or (_frame > 140 and _frame < 260), "fire2": false, "aim": m.global_position + Vector3(30, 1.5, 0)}
+	if _frame == 130:
+		var a: Array = _link_shots[0]
+		var b: Array = _link_shots[1]
+		var gap: int = (b[0] - a[0]) if not a.is_empty() and not b.is_empty() else -1
+		print("[LINK] на ЛКМ: левая %d выстрелов, правая %d, правая позже левой на %d кадров — %s" % [a.size(), b.size(), gap,
+			"ВЕРНО" if a.size() > 2 and b.size() > 2 and gap > 0 else "НЕ ТАК"])
+		_link_shots = [[], []]
+		Cfg.link_guns = 0
+	if _frame == 265:
+		print("[LINK] настройка выключена: левая %d выстрелов, правая %d — %s" % [_link_shots[0].size(), _link_shots[1].size(),
+			"ВЕРНО" if _link_shots[0].size() > 2 and _link_shots[1].is_empty() else "НЕ ТАК"])
+		Cfg.link_guns = 1
+		get_tree().quit()
 
 
 # рельсотрон стреляет вдоль линии (X), поперёк (Z) и по диагонали; меряем, куда вытянут нарисованный луч.

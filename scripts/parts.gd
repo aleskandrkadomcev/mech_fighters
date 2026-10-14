@@ -126,7 +126,7 @@ const DATA := {
 		"recoil": 0.18, "tracer": 0.32},
 	"grenade_launcher": {"slot": "weapon", "type": "lob", "look": "grenade", "name": "Гранатомёт",
 		"weight": 7.0, "energy": 5.0, "ammo": 30, "fire_rate": 0.9, "damage": 45.0, "radius": 4.5, "edge_damage": 0.35,
-		"bullet_speed": 28.0, "range": 38.0, "min_range": 6.0, "arc": 7.0,
+		"range": 38.0, "min_range": 6.0, "arc": 3.0,
 		"spread_stand": 1.0, "spread_walk": 3.0, "spread_run": 6.0, "spread_dash": 10.0,
 		"spread_per_shot": 1.0, "spread_shot_max": 3.0, "spread_grow": 30.0, "spread_shrink": 12.0,
 		"recoil": 0.4},
@@ -173,11 +173,11 @@ const DATA := {
 		"hp": 1200.0, "damage": 25.0, "fire_rate": 1.0, "range": 48.0, "bullet_speed": 95.0, "vision": 50.0, "hit_radius": 2.2},
 	"turret_t2": {"slot": "structure", "name": "Турель 2 уровня (ЭМИ-граната)",
 		"hp": 1800.0, "damage": 35.0, "fire_rate": 1.2, "range": 52.0, "bullet_speed": 100.0, "vision": 54.0, "hit_radius": 2.4,
-		"emp_cooldown": 9.0, "emp_range": 40.0, "emp_radius": 5.0, "emp_stun": 1.2, "emp_damage": 15.0, "emp_flight": 1.1},
+		"emp_cooldown": 9.0, "emp_range": 40.0, "emp_radius": 5.0, "emp_stun": 1.2, "emp_damage": 15.0, "emp_arc": 3.0},
 	"turret_t3": {"slot": "structure", "name": "Турель 3 уровня (у базы, осадное орудие)",
 		"hp": 2600.0, "damage": 45.0, "fire_rate": 1.4, "range": 56.0, "bullet_speed": 105.0, "vision": 58.0, "hit_radius": 2.6,
 		"mortar_cooldown": 5.0, "mortar_range": 75.0, "mortar_min_range": 14.0, "mortar_damage": 90.0, "mortar_radius": 6.0,
-		"mortar_flight": 1.7},
+		"mortar_arc": 12.0},
 	"hq": {"slot": "structure", "name": "Штаб",
 		"hp": 5000.0, "vision": 30.0, "hit_radius": 6.0, "barrier": 1.0},
 	"core": {"slot": "structure", "name": "Ядро штаба (Тесла)",
@@ -263,7 +263,7 @@ const FIELDS := {
 	"bullet_speed": ["Скорость снаряда", 5, 250, 1, "м/с"],
 	"range": ["Дальность", 5, 120, 1, "метров"],
 	"min_range": ["Мин. дальность", 0, 30, 0.5, "метров: ближе граната не падает"],
-	"arc": ["Высота дуги", 1, 30, 0.5, "метров: насколько высоко летит граната"],
+	"arc": ["Высота дуги", 0.5, 20, 0.5, "метров на полную дальность (ближе — ниже). Время полёта — по настоящей гравитации"],
 	"energy_per_shot": ["Энергия за выстрел", 0, 80, 0.5, "сколько энергии ест один выстрел"],
 	"pellets": ["Дробин в выстреле", 1, 20, 1, "штук"],
 	"pellet_spread": ["Разлёт дроби", 0, 30, 0.5, "градусов, половина конуса"],
@@ -305,13 +305,13 @@ const FIELDS := {
 	"emp_radius": ["ЭМИ-граната: радиус", 1, 15, 0.5, "метров"],
 	"emp_stun": ["ЭМИ-граната: оглушение", 0, 5, 0.1, "секунд"],
 	"emp_damage": ["ЭМИ-граната: урон", 0, 100, 1, ""],
-	"emp_flight": ["ЭМИ-граната: время полёта", 0.3, 3, 0.05, "секунд; метку видно, можно увернуться"],
+	"emp_arc": ["ЭМИ-граната: высота дуги", 0.5, 20, 0.5, "метров над турелью; время полёта — по настоящей гравитации"],
 	"mortar_cooldown": ["Осадное орудие: перезарядка", 1, 30, 0.5, "секунд"],
 	"mortar_range": ["Осадное орудие: дальность", 10, 120, 1, "метров"],
 	"mortar_min_range": ["Осадное орудие: мёртвая зона", 0, 40, 1, "метров: ближе не стреляет"],
 	"mortar_damage": ["Осадное орудие: урон", 0, 400, 5, "в центре"],
 	"mortar_radius": ["Осадное орудие: радиус", 1, 15, 0.5, "метров"],
-	"mortar_flight": ["Осадное орудие: время полёта", 0.5, 4, 0.05, "секунд; метку видно, можно увернуться"],
+	"mortar_arc": ["Осадное орудие: высота дуги", 1, 40, 0.5, "метров над турелью; время полёта — по настоящей гравитации"],
 	"charge": ["Тесла: зарядка", 0, 3, 0.05, "секунд от вспышки до удара молнии; можно успеть выйти из радиуса"],
 	"stun": ["Тесла: оглушение", 0, 5, 0.1, "секунд"],
 	"offset": ["Ядра: отступ вбок", 6, 30, 0.5, "метров от центра штаба (действует со следующего боя)"],
@@ -464,6 +464,11 @@ const BONUS_TEXT := {
 }
 
 
+# расстояние или скорость в настоящих метрах (игра считает в единицах, 1 единица = Cfg.METERS_PER_UNIT м)
+func _m(x: float) -> String:
+	return _n(snappedf(x * Cfg.METERS_PER_UNIT, 0.1))
+
+
 func _n(x: float) -> String:
 	if is_equal_approx(x, round(x)):
 		return str(int(round(x)))
@@ -492,7 +497,7 @@ func short_line(id: String) -> String:
 	var d: Dictionary = DATA[id]
 	match d["slot"]:
 		"mech":
-			return "%s HP · %s м/с · слотов %d" % [_n(v(id, "hp")), _n(v(id, "run_speed")), int(v(id, "slots"))]
+			return "%s HP · %s м/с · слотов %d" % [_n(v(id, "hp")), _m(v(id, "run_speed")), int(v(id, "slots"))]
 		"core":
 			return "энергия %s · +%s/с" % [_n(v(id, "energy_max")), _n(v(id, "energy_regen"))]
 		"weapon":
@@ -501,7 +506,7 @@ func short_line(id: String) -> String:
 				ammo = "энергия"
 			if d.get("type", "") == "beam":
 				ammo = "энергия"
-			return "%s урона/с · %s м · %s" % [_n(snappedf(weapon_dps(id), 1.0)), _n(v(id, "range")), ammo]
+			return "%s урона/с · %s м · %s" % [_n(snappedf(weapon_dps(id), 1.0)), _m(v(id, "range")), ammo]
 		"module":
 			var s := describe(id)
 			return s.split(" · ")[0] if s != "" else ""
@@ -517,12 +522,12 @@ func describe(id: String) -> String:
 		"mech":
 			out.append("%s, %s т, груз до %s т" % [d.get("class", ""), _n(v(id, "weight")), _n(v(id, "capacity"))])
 			out.append("%s HP" % _n(v(id, "hp")))
-			out.append("ход %s / бег %s м/с" % [_n(v(id, "walk_speed")), _n(v(id, "run_speed"))])
-			out.append("рывок %s м, кд %s с%s" % [_n(snappedf(v(id, "dash_speed") * v(id, "dash_time"), 0.1)), _n(v(id, "dash_cooldown")),
+			out.append("ход %s / бег %s м/с" % [_m(v(id, "walk_speed")), _m(v(id, "run_speed"))])
+			out.append("рывок %s м, кд %s с%s" % [_m(v(id, "dash_speed") * v(id, "dash_time")), _n(v(id, "dash_cooldown")),
 				(", зарядов %d" % int(v(id, "dash_charges"))) if v(id, "dash_charges") > 1.0 else ""])
 			out.append("модулей: %d" % int(v(id, "slots")))
-			out.append("хитбокс %s м" % _n(v(id, "hit_radius")))
-			out.append("обзор %s м, омни %s м" % [_n(v(id, "vision")), _n(v(id, "omni"))])
+			out.append("хитбокс %s м" % _m(v(id, "hit_radius")))
+			out.append("обзор %s м, омни %s м" % [_m(v(id, "vision")), _m(v(id, "omni"))])
 			if v(id, "resist_explosion") > 0.0:
 				out.append("%s урона от взрывов" % _pct(-v(id, "resist_explosion")))
 			if v(id, "resist_stun") > 0.0:
@@ -538,7 +543,7 @@ func describe(id: String) -> String:
 					out.append("%s урона/с" % _n(v(id, "dps")))
 					out.append("ест %s эн./с" % _n(v(id, "energy_per_sec")))
 				"lob":
-					out.append("граната %s урона, радиус %s м, навесом через укрытия" % [_n(v(id, "damage")), _n(v(id, "radius"))])
+					out.append("граната %s урона, радиус %s м, навесом через укрытия" % [_n(v(id, "damage")), _m(v(id, "radius"))])
 					out.append("%s выстр./с" % _n(v(id, "fire_rate")))
 				"rail":
 					out.append("%s урона, заряд %s с%s" % [_n(v(id, "damage")), _n(v(id, "charge_time")), ", насквозь" if v(id, "pierce") > 0.5 else ""])
@@ -549,7 +554,7 @@ func describe(id: String) -> String:
 						out.append("%s урона × %s/с = %s/с" % [_n(v(id, "damage")), _n(v(id, "fire_rate")), _n(v(id, "damage") * v(id, "fire_rate"))])
 					if v(id, "spin_up") > 0.0:
 						out.append("раскрутка %s с" % _n(v(id, "spin_up")))
-			out.append("%s м" % _n(v(id, "range")))
+			out.append("%s м" % _m(v(id, "range")))
 			if v(id, "ammo") > 0.0:
 				out.append("%s патронов" % _n(v(id, "ammo")))
 			if v(id, "energy_per_shot") > 0.0:
@@ -559,23 +564,23 @@ func describe(id: String) -> String:
 			out.append("%s HP" % _n(v(id, "hp")))
 			if v(id, "damage") > 0.0:
 				out.append("%s урона × %s/с" % [_n(v(id, "damage")), _n(v(id, "fire_rate"))])
-				out.append("дальность %s м" % _n(v(id, "range")))
-			out.append("обзор %s м" % _n(v(id, "vision")))
+				out.append("дальность %s м" % _m(v(id, "range")))
+			out.append("обзор %s м" % _m(v(id, "vision")))
 			if v(id, "emp_cooldown") > 0.0:
 				out.append("ЭМИ-граната: оглушение %s с раз в %s с" % [_n(v(id, "emp_stun")), _n(v(id, "emp_cooldown"))])
 			if v(id, "mortar_cooldown") > 0.0:
-				out.append("осадное орудие: %s урона раз в %s с, до %s м" % [_n(v(id, "mortar_damage")), _n(v(id, "mortar_cooldown")), _n(v(id, "mortar_range"))])
+				out.append("осадное орудие: %s урона раз в %s с, до %s м" % [_n(v(id, "mortar_damage")), _n(v(id, "mortar_cooldown")), _m(v(id, "mortar_range"))])
 		"module":
 			match d.get("ability", ""):
 				"rockets":
 					out.append("%d×%s урона" % [int(v(id, "count")), _n(v(id, "damage"))])
-					out.append("радиус %s м (край %s)" % [_n(v(id, "radius")), _pct(v(id, "edge_damage")).trim_prefix("+")])
-					out.append("до %s м" % _n(v(id, "range")))
+					out.append("радиус %s м (край %s)" % [_m(v(id, "radius")), _pct(v(id, "edge_damage")).trim_prefix("+")])
+					out.append("до %s м" % _m(v(id, "range")))
 				"emp":
 					out.append("%s урона + оглушение %s с" % [_n(v(id, "damage")), _n(v(id, "stun_time"))])
 					if v(id, "no_regen_time") > 0.0:
 						out.append("энергия врага не растёт %s с" % _n(v(id, "no_regen_time")))
-					out.append("радиус %s м" % _n(v(id, "radius")))
+					out.append("радиус %s м" % _m(v(id, "radius")))
 				"cloak":
 					out.append("невидимость %s с" % _n(v(id, "duration")))
 					if v(id, "break_on_fire") > 0.5:
@@ -584,16 +589,16 @@ func describe(id: String) -> String:
 					out.append("+%s HP за %s с (%s/с)" % [_n(v(id, "heal_per_sec") * v(id, "duration")), _n(v(id, "duration")), _n(v(id, "heal_per_sec"))])
 				"airstrike":
 					out.append("%s урона через %s с" % [_n(v(id, "damage")), _n(v(id, "delay"))])
-					out.append("радиус %s м (край %s)" % [_n(v(id, "radius")), _pct(v(id, "edge_damage")).trim_prefix("+")])
-					out.append("до %s м" % _n(v(id, "range")))
+					out.append("радиус %s м (край %s)" % [_m(v(id, "radius")), _pct(v(id, "edge_damage")).trim_prefix("+")])
+					out.append("до %s м" % _m(v(id, "range")))
 				"shield":
 					out.append("берёт %s урона" % _pct(v(id, "absorb")).trim_prefix("+"))
 					out.append("%s эн. за 1 урона" % _n(v(id, "energy_per_damage")))
 					out.append("держать %s эн./с" % _n(v(id, "upkeep")))
 				"mine":
-					out.append("%s урона, радиус %s м, замедление %s на %s с" % [_n(v(id, "damage")), _n(v(id, "radius")), _pct(v(id, "slow")).trim_prefix("+"), _n(v(id, "slow_time"))])
+					out.append("%s урона, радиус %s м, замедление %s на %s с" % [_n(v(id, "damage")), _m(v(id, "radius")), _pct(v(id, "slow")).trim_prefix("+"), _n(v(id, "slow_time"))])
 				"blink":
-					out.append("прыжок до %s м через %s с (стоишь)" % [_n(v(id, "range")), _n(v(id, "delay"))])
+					out.append("прыжок до %s м через %s с (стоишь)" % [_m(v(id, "range")), _n(v(id, "delay"))])
 			if d.get("ability", "") == "shield":
 				out.append("вкл. %s эн., кд %s с после выкл." % [_n(v(id, "cost")), _n(v(id, "cooldown"))])
 			elif d.has("ability"):
