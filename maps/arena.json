@@ -54,10 +54,6 @@
  ],
  "lanepoints": [],
  "decor": [
-  ["container", -52, -42, 0],
-  ["container", 42, 52, 90],
-  ["container", -42, -52, 90],
-  ["container", 52, 42, 0],
   ["crates", -53, -53, 0],
   ["crates", 53, 53, 90],
   ["crates", -53, -53, 90],

@@ -42,6 +42,7 @@ var _gfxbench := false           # графика: драка у турели н
 var _boom := false               # взрыв рядом с игроком на 5-м кадре (проверка следа гари)
 var _moba_secs := 60
 var _perf := false               # с mobatest: каждые 20 с сколько узлов, объектов, ресурсов и время кадра
+var _aimtest := false            # --aimtest: прицел (земля / середина хитбокса), пределы стволов, гранатомёт
 var _fancheck := false           # --fancheck: веер обзора с пропуском лучей совпадает с полным (все лучи)
 var _cpubench := false           # --cpubench: что сколько стоит в обычном бою (окно, по очереди выключает тени, траву, крипов...)
 var _prof := false               # --prof: сколько времени процессора берёт каждый вид объектов (раз в 10 с в лог)
@@ -146,6 +147,8 @@ func setup(main_node: Node3D, args: PackedStringArray) -> void:
 			_prof = true
 		elif a == "--fancheck":
 			_fancheck = true
+		elif a == "--aimtest":
+			_aimtest = true
 		elif a == "--cpubench" or a == "--cpubench-gpu":
 			_cpubench = true
 			CB_RUNS = CB_RUNS_GPU if a == "--cpubench-gpu" else CB_RUNS_CPU
@@ -207,6 +210,8 @@ func _process(_delta: float) -> void:
 		_run_cpubench()
 	if _fancheck and _frame == 10:
 		_run_fancheck()
+	if _aimtest:
+		_run_aimtest()
 	if _demo:
 		_run_demo()
 	if _inputtest:
@@ -274,7 +279,7 @@ func _process(_delta: float) -> void:
 		var img := get_viewport().get_texture().get_image()
 		img.save_png("%s/f%04d.png" % [_shot_dir, shot_f])
 		_shots_left.erase(shot_f)
-		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and not _linktest and _mechexport == "" and not _gfxbench and not _cpubench and not _fancheck:
+		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and not _linktest and _mechexport == "" and not _gfxbench and not _cpubench and not _fancheck and not _aimtest:
 			get_tree().quit()
 
 
@@ -2187,3 +2192,145 @@ func _run_fancheck() -> void:
 	print("[FAN] точек 400, лучей %d, из них пущено %d (%.0f%%), расхождений %d, худшее %.3f м — %s" % [total_rays, cast_rays,
 		100.0 * cast_rays / maxf(total_rays, 1), bad, worst, "ВЕРНО" if bad == 0 else "ОШИБКА"])
 	get_tree().quit()
+
+
+# ------------------------------------------------------------------
+#  Прицел и стрельба (--aimtest). Мех стоит в (0, -30) лицом к барьеру (0, -14), высота барьера 3,5.
+#  Пули и гранаты отслеживаются: где пропали (там и попали) и сколько летели.
+# ------------------------------------------------------------------
+
+var _at_track := {}      # id -> [узел, последняя позиция, кадр вылета, вид]
+var _at_done: Array = []  # [вид, где пропал, сколько кадров летел, скорость в начале]
+var _at_creep: Node3D
+var _at_fails := 0
+
+
+func _at_check(ok: bool, text: String) -> void:
+	print("[AIM] %s — %s" % [text, "ВЕРНО" if ok else "ОШИБКА"])
+	if not ok:
+		_at_fails += 1
+
+
+func _at_collect() -> void:
+	for c in main.get_children():
+		var sc = c.get_script()
+		if sc == null:
+			continue
+		var kind := ""
+		if sc == main.mech.Projectile:
+			kind = "bullet"
+		elif sc == main.mech.Lob:
+			kind = "lob"
+		if kind == "":
+			continue
+		var id := c.get_instance_id()
+		if not _at_track.has(id):
+			var v0: Vector3 = c.vel if kind == "bullet" else c._vel
+			_at_track[id] = [c, c.global_position, _frame, kind, v0]
+		else:
+			_at_track[id][1] = c.global_position
+	for id in _at_track.keys():
+		var e: Array = _at_track[id]
+		if not is_instance_valid(e[0]) or e[0].is_queued_for_deletion():
+			_at_done.append([e[3], e[1], _frame - e[2], e[4]])
+			_at_track.erase(id)
+
+
+func _at_shots(kind: String) -> Array:
+	var out := _at_done.filter(func(x): return x[0] == kind)
+	_at_done.clear()
+	return out
+
+
+func _run_aimtest() -> void:
+	var m = main.mech
+	var fwd := Vector3(0, 0, 1)
+	if _frame == 3:
+		Cfg.creeps_enabled = 0
+		m.set_build({"mech": "mech_fortress", "core": "core_combat", "weapons": ["autocannon", "grenade_launcher"], "modules": []})
+		m.global_position = Vector3(0, 0.05, -30)
+		m.torso_yaw = PI
+		m.legs_yaw = PI
+		m.shield_left = 0.0
+		m.snap_interpolation(m)
+		m.demo = {"move": Vector2.ZERO, "fire": false, "fire2": false, "aim": Vector3(0, 0, -18)}
+		print("[AIM] высота хитбокса Крепости %.2f" % m.get_hit_height())
+	if _frame < 5:
+		return
+	_at_collect()
+	var d: Dictionary = m.demo
+	m.ammo[0] = 99.0
+	m.ammo[1] = 99.0
+	# A: автопушка в землю на 12 м
+	if _frame == 40:
+		d["aim"] = Vector3(0, 0, -18)
+	d["fire"] = _frame >= 60 and _frame < 66
+	if _frame == 150:
+		var b := _at_shots("bullet")
+		var ok := not b.is_empty()
+		for x in b:
+			ok = ok and absf(x[1].z - (-18.0)) < 3.5 and x[1].y < 1.5
+		_at_check(ok, "выстрел в землю на 12 м: пули упали у точки (%s)" % ", ".join(b.map(func(x): return "z=%.1f y=%.1f" % [x[1].z, x[1].y])))
+		d["aim"] = Vector3(0, 0, -28)          # B: в упор (2 м)
+	d["fire"] = d["fire"] or (_frame >= 180 and _frame < 186)
+	if _frame == 270:
+		var b2 := _at_shots("bullet")
+		var ok2 := not b2.is_empty()
+		var angs := []
+		for x in b2:
+			var flat := Vector3(x[3].x, 0, x[3].z).normalized()
+			var ang := rad_to_deg(flat.angle_to(fwd))
+			angs.append("%.0f°" % ang)
+			ok2 = ok2 and ang <= 13.0 + 6.0 and x[1].z > -26.0
+		_at_check(ok2, "прицел в упор: стволы повёрнуты не больше 12° (+разброс): %s, пули ушли вперёд дальше 4 м" % ", ".join(angs))
+		# C: враг под курсором — прицел на середину его хитбокса
+		_at_creep = main.Creep.new()
+		_at_creep.team = 1
+		_at_creep.lane = "mid"
+		_at_creep.path = main.lane_path(1, "mid")
+		_at_creep.nav = main.nav
+		_at_creep.position = Vector3(5, 0, -18)
+		main.add_child(_at_creep)
+	if _frame == 280:
+		_at_creep.seen = true
+		var c: Vector3 = _at_creep.global_position
+		var o := c + Vector3(0, 45, 26)
+		var ap: Vector3 = m.aim_from_ray(o, (c + Vector3(0.3, 0.5, 0.2) - o).normalized())
+		_at_check(absf(ap.y - _at_creep.get_hit_height() * 0.5) < 0.05 and Vector2(ap.x - c.x, ap.z - c.z).length() < 0.1,
+			"курсор на крипе: прицел на середине его хитбокса (y=%.2f, высота крипа %.2f)" % [ap.y, _at_creep.get_hit_height()])
+		var o2 := Vector3(-6, 45, 0)
+		var ap2: Vector3 = m.aim_from_ray(o2, (Vector3(-6, 0, -22) - o2).normalized())
+		_at_check(absf(ap2.y) < 0.05, "курсор на земле: прицел на земле (y=%.2f)" % ap2.y)
+		d["aim"] = Vector3(c.x, c.y + _at_creep.get_hit_height() * 0.5, c.z)
+		_at_creep.set_meta("hp0", _at_creep.hp)
+	d["fire"] = d["fire"] or (_frame >= 300 and _frame < 330)
+	if _frame == 380:
+		_at_creep.stun(99.0)
+		_at_check(_at_creep.dead or _at_creep.hp < _at_creep.get_meta("hp0"), "стреляем в середину крипа: попадания есть (здоровье %d из %d)" % [int(_at_creep.hp), int(_at_creep.get_meta("hp0"))])
+		_at_shots("bullet")
+		if is_instance_valid(_at_creep):
+			_at_creep.queue_free()
+		d["aim"] = Vector3(0, 0, -20)           # D: граната в землю на 10 м
+	d["fire2"] = (_frame >= 400 and _frame < 402) or (_frame >= 520 and _frame < 522) or (_frame >= 640 and _frame < 642)
+	if _frame == 500:
+		var g := _at_shots("lob")
+		var ok3 := g.size() >= 1
+		for x in g:
+			ok3 = ok3 and absf(x[1].z - (-20.0)) < 3.0 and x[2] < 40
+		_at_check(ok3, "граната на 10 м перед барьером: упала у точки быстро (%s)" % ", ".join(g.map(func(x): return "z=%.1f y=%.1f за %.2f с" % [x[1].z, x[1].y, x[2] / 60.0])))
+		d["aim"] = Vector3(0, 0, -10)           # E: сразу за барьером
+	if _frame == 620:
+		var g2 := _at_shots("lob")
+		var ok4 := g2.size() >= 1
+		for x in g2:
+			ok4 = ok4 and x[1].z < -12.5 and x[1].z > -16.5 and x[1].y > 0.2
+		_at_check(ok4, "граната сразу за барьер: врезалась в барьер (%s)" % ", ".join(g2.map(func(x): return "z=%.1f y=%.1f" % [x[1].z, x[1].y])))
+		d["aim"] = Vector3(0, 0, 20)            # F: далеко за барьер (дальше дальности)
+	if _frame == 760:
+		var g3 := _at_shots("lob")
+		var ok5 := g3.size() >= 1
+		for x in g3:
+			ok5 = ok5 and x[1].z > -12.0 and x[1].y < 1.0
+		_at_check(ok5, "граната вдаль: перелетела барьер и упала на землю (%s)" % ", ".join(g3.map(func(x): return "z=%.1f за %.2f с" % [x[1].z, x[2] / 60.0])))
+		print("[AIM] итог: %s" % ("ВСЁ ВЕРНО" if _at_fails == 0 else "ошибок %d" % _at_fails))
+		get_tree().quit()

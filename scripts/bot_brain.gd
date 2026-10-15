@@ -78,6 +78,9 @@ func on_damaged() -> void:
 		_want_dodge = true
 
 
+const AIM_IDLE_Y := 1.5     # высота прицела, когда бот просто смотрит по сторонам
+
+
 func think(delta: float) -> void:
 	_time += delta
 	_dodge_cd = maxf(_dodge_cd - delta, 0.0)
@@ -200,7 +203,7 @@ func think(delta: float) -> void:
 				wr = w
 		if wr != null:
 			var wp: Vector3 = wr.global_position
-			mech.aim_point = Vector3(wp.x, Cfg.aim_height, wp.z)
+			mech.aim_point = Vector3(wp.x, wp.y + wr.get_hit_height() * 0.5, wp.z)
 			var wd := (wp - pos).normalized()
 			if mech.torso_forward().dot(Vector3(wd.x, 0, wd.z).normalized()) > 0.9:
 				mech._fire = true
@@ -310,7 +313,7 @@ func _think_aim(delta: float, target: CharacterBody3D, pos: Vector3, tpos: Vecto
 	var aim_dir := _aim - pos
 	aim_dir.y = 0
 	var aimed := pos + aim_dir.rotated(Vector3.UP, deg_to_rad(Cfg.bot_aim_error) * wobble)
-	aimed.y = Cfg.aim_height
+	aimed.y = target.global_position.y + target.get_hit_height() * 0.5     # в середину хитбокса
 	mech.aim_point = aimed
 
 
@@ -609,7 +612,7 @@ func _think_roam(delta: float, pos: Vector3) -> Vector3:
 		var togo := _last_seen - pos
 		togo.y = 0
 		if togo.length() > 3.0:
-			mech.aim_point = Vector3(_last_seen.x, Cfg.aim_height, _last_seen.z)
+			mech.aim_point = Vector3(_last_seen.x, AIM_IDLE_Y, _last_seen.z)
 			return _follow_path(delta, pos, _last_seen, togo.normalized())
 	if main == null:
 		return Vector3.ZERO
@@ -635,7 +638,7 @@ func _think_roam(delta: float, pos: Vector3) -> Vector3:
 	if to_obj > mech.weapon_range() + 10.0:
 		var wp: Vector3 = main.lane_waypoint(mech.team, lane, pos)
 		if wp.distance_to(pos) > 6.0:
-			mech.aim_point = Vector3(wp.x, Cfg.aim_height, wp.z)
+			mech.aim_point = Vector3(wp.x, AIM_IDLE_Y, wp.z)
 			mech._run = mech.energy > 40.0
 			return _follow_path(delta, pos, wp, (wp - pos).normalized())
 	return _attack_object(delta, pos, obj, mech.weapon_range() * 0.8)
@@ -656,7 +659,7 @@ func _think_loot(delta: float, pos: Vector3) -> Vector3:
 		_loot_skip[pid] = true
 		_loot_id = 0
 	var tp: Vector3 = pk.global_position
-	mech.aim_point = Vector3(tp.x, Cfg.aim_height, tp.z)
+	mech.aim_point = Vector3(tp.x, AIM_IDLE_Y, tp.z)
 	return _follow_path(delta, pos, tp, (tp - pos).normalized())
 
 
@@ -693,7 +696,7 @@ func _think_hunt(delta: float, pos: Vector3) -> Vector3:
 	if to.length() < 3.0:
 		return Vector3.ZERO
 	mech._run = to.length() > 25.0 and mech.energy > 40.0
-	mech.aim_point = Vector3(goal.x, Cfg.aim_height, goal.z)
+	mech.aim_point = Vector3(goal.x, AIM_IDLE_Y, goal.z)
 	return _follow_path(delta, pos, goal, to.normalized())
 
 
@@ -773,7 +776,7 @@ func _attack_object(delta: float, pos: Vector3, obj: Node3D, reach: float) -> Ve
 	var dist: float = to.length() - obj.get_hit_radius()
 	var dir := to.normalized()
 	var los := _has_los(pos, tp)
-	mech.aim_point = Vector3(tp.x, Cfg.aim_height, tp.z)
+	mech.aim_point = Vector3(tp.x, tp.y + (obj.get_hit_height() * 0.5 if obj.has_method("get_hit_height") else 1.0), tp.z)
 	if dist > reach or not los:
 		mech._run = dist > 30.0 and mech.energy > 40.0
 		return _follow_path(delta, pos, tp, dir)

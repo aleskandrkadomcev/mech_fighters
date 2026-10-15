@@ -11,6 +11,7 @@ var weight := 60.0              # тонн, от этого зависит, ка
 var radius := 1.8
 var loot := 1                   # сколько припасов выпадет (0 = случайно от 1 до loot_max)
 var is_crate := false
+var height := 2.0               # настоящая высота обломка или ящика (по ней попадают пули)
 var _vel := Vector3.ZERO
 var _visual: Node3D
 var _smoke: CPUParticles3D
@@ -30,14 +31,15 @@ func _ready() -> void:
 	_cs = cs
 	var cyl := CylinderShape3D.new()
 	cyl.radius = radius
-	cyl.height = Cfg.hitbox_height
+	cyl.height = height
 	cs.shape = cyl
-	cs.position = Vector3(0, Cfg.hitbox_height * 0.5 + 0.15, 0)    # чуть над полом, чтобы не цеплять землю
+	cs.position = Vector3(0, height * 0.5 + 0.15, 0)    # чуть над полом, чтобы не цеплять землю
 	add_child(cs)
 
 
 # обломок из меха: забираем его модель как есть и роняем
-func setup_wreck(visual: Node3D, vel: Vector3, mech_weight: float, r: float) -> void:
+func setup_wreck(visual: Node3D, vel: Vector3, mech_weight: float, r: float, h := 3.0) -> void:
+	height = h
 	hp = Cfg.wreck_hp
 	weight = maxf(mech_weight, 5.0)
 	radius = r * 0.85
@@ -176,6 +178,10 @@ func shove(offset: Vector3, depth := 0) -> float:
 
 func get_hit_radius() -> float:
 	return radius
+
+
+func get_hit_height() -> float:
+	return height
 
 
 func take_damage(amount: float, _pos: Vector3, _dir: Vector3, _kind := "", _src: Node = null) -> void:

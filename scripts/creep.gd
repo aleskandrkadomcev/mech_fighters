@@ -84,7 +84,7 @@ func get_hit_radius() -> float:
 
 
 func get_hit_height() -> float:
-	return Cfg.hitbox_height * 0.5
+	return 1.6      # настоящая высота танка с башней
 
 
 func vision_radius() -> float:
@@ -331,7 +331,8 @@ func _fire() -> void:
 	var tp: Vector3 = _target.global_position
 	var spd := Parts.v(ID, "bullet_speed")
 	var aim: Vector3 = tp + _target.velocity * (origin.distance_to(tp) / maxf(spd, 1.0)) * 0.5
-	aim.y = origin.y
+	# в середину хитбокса цели по высоте
+	aim.y = tp.y + (_target.get_hit_height() * 0.5 if _target.has_method("get_hit_height") else 1.0)
 	var dir: Vector3 = (aim - origin).normalized().rotated(Vector3.UP, randf_range(-0.04, 0.04))
 	if not _clear_shot(global_position, tp) and not _target.is_in_group("structures"):
 		return

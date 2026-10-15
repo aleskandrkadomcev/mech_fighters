@@ -64,6 +64,7 @@ var _rammed := {}               # кого уже ударил этим рывк
 var _snap_next := true          # мех телепортировался или модель новая: не сглаживать переход между тиками
 
 var aim_point := Vector3(0, 0, -10)
+var _hit_h := 0.0               # высота хитбокса по модели (0 — ещё не мерили)
 var ability_aim_override = null # бот может указать точку для ракет отдельно от прицела пушек
 var torso_yaw := 0.0
 var legs_yaw := 0.0
@@ -222,6 +223,7 @@ func _apply_build() -> void:
 		# мехи без краски команды: свой/чужой видно по полоске здоровья и нику над мехом
 		visual.build(Cfg.mech_accent, Color(1, 1, 1), look, team == 0)
 		visual.footstep.connect(_on_footstep)
+		_hit_h = 0.0      # новая модель: высоту хитбокса перемерить
 		_fade = 0.0
 		_snap_next = true
 		dash_stock = minf(dash_stock, stats["dash_charges"])
@@ -268,9 +270,21 @@ func get_hit_radius() -> float:
 	return stats.get("hit_radius", 1.9)
 
 
-# игра плоская: хитбокс это высокий столб, чтобы любой ствол на любой высоте попадал
+# хитбокс — столб настоящей высоты меха (по модели, меряется после постройки)
 func get_hit_height() -> float:
-	return Cfg.hitbox_height
+	if _hit_h > 0.0:
+		return _hit_h
+	return 2.37 * stats.get("legs_scale", 1.0) + 1.7 * stats.get("hull_scale", 1.0)
+
+
+func _measure_height() -> float:
+	var top := 0.0
+	for mi in visual.find_children("*", "MeshInstance3D", true, false):
+		if not mi.visible or mi.mesh == null or mi.top_level:
+			continue
+		var bb: AABB = mi.global_transform * mi.get_aabb()
+		top = maxf(top, bb.end.y - global_position.y)
+	return clampf(top, 2.0, 8.0)
 
 
 func max_hp() -> float:
@@ -581,7 +595,10 @@ func _physics_process(delta: float) -> void:
 	_update_fire(delta)
 	_update_abilities(delta)
 	visual.stunned = is_stunned()
+	_aim_guns()
 	visual.update_visual(delta, global_position, velocity, legs_yaw, torso_yaw, is_dashing())
+	if _hit_h <= 0.0:
+		_hit_h = _measure_height()
 	if _snap_next:
 		_snap_next = false
 		snap_interpolation(self)
@@ -629,11 +646,24 @@ func _read_player() -> void:
 
 	if camera != null and not Cfg.ui_hover:
 		var mp := get_viewport().get_mouse_position()
-		var o := camera.project_ray_origin(mp)
-		var d := camera.project_ray_normal(mp)
-		var hit = Plane(Vector3.UP, Cfg.aim_height).intersects_ray(o, d)
-		if hit != null:
-			aim_point = hit
+		aim_point = aim_from_ray(camera.project_ray_origin(mp), camera.project_ray_normal(mp))
+
+
+# куда целится игрок: курсор на видимом враге (мех, крип, постройка) — в середину его хитбокса
+# по высоте; иначе — в точку на земле (стрельба вслепую, граната под ноги)
+func aim_from_ray(o: Vector3, d: Vector3) -> Vector3:
+	var q := PhysicsRayQueryParameters3D.create(o, o + d * 500.0, 4)
+	q.collide_with_areas = true
+	q.collide_with_bodies = false
+	q.exclude = Fx.team_rids(team)
+	var hit := get_world_3d().direct_space_state.intersect_ray(q)
+	if not hit.is_empty():
+		var u = hit["collider"].get("mech")
+		if u != null and is_instance_valid(u) and u.get("seen") != false and u.has_method("get_hit_height"):
+			var c: Vector3 = u.global_position
+			return Vector3(c.x, c.y + u.get_hit_height() * 0.5, c.z)
+	var g = Plane(Vector3.UP, 0.0).intersects_ray(o, d)
+	return g if g != null else aim_point
 
 
 # ------------------------------------------------------------------
@@ -1150,16 +1180,57 @@ func _pay_shot(i: int, w: Dictionary) -> void:
 		energy = maxf(energy - w["energy_per_shot"], 0.0)
 
 
-func _aim_dir(origin: Vector3, spread_deg: float, random := true) -> Vector3:
-	# оба ствола сводятся в точку, куда смотрит корпус
-	var conv := global_position + torso_forward() * aim_distance()
-	var dir := conv - origin
-	dir.y = 0
-	dir = dir.normalized()
-	var s := deg_to_rad(spread_deg)
+# Стволы смотрят туда, куда смотрит корпус, на дальность прицела и на его высоту (земля или
+# середина хитбокса врага). Доворачиваются в стороны и вверх-вниз только в пределах, сводятся
+# не ближе GUN_MIN_DIST: в упор между стволами не стреляем, пули не вылетают поперёк
+const GUN_YAW_MAX := 12.0        # градусов в сторону от корпуса
+const GUN_PITCH_MIN := -30.0     # градусов вниз
+const GUN_PITCH_MAX := 20.0      # градусов вверх
+const GUN_MIN_DIST := 8.0        # ближе этого стволы не сводятся
+
+
+# точка, в которую сводятся стволы
+func gun_target() -> Vector3:
+	var t := global_position + torso_forward() * maxf(aim_distance(), GUN_MIN_DIST)
+	t.y = aim_point.y
+	return t
+
+
+# поворот ствола от корпуса: x — в сторону, y — вверх-вниз (радианы, в пределах)
+func _gun_angles(origin: Vector3, target: Vector3) -> Vector2:
+	var fwd := torso_forward()
+	var v := target - origin
+	var flat := Vector3(v.x, 0, v.z)
+	var yaw := 0.0
+	if flat.length() > 0.01:
+		yaw = clampf(fwd.signed_angle_to(flat.normalized(), Vector3.UP), -deg_to_rad(GUN_YAW_MAX), deg_to_rad(GUN_YAW_MAX))
+	var pitch := clampf(atan2(v.y, maxf(flat.length(), 0.01)), deg_to_rad(GUN_PITCH_MIN), deg_to_rad(GUN_PITCH_MAX))
+	return Vector2(yaw, pitch)
+
+
+func _dir_from(a: Vector2) -> Vector3:
+	var flat := torso_forward().rotated(Vector3.UP, a.x)
+	return (flat * cos(a.y) + Vector3.UP * sin(a.y)).normalized()
+
+
+# направление выстрела из ствола (с разбросом влево-вправо)
+func _gun_dir(origin: Vector3, spread_deg: float, random := true) -> Vector3:
+	var dir := _dir_from(_gun_angles(origin, gun_target()))
 	if random:
-		return dir.rotated(Vector3.UP, (randf() + randf() - 1.0) * s)
+		var s := deg_to_rad(spread_deg)
+		dir = dir.rotated(Vector3.UP, (randf() + randf() - 1.0) * s)
 	return dir
+
+
+# модель: стволы поворачиваются туда же, куда полетят пули
+func _aim_guns() -> void:
+	var t := gun_target()
+	for i in mini(visual.gun_pods.size(), weapons.size()):
+		var a := _gun_angles(visual.gun_pods[i].global_position, t)
+		if weapons[i]["type"] == "lob":
+			a.y = _lob_pitch(visual.gun_pods[i].global_position, t, weapons[i])
+		visual.gun_yaw[i] = a.x
+		visual.gun_pitch[i] = a.y
 
 
 # если ствол упёрся в стену, выстрел не должен пройти сквозь неё
@@ -1181,7 +1252,7 @@ func _fire_bullet(i: int, w: Dictionary) -> void:
 			var spread: float = weapon_spread_deg(i)
 			if n > 1:
 				spread += w["pellet_spread"]
-			var dir := _aim_dir(origin, spread)
+			var dir := _gun_dir(origin, spread)
 			var p := Projectile.new()
 			p.setup(origin, dir * w["bullet_speed"], w["damage"] * damage_mult(), w_range(i), self)
 			p.tracer = w["tracer"]
@@ -1212,23 +1283,39 @@ func _after_shot(i: int, w: Dictionary) -> void:
 	fired.emit(i)
 
 
-# гранатомёт: граната летит навесом через укрытия и падает туда, куда смотрит прицел
+# гранатомёт: граната вылетает с постоянной скоростью, ствол сам поднимается или опускается под
+# точку прицела (под ноги — вниз, вдаль — чуть вверх), летит по настоящей баллистике и рвётся о то,
+# во что врежется: стену, меха, крипа, обломок или землю. Низкую стену может перелететь
 func _fire_lob(i: int, w: Dictionary) -> void:
 	var origin: Vector3 = visual.get_muzzle(i)
-	var dist := clampf(aim_distance(), w["min_range"], w_range(i))
-	var target := Vector3(global_position.x, 0, global_position.z) + torso_forward() * dist
-	# разброс: точка падения гуляет тем сильнее, чем дальше и чем больше разброс
-	var off := tan(deg_to_rad(weapon_spread_deg(i))) * dist
-	var a := randf() * TAU
-	target += Vector3(cos(a), 0, sin(a)) * off * sqrt(randf())
-	target.y = 0.0
-	# близко — бросок пологий и быстрый, на полную дальность — дуга высотой arc
-	var arc: float = maxf(1.2, w["arc"] * dist / maxf(w_range(i), 1.0))
+	var t := gun_target()
+	var flat := Vector3(t.x - global_position.x, 0, t.z - global_position.z)
+	if flat.length() > w_range(i):
+		t = Vector3(global_position.x, t.y, global_position.z) + flat.normalized() * w_range(i)
+	var a := _gun_angles(origin, t)
+	a.y = _lob_pitch(origin, t, w)
+	var dir := _dir_from(a)
+	var s := deg_to_rad(weapon_spread_deg(i))
+	dir = dir.rotated(Vector3.UP, (randf() + randf() - 1.0) * s)
 	var lob := Lob.new()
-	lob.setup(origin, target, arc, self, {
+	lob.setup_ballistic(origin, dir * w["launch_speed"], self, {
 		"kind": "explosive", "damage": w["damage"] * damage_mult(), "radius": w["radius"], "edge_damage": w["edge_damage"]})
 	get_tree().current_scene.add_child(lob)
 	_after_shot(i, w)
+
+
+# угол ствола гранатомёта, чтобы граната с его скоростью вылета упала в точку (низкая траектория).
+# Не долетает — максимальный угол
+func _lob_pitch(origin: Vector3, t: Vector3, w: Dictionary) -> float:
+	var v: float = maxf(w["launch_speed"], 1.0)
+	var g: float = Cfg.gravity()
+	var x := Vector2(t.x - origin.x, t.z - origin.z).length()
+	var y := t.y - origin.y
+	var disc := v * v * v * v - g * (g * x * x + 2.0 * y * v * v)
+	var ang := deg_to_rad(GUN_PITCH_MAX)
+	if disc >= 0.0 and x > 0.01:
+		ang = atan((v * v - sqrt(disc)) / (g * x))
+	return clampf(ang, deg_to_rad(GUN_PITCH_MIN), deg_to_rad(GUN_PITCH_MAX))
 
 
 # рельсотрон: держишь кнопку, он заряжается и сам стреляет, когда заряд полный.
@@ -1260,7 +1347,7 @@ func rail_charge(i: int) -> float:
 
 func _fire_rail(i: int, w: Dictionary) -> void:
 	var origin: Vector3 = visual.get_muzzle(i)
-	var dir := _aim_dir(origin, weapon_spread_deg(i))
+	var dir := _gun_dir(origin, weapon_spread_deg(i))
 	var end := origin + dir * w_range(i)
 	var blocked := _muzzle_blocked(origin)
 	if not blocked.is_empty():
@@ -1305,7 +1392,7 @@ func _update_beam(i: int, w: Dictionary, delta: float, pressed: bool) -> void:
 	var origin: Vector3 = visual.get_muzzle(i)
 	# луч слегка гуляет: на ходу сильнее
 	var wobble := deg_to_rad(weapon_spread_deg(i)) * sin(Time.get_ticks_msec() * 0.007 + i * 1.7)
-	var dir := _aim_dir(origin, 0.0, false).rotated(Vector3.UP, wobble)
+	var dir := _gun_dir(origin, 0.0, false).rotated(Vector3.UP, wobble)
 	var end: Vector3 = origin + dir * w_range(i)
 	var normal: Vector3 = -dir
 	var target = null

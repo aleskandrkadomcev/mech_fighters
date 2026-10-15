@@ -539,7 +539,7 @@ func _on_mech_died(who: Node3D) -> void:
 		team_kills[1 - who.team] += 1
 	# обломок: забирает модель меха, едет по инерции, оседает и дымит
 	var w := Wreck.new()
-	w.setup_wreck(who.detach_visual(), who.death_velocity, who.stats.get("weight", 60.0), who.get_hit_radius())
+	w.setup_wreck(who.detach_visual(), who.death_velocity, who.stats.get("weight", 60.0), who.get_hit_radius(), who.get_hit_height() * 0.7)
 	add_child(w)
 	w.global_position = Vector3(who.global_position.x, 0, who.global_position.z)
 	Mech.snap_interpolation(w)
@@ -1224,6 +1224,7 @@ func _block(pos: Vector3, size: Vector3) -> void:
 	body.collision_layer = 1
 	body.collision_mask = 0
 	body.position = pos
+	body.set_meta("top", pos.y + size.y * 0.5)     # настоящая высота: граната её перелетает
 	add_child(body)
 	# стена для выстрелов выше, чем на вид: игра плоская, перестрелять через укрытие сверху нельзя
 	var cs := CollisionShape3D.new()

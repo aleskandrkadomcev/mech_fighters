@@ -1,7 +1,7 @@
 extends MeshInstance3D
-## Прицел на земле. Кольцо показывает, куда реально смотрят стволы,
-## а его размер это текущий разброс. Две линии от меха это края конуса.
-## Маленькая точка это курсор (куда корпус ещё доворачивает).
+## Прицел. Кольцо показывает, куда сводятся стволы (на земле или на середине хитбокса врага под
+## курсором, не ближе GUN_MIN_DIST), а его размер это текущий разброс. Две линии от меха это края
+## конуса. Маленькая точка это курсор (куда корпус ещё доворачивает).
 
 var mech: Node3D
 var _im: ImmediateMesh
@@ -28,11 +28,11 @@ func _process(_delta: float) -> void:
 	_im.clear_surfaces()
 	if mech == null or mech.dead:
 		return
-	var y := Cfg.aim_height
+	var y := maxf(mech.aim_point.y, 0.06)
 	var origin: Vector3 = mech.get_global_transform_interpolated().origin
 	origin.y = y
 	var fwd: Vector3 = mech.torso_forward()
-	var dist: float = mech.aim_distance()
+	var dist: float = maxf(mech.aim_distance(), mech.GUN_MIN_DIST)
 	var center := origin + fwd * dist
 	var spread: float = deg_to_rad(mech.get_spread_deg())
 
@@ -59,8 +59,8 @@ func _process(_delta: float) -> void:
 			if k > 0.01:
 				_arc(center, 1.1 + i * 0.25, 0.12, k, Color(0.5, 0.9, 1.0, 0.95))
 		elif mech.weapons[i]["type"] == "lob":
-			# гранатомёт: куда упадёт граната (не ближе и не дальше его дальности)
-			var dl := clampf(dist, mech.weapons[i]["min_range"], mech.w_range(i))
+			# гранатомёт: куда полетит граната (не дальше его дальности)
+			var dl := minf(dist, mech.w_range(i))
 			_ring(origin + fwd * dl, 0.5, 0.06, Color(1.0, 0.7, 0.3, 0.6))
 	# края конуса разброса
 	var faint := Color(col.r, col.g, col.b, 0.22)

@@ -71,10 +71,6 @@
   [96, 50, "bot"]
  ],
  "decor": [
-  ["container", -76, -36, 90],
-  ["container", -76, 36, -90],
-  ["container", 76, -36, -90],
-  ["container", 76, 36, 90],
   ["generator", -20, -38, 0],
   ["generator", -20, 38, 0],
   ["generator", 20, -38, 0],
@@ -87,10 +83,6 @@
   ["generator", -106, 30, -90],
   ["generator", 106, -30, -90],
   ["generator", 106, 30, 90],
-  ["container", -40, -66, 90],
-  ["container", -40, 66, -90],
-  ["container", 40, -66, -90],
-  ["container", 40, 66, 90],
   ["antenna", -10, -66, 0],
   ["antenna", -10, 66, 0],
   ["antenna", 10, -66, 0],

@@ -45,6 +45,8 @@ var hs := 1.0                    # масштаб корпуса
 var legs_root: Node3D
 var torso: Node3D
 var gun_pods: Array[Node3D] = []
+var gun_yaw := [0.0, 0.0]        # поворот стволов от корпуса (ставит mech.gd): в сторону и вверх-вниз
+var gun_pitch := [0.0, 0.0]
 var muzzles: Array[Node3D] = []
 var flashes: Array[MeshInstance3D] = []
 var beams: Array[MeshInstance3D] = []
@@ -979,6 +981,7 @@ func update_visual(delta: float, body_pos: Vector3, vel: Vector3, legs_yaw: floa
 	for i in 2:
 		gun_kick[i] *= exp(-16.0 * delta)
 		gun_pods[i].position.z = _pod_z[i] + gun_kick[i]
+		gun_pods[i].rotation = Vector3(gun_pitch[i], gun_yaw[i], 0.0)
 		flash_t[i] -= delta
 		flashes[i].visible = flash_t[i] > 0.0
 		missile_flash_t[i] -= delta

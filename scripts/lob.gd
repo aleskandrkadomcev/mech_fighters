@@ -1,6 +1,8 @@
 extends Node3D
 ## Снаряд навесом: граната гранатомёта, ЭМИ-граната турели 2 уровня, снаряд осадного орудия турели 3 уровня.
-## Летит по дуге над укрытиями и срабатывает в точке падения. Ни обо что по пути не цепляется.
+## Турели (setup): летит по дуге над укрытиями и срабатывает в точке падения, ни обо что не цепляется.
+## Гранатомёт меха (setup_ballistic): вылетает с постоянной скоростью и рвётся о то, во что врежется:
+## стену (по её настоящей высоте — низкую может перелететь), меха, крипа, обломок или землю.
 ## Баллистика настоящая: гравитация Cfg.gravity() (земная при масштабе Cfg.METERS_PER_UNIT),
 ## время полёта считается из высоты дуги, поэтому граната и снаряд падают как настоящие.
 ## payload: kind "explosive" (урон по площади) или "emp" (урон + оглушение + энергия не растёт).
@@ -15,6 +17,9 @@ var _vy := 0.0                 # скорость вверх при вылете
 var _g := 6.6
 var _t := 0.0
 var _p := {}
+var _ballistic := false        # гранатомёт меха: настоящая баллистика и удар о преграды
+var _vel := Vector3.ZERO
+var _exclude: Array[RID] = []
 var _body: MeshInstance3D
 var _trail: CPUParticles3D
 
@@ -42,6 +47,19 @@ func setup(from: Vector3, to: Vector3, arc: float, who: Node, payload: Dictionar
 		team = who.team
 
 
+func setup_ballistic(from: Vector3, vel: Vector3, who: Node, payload: Dictionary) -> void:
+	_from = from
+	_to = from
+	_vel = vel
+	_ballistic = true
+	_g = Cfg.gravity()
+	_time = 8.0          # не дольше (если улетела за край карты)
+	shooter = who
+	_p = payload
+	if who != null and "team" in who:
+		team = who.team
+
+
 static func _m(key: String, c: Color, unshaded := false) -> StandardMaterial3D:
 	if _mats.has(key):
 		return _mats[key]
@@ -58,6 +76,8 @@ static func _m(key: String, c: Color, unshaded := false) -> StandardMaterial3D:
 
 func _ready() -> void:
 	add_to_group("lobs")
+	if _ballistic:
+		_exclude = Fx.team_rids(team)       # свои мехи и постройки для гранаты прозрачны
 	var big: bool = _p.get("kind", "") == "explosive" and _p.get("radius", 4.0) > 5.0
 	var emp: bool = _p.get("kind", "") == "emp"
 	_body = MeshInstance3D.new()
@@ -120,6 +140,9 @@ func _pos_at(t: float) -> Vector3:
 
 
 func _physics_process(delta: float) -> void:
+	if _ballistic:
+		_fly_ballistic(delta)
+		return
 	_t += delta
 	var p := _pos_at(_t)
 	var nxt := _pos_at(_t + 0.03)
@@ -139,8 +162,45 @@ func blast_radius() -> float:
 	return _p.get("radius", 4.0)
 
 
+func _fly_ballistic(delta: float) -> void:
+	_t += delta
+	var from := global_position
+	_vel.y -= _g * delta
+	var to := from + _vel * delta
+	var hit := _cast(from, to)
+	if not hit.is_empty():
+		_to = hit["position"]
+		_land()
+		return
+	global_position = to
+	if _vel.length() > 0.01:
+		_body.look_at(to + _vel, Vector3.UP if absf(_vel.normalized().y) < 0.98 else Vector3.RIGHT)
+	if _t >= _time or to.y < -2.0:
+		_to = to
+		_land()
+
+
+# во что граната врезается на отрезке: стены (по настоящей высоте), хитбоксы, обломки, земля
+func _cast(from: Vector3, to: Vector3) -> Dictionary:
+	var q := PhysicsRayQueryParameters3D.create(from, to, 1 | 4 | 16)
+	q.collide_with_areas = true
+	var ex: Array[RID] = _exclude.duplicate()
+	for k in 4:
+		q.exclude = ex
+		var hit := get_world_3d().direct_space_state.intersect_ray(q)
+		if hit.is_empty():
+			return hit
+		var col = hit["collider"]
+		# у стен и скал столкновение для пуль выше, чем на вид: граната летит над настоящей высотой
+		if col is Object and col.has_meta("top") and hit["position"].y > float(col.get_meta("top")) + 0.05:
+			ex.append(hit["rid"])
+			continue
+		return hit
+	return {}
+
+
 func _land() -> void:
-	var pos := Vector3(_to.x, 0.3, _to.z)
+	var pos := Vector3(_to.x, maxf(_to.y, 0.3) if _ballistic else 0.3, _to.z)
 	var radius: float = _p.get("radius", 4.0)
 	var src: Node = shooter if is_instance_valid(shooter) else null
 	if _p.get("kind", "") == "emp":

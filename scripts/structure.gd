@@ -101,8 +101,13 @@ func get_hit_radius() -> float:
 	return Parts.v(id, "hit_radius")
 
 
+# настоящая высота постройки
 func get_hit_height() -> float:
-	return Cfg.hitbox_height
+	if id == "hq":
+		return 13.0
+	if id == "core":
+		return 7.2
+	return 5.0
 
 
 func vision_radius() -> float:
@@ -481,10 +486,12 @@ func _pick_mech(min_r: float, max_r: float) -> Node3D:
 # куда турель стреляет: в цель с лёгким упреждением, ровно горизонтально
 func _aim_dir() -> Vector3:
 	var origin: Vector3 = _muzzle.global_position
-	var aim: Vector3 = _target.global_position + Vector3.UP * (origin.y - _target.global_position.y)
+	var tp: Vector3 = _target.global_position
+	var aim: Vector3 = tp
 	var spd := Parts.v(id, "bullet_speed")
 	aim += _target.velocity * (origin.distance_to(aim) / maxf(spd, 1.0)) * 0.7
-	aim.y = origin.y
+	# в середину хитбокса цели по высоте
+	aim.y = tp.y + (_target.get_hit_height() * 0.5 if _target.has_method("get_hit_height") else 1.0)
 	return (aim - origin).normalized()
 
 

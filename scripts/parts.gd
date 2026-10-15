@@ -126,7 +126,7 @@ const DATA := {
 		"recoil": 0.18, "tracer": 0.32},
 	"grenade_launcher": {"slot": "weapon", "type": "lob", "look": "grenade", "name": "Гранатомёт",
 		"weight": 7.0, "energy": 5.0, "ammo": 30, "fire_rate": 0.9, "damage": 45.0, "radius": 4.5, "edge_damage": 0.35,
-		"range": 38.0, "min_range": 6.0, "arc": 3.0,
+		"range": 38.0, "launch_speed": 30.0,
 		"spread_stand": 1.0, "spread_walk": 3.0, "spread_run": 6.0, "spread_dash": 10.0,
 		"spread_per_shot": 1.0, "spread_shot_max": 3.0, "spread_grow": 30.0, "spread_shrink": 12.0,
 		"recoil": 0.4},
@@ -262,8 +262,7 @@ const FIELDS := {
 	"damage": ["Урон", 0, 300, 0.5, ""],
 	"bullet_speed": ["Скорость снаряда", 5, 250, 1, "м/с"],
 	"range": ["Дальность", 5, 120, 1, "метров"],
-	"min_range": ["Мин. дальность", 0, 30, 0.5, "метров: ближе граната не падает"],
-	"arc": ["Высота дуги", 0.5, 20, 0.5, "метров на полную дальность (ближе — ниже). Время полёта — по настоящей гравитации"],
+	"launch_speed": ["Скорость гранаты", 10, 150, 1, "м/с при вылете: быстрее — дуга площе и граната быстрее долетает. Ствол сам поднимается под точку прицела"],
 	"energy_per_shot": ["Энергия за выстрел", 0, 80, 0.5, "сколько энергии ест один выстрел"],
 	"pellets": ["Дробин в выстреле", 1, 20, 1, "штук"],
 	"pellet_spread": ["Разлёт дроби", 0, 30, 0.5, "градусов, половина конуса"],
@@ -339,7 +338,7 @@ const MECH_STATS := ["capacity", "hp", "hit_radius", "vision", "omni", "torso_tu
 	"armor_flat", "regen_hp", "regen_delay", "brace_bonus", "brace_time", "ram_damage", "ram_stun"]
 const WEAPON_STATS := ["ammo", "fire_rate", "damage", "bullet_speed", "range", "spread_stand", "spread_walk", "spread_run",
 	"spread_dash", "spread_per_shot", "spread_shot_max", "spread_grow", "spread_shrink", "recoil", "tracer",
-	"dps", "energy_per_sec", "energy_per_shot", "pellets", "pellet_spread", "falloff", "min_range", "arc",
+	"dps", "energy_per_sec", "energy_per_shot", "pellets", "pellet_spread", "falloff", "launch_speed",
 	"radius", "edge_damage", "charge_time", "pierce", "spin_up"]
 const ABILITY_STATS := ["cost", "cooldown", "count", "salvo_delay", "speed", "range", "damage", "radius",
 	"edge_damage", "scatter", "stun_time", "no_regen_time",
@@ -543,7 +542,7 @@ func describe(id: String) -> String:
 					out.append("%s урона/с" % _n(v(id, "dps")))
 					out.append("ест %s эн./с" % _n(v(id, "energy_per_sec")))
 				"lob":
-					out.append("граната %s урона, радиус %s м, навесом через укрытия" % [_n(v(id, "damage")), _m(v(id, "radius"))])
+					out.append("граната %s урона, радиус %s м, по дуге, рвётся о преграду" % [_n(v(id, "damage")), _m(v(id, "radius"))])
 					out.append("%s выстр./с" % _n(v(id, "fire_rate")))
 				"rail":
 					out.append("%s урона, заряд %s с%s" % [_n(v(id, "damage")), _n(v(id, "charge_time")), ", насквозь" if v(id, "pierce") > 0.5 else ""])

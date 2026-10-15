@@ -107,8 +107,11 @@ func _box(size: Vector3, pos: Vector3, mat: Material) -> void:
 	_visual.add_child(mi)
 
 
+const HEIGHT := 3.0      # настоящая высота мишени
+
+
 func _apply_height() -> void:
-	_h = Cfg.hitbox_height
+	_h = HEIGHT
 	_box_shape.size = Vector3(2.4, _h, 2.2)
 	_hit_mesh.size = _box_shape.size
 	_shape.position = Vector3(0, _h * 0.5, 0)
@@ -162,7 +165,7 @@ func _respawn() -> void:
 
 func _physics_process(delta: float) -> void:
 	_hit_vis.visible = Cfg.show_hitboxes
-	if _h != Cfg.hitbox_height:
+	if _h != HEIGHT:
 		_apply_height()
 	var base := BASE_COLOR
 	if _stun > 0.0:
