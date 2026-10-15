@@ -16,7 +16,9 @@ func setup(main_node: Node3D, vision_node: Node, map_rect: Rect2, covers: Array,
 	vision = vision_node
 	_rect = map_rect
 	custom_minimum_size = size_px
-	size = size_px
+	# прижата к левому нижнему углу (hud.gd): высоту отсчитываем от нижнего края, а не вниз за экран
+	offset_top = offset_bottom - size_px.y
+	offset_right = offset_left + size_px.x
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 	# картинка карты: пол и стены (перерисовывается, когда ломают стену)

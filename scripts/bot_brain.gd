@@ -11,6 +11,8 @@ extends RefCounted
 ##   получил попадание         -> иногда рывок в сторону
 ##   цель невидима             -> идёт туда, где видел её последний раз
 ##   абилки                    -> атакующие по цели, щит под огнём, ремонт и невидимость/блинк когда мало здоровья
+## В PvP (мехи против мехов, без баз) бот не уходит на базу: врага рядом нет — идёт к врагу, которого
+## видит его команда, или обходит карту; патроны кончились — бежит к припасам.
 ## Все пороги и шансы лежат в настройках, группа "Боты".
 
 var mech: CharacterBody3D
@@ -44,6 +46,8 @@ var dbg := ""                 # что бот сейчас делает (для 
 var _loot_id := 0
 var _loot_t := 0.0
 var _loot_skip := {}
+var _hunt := Vector3.ZERO      # PvP: куда бот идёт искать врагов
+var _hunt_t := 0.0
 
 
 func _init() -> void:
@@ -65,6 +69,7 @@ func reset() -> void:
 	_since_hit = 99.0
 	_last_seen_t = 99.0
 	_retreat = false
+	_hunt_t = 0.0
 
 
 func on_damaged() -> void:
@@ -88,12 +93,12 @@ func think(delta: float) -> void:
 	_think_defense()
 	var pos := mech.global_position
 	var hp_k: float = mech.hp / maxf(mech.max_hp(), 1.0)
-	# отход на базу: мало здоровья или кончились патроны
+	# отход на базу: мало здоровья или кончились патроны (в PvP базы нет, бот не отходит)
 	if _retreat:
 		var home: Vector3 = main.base_center(mech.team) if main != null else pos
-		if (hp_k >= 0.9 and mech.ammo_ratio() >= 0.85) or home.distance_to(pos) > 1e6:
+		if (hp_k >= 0.9 and mech.ammo_ratio() >= 0.85) or home.distance_to(pos) > 1e6 or Battle.pvp:
 			_retreat = false
-	elif hp_k < Cfg.bot_retreat_hp or (mech.ammo_ratio() < 0.03 and not _has_beam()):
+	elif not Battle.pvp and (hp_k < Cfg.bot_retreat_hp or _out_of_ammo()):
 		_retreat = true
 	# далеко от базы и надо чиниться: телепорт (если рядом нет врагов, иначе собьют)
 	if _retreat and mech.can_tp() and main != null and main.base_center(mech.team).distance_to(pos) > 60.0 and _since_hit > 2.0:
@@ -136,7 +141,11 @@ func think(delta: float) -> void:
 			if mech.dash_cd <= 0.0:
 				mech.press_dash()
 		else:
-			move = _think_move(delta, pos, tpos, dir, dist, los)
+			# PvP: патроны кончились — сперва к припасам рядом, если они есть
+			if Battle.pvp and _out_of_ammo():
+				move = _think_loot(delta, pos)
+			if move == Vector3.ZERO:
+				move = _think_move(delta, pos, tpos, dir, dist, los)
 	else:
 		_aim_ready = false
 		var creep := _find_creep(pos)
@@ -557,6 +566,11 @@ func _has_beam() -> bool:
 	return false
 
 
+# стрелять нечем: патроны кончились, а лазера (он без патронов) нет
+func _out_of_ammo() -> bool:
+	return mech.ammo_ratio() < 0.03 and not _has_beam()
+
+
 func _go_home(delta: float, pos: Vector3) -> Vector3:
 	if main == null:
 		return Vector3.ZERO
@@ -576,23 +590,12 @@ func _think_roam(delta: float, pos: Vector3) -> Vector3:
 			mech.aim_point = pos + mv * 10.0
 		return mv
 	# припасы рядом, которые нужны
-	var pk := _find_pickup(pos)
-	if pk != null:
-		# не дошёл за 8 секунд: значит не добраться, забываем про этот припас
-		dbg = "loot"
-		var pid: int = pk.get_instance_id()
-		if pid != _loot_id:
-			_loot_id = pid
-			_loot_t = 0.0
-		_loot_t += delta
-		if _loot_t > 8.0:
-			_loot_skip[pid] = true
-			_loot_id = 0
-		var tp: Vector3 = pk.global_position
-		mech.aim_point = Vector3(tp.x, Cfg.aim_height, tp.z)
-		return _follow_path(delta, pos, tp, (tp - pos).normalized())
-	# обломок рядом, а патроны на исходе: разбить его ради припасов
-	if mech.ammo_ratio() < 0.35:
+	var loot := _think_loot(delta, pos)
+	if loot != Vector3.ZERO:
+		return loot
+	# обломок или ящик рядом, а патроны на исходе: разбить его ради припасов
+	# (в PvP раньше: патроны пополнять больше негде)
+	if mech.ammo_ratio() < (0.6 if Battle.pvp else 0.35) and not _out_of_ammo():
 		var wr := _find_wreck(pos)
 		if wr != null:
 			dbg = "wreck"
@@ -606,6 +609,8 @@ func _think_roam(delta: float, pos: Vector3) -> Vector3:
 			return _follow_path(delta, pos, _last_seen, togo.normalized())
 	if main == null:
 		return Vector3.ZERO
+	if Battle.pvp:
+		return _think_hunt(delta, pos)
 	# ничья или чужая точка интереса рядом: встать на неё и захватить
 	for poi in mech.get_tree().get_nodes_in_group("pois"):
 		if poi.owner_team == mech.team:
@@ -630,6 +635,88 @@ func _think_roam(delta: float, pos: Vector3) -> Vector3:
 			mech._run = mech.energy > 40.0
 			return _follow_path(delta, pos, wp, (wp - pos).normalized())
 	return _attack_object(delta, pos, obj, mech.weapon_range() * 0.8)
+
+
+# припас рядом, который нужен: идём подбирать. Не дошёл за 8 секунд — значит не добраться, забываем про него
+func _think_loot(delta: float, pos: Vector3) -> Vector3:
+	var pk := _find_pickup(pos)
+	if pk == null:
+		return Vector3.ZERO
+	dbg = "loot"
+	var pid: int = pk.get_instance_id()
+	if pid != _loot_id:
+		_loot_id = pid
+		_loot_t = 0.0
+	_loot_t += delta
+	if _loot_t > 8.0:
+		_loot_skip[pid] = true
+		_loot_id = 0
+	var tp: Vector3 = pk.global_position
+	mech.aim_point = Vector3(tp.x, Cfg.aim_height, tp.z)
+	return _follow_path(delta, pos, tp, (tp - pos).normalized())
+
+
+# PvP: врага рядом не видно — ищем. Если врага видит кто-то из своей команды, идём к нему.
+# Иначе к месту, куда сейчас упадёт ящик (если патронов меньше половины), или обходим карту
+func _think_hunt(delta: float, pos: Vector3) -> Vector3:
+	var goal := Vector3.ZERO
+	var known := _nearest_seen_enemy(pos)
+	var crate = main.crate_warning_pos()
+	if known != null:
+		dbg = "hunt"
+		goal = known.global_position
+	elif crate != null and mech.ammo_ratio() < 0.5:
+		dbg = "crate"
+		goal = crate
+	else:
+		dbg = "search"
+		_hunt_t -= delta
+		var near := Vector3(_hunt.x - pos.x, 0, _hunt.z - pos.z).length() < 6.0
+		if _hunt_t <= 0.0 or near:
+			_hunt = _pick_hunt_point(pos)
+			_hunt_t = randf_range(8.0, 14.0)
+		goal = _hunt
+	var to := goal - pos
+	to.y = 0
+	if to.length() < 3.0:
+		return Vector3.ZERO
+	mech._run = to.length() > 25.0 and mech.energy > 40.0
+	mech.aim_point = Vector3(goal.x, Cfg.aim_height, goal.z)
+	return _follow_path(delta, pos, goal, to.normalized())
+
+
+# ближайший враг, которого сейчас видит команда бота (на любом расстоянии)
+func _nearest_seen_enemy(pos: Vector3) -> Node3D:
+	var best: Node3D = null
+	var best_d := 1e9
+	for m in mech.get_tree().get_nodes_in_group("mechs"):
+		if m.team == mech.team or m.dead or m.is_landing():
+			continue
+		if not main.is_visible_to(mech.team, m):
+			continue
+		var d: float = m.global_position.distance_to(pos)
+		if d < best_d:
+			best_d = d
+			best = m
+	return best
+
+
+# куда пойти искать врагов: случайное проходимое место, половина точек ближе к центру карты;
+# не у своей точки появления и не прямо под ногами
+func _pick_hunt_point(pos: Vector3) -> Vector3:
+	var r: Rect2 = main.map_rect().grow(-8.0)
+	var center := Vector3(r.get_center().x, 0, r.get_center().y)
+	var home: Vector3 = main.base_center(mech.team)
+	for i in 16:
+		var p := Vector3(randf_range(r.position.x, r.end.x), 0, randf_range(r.position.y, r.end.y))
+		if randf() < 0.5:
+			p = p.lerp(center, 0.5)
+		if nav != null and not nav.is_free(p):
+			continue
+		if p.distance_to(home) < 25.0 or p.distance_to(pos) < 15.0:
+			continue
+		return p
+	return center
 
 
 # стоит на точке: чуть переминается, чтобы не торчать столбом

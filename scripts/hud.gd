@@ -204,10 +204,10 @@ func add_minimap(mm: Control) -> void:
 	mm.offset_right = 384
 
 
-func show_game_over(won: bool) -> void:
+func show_game_over(won: bool, draw := false) -> void:
 	_over.visible = true
-	_over.text = "ПОБЕДА" if won else "ПОРАЖЕНИЕ"
-	_over.add_theme_color_override("font_color", Color(0.5, 1.0, 0.5) if won else Color(1.0, 0.4, 0.35))
+	_over.text = "НИЧЬЯ" if draw else ("ПОБЕДА" if won else "ПОРАЖЕНИЕ")
+	_over.add_theme_color_override("font_color", Color(1.0, 0.85, 0.4) if draw else (Color(0.5, 1.0, 0.5) if won else Color(1.0, 0.4, 0.35)))
 
 
 func bind(m: Node3D) -> void:
@@ -225,9 +225,9 @@ func _rebuild_slots() -> void:
 	for c in _slot_row.get_children():
 		c.queue_free()
 	_slots.clear()
-	# рывок и телепорт есть у всех: отдельные слоты слева
+	# рывок и телепорт есть у всех: отдельные слоты слева (в PvP базы нет — и телепорта нет)
 	_dash_slot = _make_slot(_slot_row, -1, "Пробел", "Рывок")
-	_tp_slot = _make_slot(_slot_row, -1, "T", "На базу")
+	_tp_slot = {} if Battle.pvp else _make_slot(_slot_row, -1, "T", "На базу")
 	var gap := Control.new()
 	gap.custom_minimum_size = Vector2(14, 0)
 	_slot_row.add_child(gap)
@@ -237,7 +237,7 @@ func _rebuild_slots() -> void:
 
 func _set_hint() -> void:
 	if _hint_full:
-		_hint.text = "WASD ходьба   Shift бег   Пробел рывок   T на базу\nЛКМ / ПКМ пушки   Q E R F C V G X абилки   B ангар\nF2 настройки   F3 хитбоксы   F1 цифры   Колесо зум\nAlt+клик метка   H скрыть подсказку   Esc меню"
+		_hint.text = "WASD ходьба   Shift бег   Пробел рывок" + ("" if Battle.pvp else "   T на базу") + "\nЛКМ / ПКМ пушки   Q E R F C V G X абилки   B ангар\nF2 настройки   F3 хитбоксы   F1 цифры   Колесо зум\nAlt+клик метка   H скрыть подсказку   Esc меню"
 	else:
 		_hint.text = "H  подсказка"
 
@@ -430,7 +430,11 @@ func _process(delta: float) -> void:
 		for p in get_tree().get_nodes_in_group("pois"):
 			if p.owner_team == mech.team:
 				bonus.append("%s: %s" % [p.title, p.bonus_text()])
-		_score.text = "Убито: %d    Смертей: %d    Турели: наши %d, вражеские %d" % [main.kills, main.deaths, main.structures_left(mech.team), main.structures_left(1 - mech.team)]
+		if main.pvp:
+			_score.text = "Свои %d : %d Враги   (до %d)\nУбито: %d    Смертей: %d" % [main.team_kills[mech.team], main.team_kills[1 - mech.team],
+				Cfg.pvp_kills_to_win, main.kills, main.deaths]
+		else:
+			_score.text = "Убито: %d    Смертей: %d    Турели: наши %d, вражеские %d" % [main.kills, main.deaths, main.structures_left(mech.team), main.structures_left(1 - mech.team)]
 		if not bonus.is_empty():
 			_score.text += "\n" + "    ".join(bonus)
 		if mech.dead:
@@ -439,8 +443,12 @@ func _process(delta: float) -> void:
 		else:
 			_death.visible = false
 
-	# таймер боя и отметка попадания
-	_timer.text = Battle.time_text()
+	# таймер боя (в PvP — сколько осталось) и отметка попадания
+	if main != null and main.pvp:
+		var left := int(ceil(main.time_left()))
+		_timer.text = "%d:%02d" % [left / 60, left % 60]
+	else:
+		_timer.text = Battle.time_text()
 	_hitmark_t = maxf(_hitmark_t - delta, 0.0)
 	_hitmark.position = get_viewport().get_mouse_position() - _hitmark.size * 0.5
 	_hitmark.queue_redraw()
@@ -452,9 +460,10 @@ func _process(delta: float) -> void:
 		if mech.dash_stock < 1.0:
 			dk = clampf(mech.dash_cd / maxf(mech.stats["dash_cooldown"], 0.01), 0.0, 1.0)
 		_slot_state(_dash_slot, dk, ("%.1f" % mech.dash_cd) if mech.dash_stock < 1.0 else "", "×%d" % int(mech.dash_stock) if chm > 1.0 else "", 0.0)
-		var tk := clampf(mech.tp_cd / maxf(Cfg.tp_cooldown, 0.01), 0.0, 1.0)
-		var tp_txt := ("%.0f" % mech.tp_cd) if mech.tp_cd > 0.05 else ""
-		_slot_state(_tp_slot, tk, tp_txt, "", mech.tp_left)
+		if not _tp_slot.is_empty():
+			var tk := clampf(mech.tp_cd / maxf(Cfg.tp_cooldown, 0.01), 0.0, 1.0)
+			var tp_txt := ("%.0f" % mech.tp_cd) if mech.tp_cd > 0.05 else ""
+			_slot_state(_tp_slot, tk, tp_txt, "", mech.tp_left)
 
 	# энергия
 	var en: float = mech.energy

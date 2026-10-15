@@ -516,7 +516,7 @@ func press_tp() -> void:
 
 
 func can_tp() -> bool:
-	return not dead and tp_cd <= 0.0 and tp_left <= 0.0 and not is_landing()
+	return not dead and tp_cd <= 0.0 and tp_left <= 0.0 and not is_landing() and not Battle.pvp     # в PvP базы нет
 
 
 func press_ability(index: int) -> void:

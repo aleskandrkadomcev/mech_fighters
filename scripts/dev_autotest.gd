@@ -131,6 +131,9 @@ func setup(main_node: Node3D, args: PackedStringArray) -> void:
 			_bots = int(a.trim_prefix("--enemies="))
 		elif a.begins_with("--secs="):
 			_moba_secs = int(a.trim_prefix("--secs="))
+		elif a.begins_with("--map="):
+			# карта из папки maps: --map=arena (PvP) или --map=classic
+			Maps.selected = "res://maps/%s.json" % a.trim_prefix("--map=")
 		elif a == "--perf":
 			_perf = true
 		elif a == "--cloaktest":
@@ -798,6 +801,8 @@ func _run_mobatest() -> void:
 						cols.append((c.name + ":" + c.get_class() + str(c.global_position.round()) + " L" + str(c.collision_layer)) if c != null else "null")
 					line += " cols=%s vel=%s y=%.2f stun=%.1f slow=%.1f walk=%.1f floor=%s coldis=%s dash=%.2f" % [str(cols), b.velocity.round(), b.global_position.y, b.stun_left, b.slow_left, b.walk_speed(), b.is_on_floor(), b._col.disabled, b.dash_left]
 		line += " creeps=%d time=%s" % [get_tree().get_nodes_in_group("creeps").size(), Battle.time_text()]
+		if main.pvp:
+			line += " pvp=%d:%d left=%ds" % [main.team_kills[0], main.team_kills[1], int(main.time_left())]
 		line += " wrecks=%d pickups=%d mines=%d" % [get_tree().get_nodes_in_group("wrecks").size(), get_tree().get_nodes_in_group("pickups").size(), get_tree().get_nodes_in_group("mines").size()]
 		for p in get_tree().get_nodes_in_group("pois"):
 			line += " %s=%d" % [p.title, p.owner_team]

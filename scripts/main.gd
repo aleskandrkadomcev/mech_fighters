@@ -7,6 +7,9 @@ extends Node3D
 ## Убитый мех превращается в обломок: его можно толкать и разбить, тогда выпадут припасы.
 ## Мехи появляются, прилетая с неба. Клавиша T: телепорт на свою базу.
 ## Своя команда: ты и союзные боты. Враги: вражеские боты. Количество ботов в настройках (F2, «Боты»).
+## Режим PvP (карта с "mode": "pvp"): только мехи, без баз, турелей, штабов и крипов. Команды появляются
+## на своих точках, убитый мех возвращается через несколько секунд. Победа: первой набрать нужное число
+## убийств или иметь больше убийств, когда вышло время (числа в F2, группа «PvP»).
 
 const Mech := preload("res://scripts/mech.gd")
 const BotBrain := preload("res://scripts/bot_brain.gd")
@@ -50,7 +53,9 @@ var minimap: Control
 var bots: Array = []
 var kills := 0
 var deaths := 0
-var winner := -1
+var winner := -1                  # -1 бой идёт, 0 и 1 победила команда, 2 ничья (PvP по времени)
+var pvp := false                  # режим PvP: мехи против мехов, без баз
+var team_kills := [0, 0]          # PvP: убийства каждой команды
 var covers: Array = []            # все укрытия [x, z, ширина, высота, глубина, вид]
 var walls: Array = []             # разрушаемые стены (wall.gd)
 var lanes := {}                   # имя линии -> точки от базы команды 0 к базе команды 1
@@ -83,8 +88,10 @@ func _ready() -> void:
 	Battle.reset()
 
 	map = Maps.current()
+	pvp = Maps.is_pvp(map)
+	Battle.pvp = pvp
 	covers = map["covers"]
-	lanes = Maps.lanes(map)
+	lanes = Maps.lanes(map)          # в PvP линий нет
 	vision = Vision.new()
 	vision.map_rect = map_rect()
 	Fx.player_team = vision.player_team
@@ -133,7 +140,9 @@ func _ready() -> void:
 	add_child(hud)
 	minimap = Minimap.new()
 	hud.add_minimap(minimap)
-	minimap.setup(self, vision, map_rect(), covers, Vector2(360, 360.0 * map_rect().size.y / map_rect().size.x) if map_rect().size.x >= map_rect().size.y else Vector2(300.0 * map_rect().size.x / map_rect().size.y, 300))
+	# миникарта вписана в 360 × 260 пикселей (квадратная карта не вылезает за низ экрана)
+	var mm_k := minf(360.0 / map_rect().size.x, 260.0 / map_rect().size.y)
+	minimap.setup(self, vision, map_rect(), covers, map_rect().size * mm_k)
 
 	add_child(TuningPanel.new())
 
@@ -170,7 +179,7 @@ func _ready() -> void:
 	mech.damaged.connect(_on_player_damaged)
 	mech.landed.connect(_on_player_landed)
 	Fx.shake_at.connect(_on_shake_at)
-	_crate_t = Cfg.crate_interval * 0.5
+	_crate_t = _crate_every() * 0.5
 	_creep_t = Cfg.creep_first
 
 	if autotest != null:
@@ -201,13 +210,14 @@ func _face_yaw(team: int) -> float:
 	return atan2(-to.x, -to.z)
 
 
-# места появления: кольцо вокруг своего штаба (свободные от стен и построек)
+# места появления: кольцо вокруг своего штаба (свободные от стен и построек).
+# В PvP кольца теснее: вокруг точки появления команды
 func _build_spawns(team: int) -> void:
 	var c := base_center(team)
 	var to_enemy := (base_center(1 - team) - c).normalized()
 	var r := map_rect().grow(-4.0)
 	var pts: Array = []
-	for ring in [10.0, 14.0, 18.0]:
+	for ring in ([4.0, 8.0, 12.0] if pvp else [10.0, 14.0, 18.0]):
 		for i in 12:
 			var a := TAU * i / 12.0
 			var p: Vector3 = c + Vector3(cos(a), 0, sin(a)) * ring
@@ -239,8 +249,9 @@ func spawn_point(team: int) -> Vector3:
 	return options.pick_random()
 
 
+# штаб команды; в PvP баз нет — точка появления команды
 func base_center(team: int) -> Vector3:
-	return Maps.hq_pos(map, team)
+	return Maps.spawn_pos(map, team) if pvp else Maps.hq_pos(map, team)
 
 
 func is_visible_to(team: int, node: Node) -> bool:
@@ -285,9 +296,11 @@ func to_editor() -> void:
 
 func _physics_process(delta: float) -> void:
 	_update_bots(delta)
-	_update_base(delta)
+	if not pvp:
+		_update_base(delta)
 	_update_crates(delta)
 	_update_creeps(delta)
+	_update_pvp()
 	_hit_shake_t = maxf(_hit_shake_t - delta, 0.0)
 	Sfx.set_laser(mech.is_beaming() and not mech.dead)
 	Sfx.set_listener(mech.global_position, cam.global_basis)
@@ -335,7 +348,8 @@ func _spawn_bot(team: int) -> Node:
 	brain.nav = nav
 	brain.main = self
 	var names := lanes.keys()
-	brain.lane = names[_lane_i % names.size()]
+	if not names.is_empty():          # в PvP линий нет
+		brain.lane = names[_lane_i % names.size()]
 	_lane_i += 1
 	b.brain = brain
 	add_child(b)
@@ -404,6 +418,8 @@ func objective_for(team: int, lane: String) -> Node3D:
 
 # линия глазами команды: точки от своей базы к вражеской
 func lane_path(team: int, lane: String) -> PackedVector3Array:
+	if lanes.is_empty():
+		return PackedVector3Array()
 	var p: PackedVector3Array = lanes.get(lane, lanes.values()[0])
 	if team == 0:
 		return p
@@ -416,6 +432,8 @@ func lane_path(team: int, lane: String) -> PackedVector3Array:
 # ближайшая к боту точка его линии впереди (бот сначала выходит на линию, потом идёт по ней)
 func lane_waypoint(team: int, lane: String, pos: Vector3) -> Vector3:
 	var p := lane_path(team, lane)
+	if p.is_empty():
+		return pos
 	var best_i := 0
 	var best_d := 1e9
 	for i in p.size():
@@ -436,7 +454,7 @@ func lane_waypoint(team: int, lane: String, pos: Vector3) -> Vector3:
 # ------------------------------------------------------------------
 
 func _update_creeps(delta: float) -> void:
-	if not started or winner >= 0 or Cfg.creeps_enabled != 1:
+	if pvp or not started or winner >= 0 or Cfg.creeps_enabled != 1:
 		return
 	_creep_t -= delta
 	if _creep_t > 0.0:
@@ -496,6 +514,9 @@ func _on_mech_died(who: Node3D) -> void:
 		if who.team != mech.team:
 			kills += 1
 		who.set_meta("respawn", Cfg.bot_respawn)
+	# PvP: каждая смерть меха — очко команде противника (счёт смотрит _update_pvp)
+	if pvp and winner < 0:
+		team_kills[1 - who.team] += 1
 	# обломок: забирает модель меха, едет по инерции, оседает и дымит
 	var w := Wreck.new()
 	w.setup_wreck(who.detach_visual(), who.death_velocity, who.stats.get("weight", 60.0), who.get_hit_radius())
@@ -554,7 +575,7 @@ func _update_crates(delta: float) -> void:
 	_crate_t -= delta
 	if _crate_t > 0.0:
 		return
-	_crate_t = Cfg.crate_interval
+	_crate_t = _crate_every()
 	var spot: Array = map["crates"].pick_random()
 	_crate_spot = Vector3(float(spot[0]), 0, float(spot[1]))
 	_crate_warn = Cfg.crate_warning
@@ -563,6 +584,11 @@ func _update_crates(delta: float) -> void:
 
 func crate_warning_pos():
 	return _crate_spot
+
+
+# как часто падают ящики: в PvP чаще (баз нет, патроны пополнять негде)
+func _crate_every() -> float:
+	return Cfg.pvp_crate_interval if pvp else Cfg.crate_interval
 
 
 # на своей базе мех чинится и пополняет патроны и заряды
@@ -591,6 +617,8 @@ func _update_base(delta: float) -> void:
 # ------------------------------------------------------------------
 
 func _build_structures() -> void:
+	if pvp:
+		return       # в PvP нет турелей, штабов и ядер
 	for s in map["structures"]:
 		var team := int(s[1])
 		var st := Structure.new()
@@ -702,12 +730,37 @@ func structures_left(team: int) -> int:
 
 func _on_structure_destroyed(s: Node3D) -> void:
 	if s.id == "hq" and winner < 0:
-		winner = 1 - s.team
-		Battle.running = false
-		hud.show_game_over(winner == mech.team)
-		get_tree().create_timer(2.5, false).timeout.connect(func() -> void:
-			get_tree().paused = true
-			menu.show_results(winner == mech.team))
+		_finish(1 - s.team)
+
+
+# конец боя: надпись, через пару секунд пауза и таблица. w: команда-победитель или 2 (ничья)
+func _finish(w: int) -> void:
+	winner = w
+	Battle.running = false
+	var draw := w == 2
+	hud.show_game_over(winner == mech.team, draw)
+	get_tree().create_timer(2.5, false).timeout.connect(func() -> void:
+		get_tree().paused = true
+		menu.show_results(winner == mech.team, draw))
+
+
+# PvP: победа, когда команда набрала нужное число убийств; когда вышло время — у кого больше
+func _update_pvp() -> void:
+	if not pvp or not started or winner >= 0:
+		return
+	for team in 2:
+		if team_kills[team] >= Cfg.pvp_kills_to_win:
+			_finish(team)
+			return
+	if time_left() <= 0.0:
+		var a: int = team_kills[0]
+		var b: int = team_kills[1]
+		_finish(0 if a > b else (1 if b > a else 2))
+
+
+# PvP: сколько секунд осталось до конца боя
+func time_left() -> float:
+	return maxf(Cfg.pvp_time * 60.0 - Battle.time, 0.0)
 
 
 # стену сломали: боты могут ходить сквозь, туман и миникарта обновляются
@@ -927,7 +980,7 @@ func _ground_mask() -> Image:
 			for k in n + 1:
 				stamp.call(a.lerp(b, float(k) / n), 5.0, 0)
 	for team in 2:
-		stamp.call(base_center(team), 23.0, 1)
+		stamp.call(base_center(team), 12.0 if pvp else 23.0, 1)     # в PvP — площадка у точки появления
 	for p in map["pois"]:
 		stamp.call(Vector3(float(p[0]), 0, float(p[1])), 10.5, 2)
 	# лёгкое размытие: края мягче (уменьшить и растянуть обратно)
@@ -1070,8 +1123,8 @@ func _build_ground() -> void:
 	mi.material_override = sm
 	body.add_child(mi)
 
-	# круги баз на земле
-	for team in 2:
+	# круги баз на земле (в PvP баз нет)
+	for team in (0 if pvp else 2):
 		var ring := MeshInstance3D.new()
 		var tm := TorusMesh.new()
 		tm.inner_radius = 0.97

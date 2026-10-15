@@ -4,7 +4,9 @@ extends Node
 ## точки линий и украшения. Читать и сохранять карты, строить по ним линии для крипов и ботов.
 ##
 ## Формат (всё в метрах, x вправо, z вниз, центр карты = 0,0):
+##   mode        "pvp" = бой мехов без баз, турелей и крипов (по счёту убийств); нет поля = моба
 ##   size        [ширина, глубина]
+##   spawns      [x, z, команда]                       точки появления (только для PvP)
 ##   covers      [x, z, ширина, высота, глубина, вид]   вид: wall (стена), barrier (барьер), rock (скала)
 ##   structures  [деталь, команда, x, z, линия]         деталь: turret_t1/t2/t3, hq; линия: top/mid/bot/base
 ##   pois        [x, z, вид]                           вид: regen (Реактор), damage (Арсенал)
@@ -49,7 +51,7 @@ func list_maps() -> Array:
 			var d := load_map(path)
 			if d.is_empty():
 				continue
-			out.append({"name": d.get("name", f.get_basename()), "path": path, "file": f})
+			out.append({"name": d.get("name", f.get_basename()), "path": path, "file": f, "pvp": is_pvp(d)})
 	out.sort_custom(func(a, b) -> bool: return a["file"] == "classic.json" or (b["file"] != "classic.json" and a["name"] < b["name"]))
 	return out
 
@@ -172,9 +174,25 @@ func hq_pos(data: Dictionary, team: int) -> Vector3:
 	return Vector3(r.position.x + 12.0 if team == 0 else r.end.x - 12.0, 0, 0)
 
 
+# карта для PvP: мехи против мехов, без баз
+func is_pvp(data: Dictionary) -> bool:
+	return data.get("mode", "") == "pvp"
+
+
+# точка появления команды в PvP (если её нет на карте — там, где был бы штаб)
+func spawn_pos(data: Dictionary, team: int) -> Vector3:
+	for p in data.get("spawns", []):
+		if p.size() > 2 and int(p[2]) == team:
+			return Vector3(float(p[0]), 0, float(p[1]))
+	return hq_pos(data, team)
+
+
 # линии: имя -> точки от базы команды 0 до базы команды 1.
-# Точки линии: турели этой линии обеих команд и точки линии из редактора, по порядку от базы к базе
+# Точки линии: турели этой линии обеих команд и точки линии из редактора, по порядку от базы к базе.
+# В PvP линий нет
 func lanes(data: Dictionary) -> Dictionary:
+	if is_pvp(data):
+		return {}
 	var a := hq_pos(data, 0)
 	var b := hq_pos(data, 1)
 	var pts := {}
@@ -214,6 +232,11 @@ func _progress(p: Vector3, a: Vector3, b: Vector3) -> float:
 # проблемы карты, из-за которых в неё нельзя играть
 func problems(data: Dictionary) -> Array:
 	var out: Array = []
+	if is_pvp(data):
+		for team in 2:
+			if not data.get("spawns", []).any(func(p) -> bool: return p.size() > 2 and int(p[2]) == team):
+				out.append("Нет точки появления у %s" % ("своей команды" if team == 0 else "врагов"))
+		return out
 	for team in 2:
 		var n := 0
 		for s in data["structures"]:

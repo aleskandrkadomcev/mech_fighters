@@ -7,6 +7,7 @@ signal feed(killer: String, killer_team: int, victim: String, victim_team: int) 
 
 var time := 0.0
 var running := false
+var pvp := false                # режим PvP: мехи против мехов, без баз (ставит main.gd по карте)
 var rows := {}                  # id участника -> строка таблицы
 var _player_id := 0
 var _num_acc := {}              # накопленный урон для цифр (лучи бьют по чуть-чуть каждый кадр)
@@ -15,6 +16,7 @@ var _num_acc := {}              # накопленный урон для циф�
 func reset() -> void:
 	time = 0.0
 	running = false
+	pvp = false
 	rows.clear()
 	_num_acc.clear()
 

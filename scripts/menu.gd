@@ -1,5 +1,5 @@
 extends Control
-## Главное меню: Играть (выбор карты и ботов), Редактор карт, Настройки, Выход.
+## Главное меню: Играть (режим: моба или PvP, выбор карты и ботов), Редактор карт, Настройки, Выход.
 ## На фоне мех на платформе. При автопроверке (особые параметры запуска) сразу открывает бой.
 
 const MechVisual := preload("res://scripts/mech_visual.gd")
@@ -11,6 +11,9 @@ var _settings: Control
 var _maps: ItemList
 var _map_info: Label
 var _map_list: Array = []
+var _pvp := false                 # выбран режим PvP (мехи против мехов): в списке только карты для PvP
+var _mode_btns: Array = []
+var _creeps_check: CheckBox
 var _preview: Node3D
 var _cam: Camera3D
 var _angle := 0.4
@@ -163,6 +166,7 @@ func _build_play() -> void:
 	var col := _panel_box(Vector2(720, 160), Vector2(760, 700))
 	_play = col.get_parent()
 	_title(col, "ИГРАТЬ")
+	_mode_row(col)
 	var l := Label.new()
 	l.text = "Карта"
 	l.add_theme_font_size_override("font_size", 18)
@@ -180,7 +184,7 @@ func _build_play() -> void:
 	col.add_child(_map_info)
 	_slider_row(col, "Союзных ботов", "bot_allies", 0, 4)
 	_slider_row(col, "Вражеских ботов", "bot_enemies", 0, 5)
-	_check_row(col, "Крипы на линиях", "creeps_enabled")
+	_creeps_check = _check_row(col, "Крипы на линиях", "creeps_enabled")
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_END
 	row.add_theme_constant_override("separation", 12)
@@ -221,7 +225,7 @@ func _slider_row(parent: Control, text: String, key: String, vmin: float, vmax: 
 		v.text = Parts._n(snappedf(x, 0.01)))
 
 
-func _check_row(parent: Control, text: String, key: String) -> void:
+func _check_row(parent: Control, text: String, key: String) -> CheckBox:
 	var c := CheckBox.new()
 	c.text = text
 	c.add_theme_font_size_override("font_size", 19)
@@ -229,6 +233,39 @@ func _check_row(parent: Control, text: String, key: String) -> void:
 	c.focus_mode = Control.FOCUS_NONE
 	c.toggled.connect(func(on: bool) -> void: Cfg.set_value(key, 1.0 if on else 0.0))
 	parent.add_child(c)
+	return c
+
+
+# режим боя: две кнопки, нажата одна. От режима зависит список карт
+func _mode_row(parent: Control) -> void:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 12)
+	parent.add_child(row)
+	var l := Label.new()
+	l.text = "Режим"
+	l.custom_minimum_size = Vector2(120, 0)
+	l.add_theme_font_size_override("font_size", 19)
+	row.add_child(l)
+	var group := ButtonGroup.new()
+	for q in 2:
+		var b := Button.new()
+		b.text = ["Моба: базы, турели, крипы", "PvP: мехи против мехов"][q]
+		b.toggle_mode = true
+		b.button_group = group
+		b.focus_mode = Control.FOCUS_NONE
+		b.custom_minimum_size = Vector2(280, 44)
+		b.add_theme_font_size_override("font_size", 19)
+		b.pressed.connect(func() -> void: _set_mode(q == 1))
+		row.add_child(b)
+		_mode_btns.append(b)
+
+
+func _set_mode(pvp: bool) -> void:
+	_pvp = pvp
+	for q in _mode_btns.size():
+		_mode_btns[q].set_pressed_no_signal(q == (1 if pvp else 0))
+	_creeps_check.visible = not pvp       # в PvP крипов нет
+	_fill_maps()
 
 
 func _build_settings() -> void:
@@ -285,8 +322,14 @@ func _graphics_row(parent: Control) -> void:
 func _open_play() -> void:
 	_settings.visible = false
 	_play.visible = true
+	# режим как у карты, на которой играли в прошлый раз
+	_set_mode(Maps.is_pvp(Maps.load_map(Maps.selected)))
+
+
+# список карт выбранного режима
+func _fill_maps() -> void:
 	_maps.clear()
-	_map_list = Maps.list_maps()
+	_map_list = Maps.list_maps().filter(func(m) -> bool: return m["pvp"] == _pvp)
 	var sel := 0
 	for i in _map_list.size():
 		_maps.add_item(_map_list[i]["name"])
@@ -295,14 +338,20 @@ func _open_play() -> void:
 	if not _map_list.is_empty():
 		_maps.select(sel)
 		_on_map_selected(sel)
+	else:
+		_map_info.text = "Нет карт для этого режима"
 
 
 func _on_map_selected(i: int) -> void:
 	var d := Maps.load_map(_map_list[i]["path"])
 	var lanes := Maps.lanes(d)
 	var problems := Maps.problems(d)
-	_map_info.text = "%d × %d м   ·   линий: %d   ·   турелей: %d   ·   стен и укрытий: %d" % [int(d["size"][0]), int(d["size"][1]),
-		lanes.size(), d["structures"].filter(func(s) -> bool: return s[0] != "hq").size(), d["covers"].size()]
+	if Maps.is_pvp(d):
+		_map_info.text = "%d × %d м   ·   стен и укрытий: %d   ·   победа: %d убийств или больше всех за %s мин" % [int(d["size"][0]), int(d["size"][1]),
+			d["covers"].size(), Cfg.pvp_kills_to_win, Parts._n(Cfg.pvp_time)]
+	else:
+		_map_info.text = "%d × %d м   ·   линий: %d   ·   турелей: %d   ·   стен и укрытий: %d" % [int(d["size"][0]), int(d["size"][1]),
+			lanes.size(), d["structures"].filter(func(s) -> bool: return s[0] != "hq").size(), d["covers"].size()]
 	if not problems.is_empty():
 		_map_info.text += "\nНельзя играть: " + ", ".join(problems)
 

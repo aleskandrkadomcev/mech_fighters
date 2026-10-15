@@ -156,15 +156,22 @@ func _cell(text: String, size := 19, col := Color(1, 1, 1, 0.9), align := HORIZO
 	return l
 
 
-func show_results(won: bool) -> void:
+func show_results(won: bool, draw := false) -> void:
 	_pause.visible = false
 	_results.visible = true
-	_title.text = "ПОБЕДА" if won else "ПОРАЖЕНИЕ"
-	_title.add_theme_color_override("font_color", Color(0.5, 1.0, 0.5) if won else Color(1.0, 0.4, 0.35))
+	_title.text = "НИЧЬЯ" if draw else ("ПОБЕДА" if won else "ПОРАЖЕНИЕ")
+	_title.add_theme_color_override("font_color", Color(1.0, 0.85, 0.4) if draw else (Color(0.5, 1.0, 0.5) if won else Color(1.0, 0.4, 0.35)))
 	_sub.text = "Карта «%s»   ·   бой длился %s" % [main.map.get("name", ""), Battle.time_text()]
+	# PvP: счёт команд, а в таблице только мехи (построек и крипов там нет)
+	var pvp: bool = main.pvp
+	if pvp:
+		_sub.text = "Карта «%s»   ·   счёт %d : %d   ·   бой длился %s" % [main.map.get("name", ""), main.team_kills[0], main.team_kills[1], Battle.time_text()]
 	for c in _table.get_children():
 		c.queue_free()
-	var heads := ["", "Мех", "Убийства", "Смерти", "Урон по мехам", "Урон постройкам", "Крипы", "Турели"]
+	var heads := ["", "Мех", "Убийства", "Смерти", "Урон по мехам"]
+	if not pvp:
+		heads += ["Урон постройкам", "Крипы", "Турели"]
+	_table.columns = heads.size()
 	for i in heads.size():
 		_table.add_child(_cell(heads[i], 16, Color(1, 1, 1, 0.5), HORIZONTAL_ALIGNMENT_LEFT if i < 2 else HORIZONTAL_ALIGNMENT_RIGHT))
 	for team in 2:
@@ -172,10 +179,13 @@ func show_results(won: bool) -> void:
 		for id in Battle.rows:
 			if Battle.rows[id]["team"] == team:
 				rows.append(Battle.rows[id])
-		rows.sort_custom(func(a, b) -> bool: return a["damage"] + a["structures"] * 0.3 > b["damage"] + b["structures"] * 0.3)
+		if pvp:
+			rows.sort_custom(func(a, b) -> bool: return a["kills"] > b["kills"] or (a["kills"] == b["kills"] and a["damage"] > b["damage"]))
+		else:
+			rows.sort_custom(func(a, b) -> bool: return a["damage"] + a["structures"] * 0.3 > b["damage"] + b["structures"] * 0.3)
 		var tc := Cfg.player_color if team == 0 else Cfg.enemy_color
 		_table.add_child(_cell("СВОИ" if team == 0 else "ВРАГИ", 18, tc, HORIZONTAL_ALIGNMENT_LEFT))
-		for k in 7:
+		for k in heads.size() - 1:
 			_table.add_child(Control.new())
 		for r in rows:
 			var c := Color(1.0, 0.9, 0.5) if r["player"] else Color(1, 1, 1, 0.9)
@@ -184,6 +194,7 @@ func show_results(won: bool) -> void:
 			_table.add_child(_cell(str(r["kills"]), 20, c))
 			_table.add_child(_cell(str(r["deaths"]), 20, c))
 			_table.add_child(_cell(str(int(r["damage"])), 20, c))
-			_table.add_child(_cell(str(int(r["structures"])), 20, c))
-			_table.add_child(_cell(str(r["creeps"]), 20, c))
-			_table.add_child(_cell(str(r["towers"]), 20, c))
+			if not pvp:
+				_table.add_child(_cell(str(int(r["structures"])), 20, c))
+				_table.add_child(_cell(str(r["creeps"]), 20, c))
+				_table.add_child(_cell(str(r["towers"]), 20, c))
