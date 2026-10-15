@@ -2295,9 +2295,11 @@ func _run_aimtest() -> void:
 		_at_creep.seen = true
 		var c: Vector3 = _at_creep.global_position
 		var o := c + Vector3(0, 45, 26)
-		var ap: Vector3 = m.aim_from_ray(o, (c + Vector3(0.3, 0.5, 0.2) - o).normalized())
-		_at_check(absf(ap.y - _at_creep.get_hit_height() * 0.5) < 0.05 and Vector2(ap.x - c.x, ap.z - c.z).length() < 0.1,
-			"курсор на крипе: прицел на середине его хитбокса (y=%.2f, высота крипа %.2f)" % [ap.y, _at_creep.get_hit_height()])
+		var dir := (c + Vector3(0.6, 0.5, 0.3) - o).normalized()
+		var ap: Vector3 = m.aim_from_ray(o, dir)
+		var want = Plane(Vector3.UP, c.y + _at_creep.get_hit_height() * 0.5).intersects_ray(o, dir)
+		_at_check(want != null and ap.distance_to(want) < 0.05 and Vector2(ap.x - c.x, ap.z - c.z).length() > 0.3,
+			"курсор на крипе: прицел на высоте середины хитбокса (y=%.2f, высота крипа %.2f), но там, куда показывает курсор (%.1f м от центра — можно брать упреждение)" % [ap.y, _at_creep.get_hit_height(), Vector2(ap.x - c.x, ap.z - c.z).length()])
 		var o2 := Vector3(-6, 45, 0)
 		var ap2: Vector3 = m.aim_from_ray(o2, (Vector3(-6, 0, -22) - o2).normalized())
 		_at_check(absf(ap2.y) < 0.05, "курсор на земле: прицел на земле (y=%.2f)" % ap2.y)
@@ -2332,5 +2334,16 @@ func _run_aimtest() -> void:
 		for x in g3:
 			ok5 = ok5 and x[1].z > -12.0 and x[1].y < 1.0
 		_at_check(ok5, "граната вдаль: перелетела барьер и упала на землю (%s)" % ", ".join(g3.map(func(x): return "z=%.1f за %.2f с" % [x[1].z, x[2] / 60.0])))
+		# G: граната падает на барьер сверху (высота барьера 3,5) — должна врезаться в крышку, а не пройти
+		var probe = main.mech.Lob.new()
+		probe.setup_ballistic(Vector3(0, 60, 100), Vector3.ZERO, m, {"kind": "explosive", "damage": 0.0, "radius": 1.0})
+		main.add_child(probe)
+		var down: Dictionary = probe._cast(Vector3(0.5, 6.0, -14.2), Vector3(0.5, 2.0, -14.0))
+		_at_check(not down.is_empty() and absf(down["position"].y - 3.5) < 0.05, "граната падает на барьер сверху: врезается в его верх (y=%s)" % ("%.2f" % down["position"].y if not down.is_empty() else "мимо"))
+		var over: Dictionary = probe._cast(Vector3(0.5, 4.2, -17.0), Vector3(0.5, 3.9, -11.0))
+		_at_check(over.is_empty() or over["position"].y < 0.1, "граната над барьером выше его верха: пролетает")
+		var side: Dictionary = probe._cast(Vector3(0.5, 2.0, -17.0), Vector3(0.5, 2.0, -11.0))
+		_at_check(not side.is_empty() and absf(side["position"].z - (-14.8)) < 0.05, "граната в бок барьера: врезается в стенку (z=%s)" % ("%.2f" % side["position"].z if not side.is_empty() else "мимо"))
+		probe.queue_free()
 		print("[AIM] итог: %s" % ("ВСЁ ВЕРНО" if _at_fails == 0 else "ошибок %d" % _at_fails))
 		get_tree().quit()

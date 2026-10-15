@@ -1225,6 +1225,7 @@ func _block(pos: Vector3, size: Vector3) -> void:
 	body.collision_mask = 0
 	body.position = pos
 	body.set_meta("top", pos.y + size.y * 0.5)     # настоящая высота: граната её перелетает
+	body.add_to_group("solid_tops")
 	add_child(body)
 	# стена для выстрелов выше, чем на вид: игра плоская, перестрелять через укрытие сверху нельзя
 	var cs := CollisionShape3D.new()

@@ -78,6 +78,9 @@ func _ready() -> void:
 	add_to_group("lobs")
 	if _ballistic:
 		_exclude = Fx.team_rids(team)       # свои мехи и постройки для гранаты прозрачны
+		# стены и скалы проверяем сами, по настоящему объёму (см. _cast)
+		for b in get_tree().get_nodes_in_group("solid_tops"):
+			_exclude.append(b.get_rid())
 	var big: bool = _p.get("kind", "") == "explosive" and _p.get("radius", 4.0) > 5.0
 	var emp: bool = _p.get("kind", "") == "emp"
 	_body = MeshInstance3D.new()
@@ -180,23 +183,61 @@ func _fly_ballistic(delta: float) -> void:
 		_land()
 
 
-# во что граната врезается на отрезке: стены (по настоящей высоте), хитбоксы, обломки, земля
+# во что граната врезается на отрезке: хитбоксы, обломки, земля (физикой) и стены со скалами —
+# по их настоящему объёму, от земли до верха (метка top). У стен столкновение для пуль выше, чем
+# на вид, и граната, попавшая в этот объём сверху, физикой не видна — поэтому считаем сами,
+# включая крышку: падающая сверху граната рвётся на стене, а не проходит её насквозь
 func _cast(from: Vector3, to: Vector3) -> Dictionary:
 	var q := PhysicsRayQueryParameters3D.create(from, to, 1 | 4 | 16)
 	q.collide_with_areas = true
-	var ex: Array[RID] = _exclude.duplicate()
-	for k in 4:
-		q.exclude = ex
-		var hit := get_world_3d().direct_space_state.intersect_ray(q)
-		if hit.is_empty():
-			return hit
-		var col = hit["collider"]
-		# у стен и скал столкновение для пуль выше, чем на вид: граната летит над настоящей высотой
-		if col is Object and col.has_meta("top") and hit["position"].y > float(col.get_meta("top")) + 0.05:
-			ex.append(hit["rid"])
+	q.exclude = _exclude
+	var best := get_world_3d().direct_space_state.intersect_ray(q)
+	var seg := to - from
+	var best_t := 2.0
+	if not best.is_empty():
+		best_t = from.distance_to(best["position"]) / maxf(seg.length(), 0.0001)
+	for b in get_tree().get_nodes_in_group("solid_tops"):
+		var box = _top_box(b)
+		if box == null:
 			continue
-		return hit
-	return {}
+		var t := _seg_box(from, seg, box)
+		if t >= 0.0 and t < best_t:
+			best_t = t
+			best = {"position": from + seg * t, "collider": b}
+	return best
+
+
+# настоящий объём стены или скалы: её коробка столкновения, но от земли до верха (null — сломана)
+static func _top_box(b: Node):
+	for c in b.get_children():
+		if c is CollisionShape3D and c.shape is BoxShape3D:
+			if c.disabled:
+				return null
+			var half: Vector3 = c.shape.size * 0.5
+			var p: Vector3 = c.global_position
+			var top := float(b.get_meta("top", p.y + half.y))
+			return AABB(Vector3(p.x - half.x, 0.0, p.z - half.z), Vector3(half.x * 2.0, top, half.z * 2.0))
+	return null
+
+
+# где отрезок from + seg * t (t от 0 до 1) входит в коробку; -1 — не входит
+static func _seg_box(from: Vector3, seg: Vector3, box: AABB) -> float:
+	var t0 := 0.0
+	var t1 := 1.0
+	for k in 3:
+		var lo: float = box.position[k]
+		var hi: float = box.end[k]
+		if absf(seg[k]) < 0.000001:
+			if from[k] < lo or from[k] > hi:
+				return -1.0
+			continue
+		var a: float = (lo - from[k]) / seg[k]
+		var c: float = (hi - from[k]) / seg[k]
+		t0 = maxf(t0, minf(a, c))
+		t1 = minf(t1, maxf(a, c))
+		if t0 > t1:
+			return -1.0
+	return t0
 
 
 func _land() -> void:

@@ -59,9 +59,9 @@ func _process(_delta: float) -> void:
 			if k > 0.01:
 				_arc(center, 1.1 + i * 0.25, 0.12, k, Color(0.5, 0.9, 1.0, 0.95))
 		elif mech.weapons[i]["type"] == "lob":
-			# гранатомёт: куда полетит граната (не дальше его дальности)
-			var dl := minf(dist, mech.w_range(i))
-			_ring(origin + fwd * dl, 0.5, 0.06, Color(1.0, 0.7, 0.3, 0.6))
+			# гранатомёт: куда на земле полетит граната (не дальше его дальности)
+			var dl := minf(maxf(mech.aim_ground_distance(), mech.GUN_MIN_DIST), mech.w_range(i))
+			_ring(Vector3(origin.x, 0.06, origin.z) + fwd * dl, 0.5, 0.06, Color(1.0, 0.7, 0.3, 0.6))
 	# края конуса разброса
 	var faint := Color(col.r, col.g, col.b, 0.22)
 	for sgn in [-1.0, 1.0]:

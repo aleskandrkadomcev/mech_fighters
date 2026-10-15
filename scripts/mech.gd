@@ -64,6 +64,7 @@ var _rammed := {}               # кого уже ударил этим рывк
 var _snap_next := true          # мех телепортировался или модель новая: не сглаживать переход между тиками
 
 var aim_point := Vector3(0, 0, -10)
+var aim_ground := Vector3(0, 0, -10)   # точка на земле под курсором: туда стреляет гранатомёт
 var _hit_h := 0.0               # высота хитбокса по модели (0 — ещё не мерили)
 var ability_aim_override = null # бот может указать точку для ракет отдельно от прицела пушек
 var torso_yaw := 0.0
@@ -565,6 +566,7 @@ func _physics_process(delta: float) -> void:
 
 	if brain != null:
 		brain.think(delta)
+		aim_ground = Vector3(aim_point.x, 0.0, aim_point.z)     # бот бросает гранату под ноги цели
 	elif demo != null:
 		_read_demo()
 	elif is_player:
@@ -627,6 +629,7 @@ func _read_demo() -> void:
 		demo["e"] = false
 	if demo.has("aim"):
 		aim_point = demo["aim"]
+		aim_ground = Vector3(aim_point.x, 0.0, aim_point.z)
 
 
 func _read_player() -> void:
@@ -646,11 +649,17 @@ func _read_player() -> void:
 
 	if camera != null and not Cfg.ui_hover:
 		var mp := get_viewport().get_mouse_position()
-		aim_point = aim_from_ray(camera.project_ray_origin(mp), camera.project_ray_normal(mp))
+		var o := camera.project_ray_origin(mp)
+		var d := camera.project_ray_normal(mp)
+		aim_point = aim_from_ray(o, d)
+		var g = Plane(Vector3.UP, 0.0).intersects_ray(o, d)
+		if g != null:
+			aim_ground = g
 
 
-# куда целится игрок: курсор на видимом враге (мех, крип, постройка) — в середину его хитбокса
-# по высоте; иначе — в точку на земле (стрельба вслепую, граната под ноги)
+# куда целится игрок: курсор на видимом враге (мех, крип, постройка) — на высоту середины его
+# хитбокса, но туда же, куда показывает курсор (можно брать упреждение); иначе — в точку на земле
+# (стрельба вслепую). Гранатомёт всегда бьёт по земле под курсором (aim_ground)
 func aim_from_ray(o: Vector3, d: Vector3) -> Vector3:
 	var q := PhysicsRayQueryParameters3D.create(o, o + d * 500.0, 4)
 	q.collide_with_areas = true
@@ -660,8 +669,9 @@ func aim_from_ray(o: Vector3, d: Vector3) -> Vector3:
 	if not hit.is_empty():
 		var u = hit["collider"].get("mech")
 		if u != null and is_instance_valid(u) and u.get("seen") != false and u.has_method("get_hit_height"):
-			var c: Vector3 = u.global_position
-			return Vector3(c.x, c.y + u.get_hit_height() * 0.5, c.z)
+			var p = Plane(Vector3.UP, u.global_position.y + u.get_hit_height() * 0.5).intersects_ray(o, d)
+			if p != null:
+				return p
 	var g = Plane(Vector3.UP, 0.0).intersects_ray(o, d)
 	return g if g != null else aim_point
 
@@ -1189,11 +1199,18 @@ const GUN_PITCH_MAX := 20.0      # градусов вверх
 const GUN_MIN_DIST := 8.0        # ближе этого стволы не сводятся
 
 
-# точка, в которую сводятся стволы
-func gun_target() -> Vector3:
-	var t := global_position + torso_forward() * maxf(aim_distance(), GUN_MIN_DIST)
-	t.y = aim_point.y
+# точка, в которую сводятся стволы (у гранатомёта — на земле под курсором)
+func gun_target(lob := false) -> Vector3:
+	var p := aim_ground if lob else aim_point
+	var flat := Vector3(p.x - global_position.x, 0, p.z - global_position.z)
+	var t := global_position + torso_forward() * maxf(flat.length(), GUN_MIN_DIST)
+	t.y = p.y
 	return t
+
+
+# дальность до точки на земле под курсором (куда полетит граната)
+func aim_ground_distance() -> float:
+	return Vector2(aim_ground.x - global_position.x, aim_ground.z - global_position.z).length()
 
 
 # поворот ствола от корпуса: x — в сторону, y — вверх-вниз (радианы, в пределах)
@@ -1225,10 +1242,12 @@ func _gun_dir(origin: Vector3, spread_deg: float, random := true) -> Vector3:
 # модель: стволы поворачиваются туда же, куда полетят пули
 func _aim_guns() -> void:
 	var t := gun_target()
+	var tl := gun_target(true)
 	for i in mini(visual.gun_pods.size(), weapons.size()):
 		var a := _gun_angles(visual.gun_pods[i].global_position, t)
 		if weapons[i]["type"] == "lob":
-			a.y = _lob_pitch(visual.gun_pods[i].global_position, t, weapons[i])
+			a = _gun_angles(visual.gun_pods[i].global_position, tl)
+			a.y = _lob_pitch(visual.gun_pods[i].global_position, tl, weapons[i])
 		visual.gun_yaw[i] = a.x
 		visual.gun_pitch[i] = a.y
 
@@ -1288,7 +1307,7 @@ func _after_shot(i: int, w: Dictionary) -> void:
 # во что врежется: стену, меха, крипа, обломок или землю. Низкую стену может перелететь
 func _fire_lob(i: int, w: Dictionary) -> void:
 	var origin: Vector3 = visual.get_muzzle(i)
-	var t := gun_target()
+	var t := gun_target(true)
 	var flat := Vector3(t.x - global_position.x, 0, t.z - global_position.z)
 	if flat.length() > w_range(i):
 		t = Vector3(global_position.x, t.y, global_position.z) + flat.normalized() * w_range(i)

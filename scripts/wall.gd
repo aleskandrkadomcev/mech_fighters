@@ -44,6 +44,7 @@ func _ready() -> void:
 	var d: float = c[4]
 	hp_max = maxf(w, d) * Cfg.wall_hp_per_m * (0.6 if kind() == "barrier" else 1.0)
 	set_meta("top", h)      # настоящая высота (столкновение для пуль выше): граната её перелетает
+	add_to_group("solid_tops")
 	hp = hp_max
 	_cs = CollisionShape3D.new()
 	var bs := BoxShape3D.new()
