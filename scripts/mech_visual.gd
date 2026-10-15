@@ -373,8 +373,8 @@ func _build_torso(weapon_looks: Array, rockets: bool) -> void:
 			var fm := StandardMaterial3D.new()
 			fm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 			fm.albedo_texture = ftex
-			var fc := Color(0.5, 0.9, 1.0) if look == "blaster" or look == "rail" else Color(1.0, 0.8, 0.45)
-			fm.albedo_color = Color(fc.r * 2.0, fc.g * 2.0, fc.b * 2.0, 1.0)
+			var fc := Color(0.5, 0.9, 1.0) if look == "blaster" or look == "rail" else Color(1.0, 0.66, 0.3)
+			fm.albedo_color = Color(fc.r * 1.7, fc.g * 1.7, fc.b * 1.7, 1.0)
 			fm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 			fm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 			fm.cull_mode = BaseMaterial3D.CULL_DISABLED
@@ -398,10 +398,10 @@ func _build_torso(weapon_looks: Array, rockets: bool) -> void:
 		flashes.append(fl)
 		# луч лазера (рисуется только у лазера, когда он светит)
 		var beam := MeshInstance3D.new()
-		var bm := BoxMesh.new()
-		bm.size = Vector3(1, 1, 1)
-		beam.mesh = bm
-		beam.material_override = m_beam
+		beam.mesh = Fx._unit_quad()
+		var bc: Color = m_beam.albedo_color / 2.2
+		bc = Color(bc.r * bc.r, bc.g * bc.g, bc.b * bc.b)       # ореол насыщеннее, белое только ядро
+		beam.material_override = Fx.beam_material(bc, 2.0, 1.8, 0.18)
 		beam.top_level = true
 		beam.visible = false
 		beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -903,9 +903,8 @@ func set_beam(gun: int, on: bool, from := Vector3.ZERO, to := Vector3.ZERO) -> v
 		return
 	var d := to - from
 	var len := maxf(d.length(), 0.05)
-	var w := 0.12 + 0.05 * sin(Time.get_ticks_msec() * 0.05 + gun)
-	var basis := Basis.looking_at(d.normalized(), Vector3.UP if absf(d.normalized().y) < 0.99 else Vector3.RIGHT)
-	b.global_transform = Transform3D((basis * Basis.from_scale(Vector3(w, w, len))), from + d * 0.5)
+	var w := 0.5 + 0.08 * sin(Time.get_ticks_msec() * 0.05 + gun)
+	Fx.place_beam(b, from, from + d.normalized() * len, w)
 	# луч только что включился: не сглаживать от старого положения (иначе на один кадр
 	# мелькает длинная полоса через полкарты — от места, где луч горел в прошлый раз)
 	if not was_on:

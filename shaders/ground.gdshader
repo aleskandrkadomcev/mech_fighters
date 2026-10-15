@@ -216,14 +216,23 @@ void fragment() {
 		// бетонные площадки баз: плиты со швами, масляные пятна, натёки грязи
 		if (pad > 0.002) {
 			vec3 conc = layer_tex(tex_albedo, p, 4.5, 5.0, k, dx, dy).rgb * tint_conc;
-			conc *= 1.0 - panels(p, vec2(4.0, 4.0)) * 0.35;
-			conc *= 1.0 - smoothstep(0.5, 0.78, fbm3(p * 0.45 + 3.0)) * 0.6;
-			conc *= 0.8 + 0.4 * vnoise(p * 1.7);     // плиты разного тона
-			conc = mix(conc, layer_tex(tex_albedo, p, 6.0, 2.0, 0.0, dx, dy).rgb * tint_mud * 0.8,
-				smoothstep(0.55, 0.75, fbm3(p * 0.12 + 9.0)) * 0.6);
+			// плиты 4×4 м, каждая своего тона, с глубокими швами и мелкой разбивкой
+			conc *= 0.8 + 0.3 * hash(floor(p / 4.0) + 3.7);
+			conc *= 1.0 - panels(p, vec2(4.0, 4.0)) * 0.65;
+			conc *= 1.0 - panels(p + vec2(2.0, 0.0), vec2(4.0, 4.0)) * 0.18;
+			conc *= 0.85 + 0.3 * vnoise(p * 1.7);
+			// масляные пятна: тёмные и глянцевые
+			float oil = smoothstep(0.5, 0.74, fbm3(p * 0.35 + 3.0));
+			conc = mix(conc, conc * 0.35, oil * 0.7);
+			// гарь и копоть
+			float soot = smoothstep(0.56, 0.8, fbm3(p * 0.09 + 17.0)) * (0.6 + 0.4 * vnoise(p * 2.3));
+			conc = mix(conc, vec3(0.03, 0.028, 0.025), soot * 0.5);
+			// натёки грязи
+			conc = mix(conc, layer_tex(tex_albedo, p, 6.0, 2.0, 0.0, dx, dy).rgb * tint_mud * 0.6,
+				smoothstep(0.55, 0.75, fbm3(p * 0.12 + 9.0)) * 0.5);
 			col = mix(col, conc, pad);
 			nmap = mix(nmap, NORMAL_TEX(4.5, 5.0), pad);
-			rough = mix(rough, 0.82, pad);
+			rough = mix(rough, mix(0.78, 0.3, oil), pad);
 		}
 		// наклон земли: рельеф по шуму (кроме площадок) и колеи-жёлоба на дороге,
 		// плюс рельеф фото-текстур. Лужи гладкие

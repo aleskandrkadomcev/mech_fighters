@@ -37,6 +37,7 @@ var last_attacker: Node = null
 # ядро (Тесла)
 var _orb: MeshInstance3D
 var _orb_mat: StandardMaterial3D
+var _halo: MeshInstance3D            # ореол вокруг шара ядра: пульсирует, при зарядке разгорается
 var _rings: Array = []
 var _zap_cd := 2.0
 var _charge_left := 0.0
@@ -282,6 +283,22 @@ func _build_core(col: Color) -> void:
 	_orb.material_override = _orb_mat
 	_orb.position = Vector3(0, 6.3, 0)
 	add_child(_orb)
+	_halo = MeshInstance3D.new()
+	var hq := QuadMesh.new()
+	hq.size = Vector2.ONE
+	_halo.mesh = hq
+	var hm := StandardMaterial3D.new()
+	hm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	hm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	hm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	hm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	hm.cull_mode = BaseMaterial3D.CULL_DISABLED
+	hm.albedo_texture = Art.fx_tex("circle_05")
+	hm.albedo_color = Color(0.4, 0.72, 1.0, 0.9)
+	_halo.material_override = hm
+	_halo.scale = Vector3.ONE * 4.0
+	_halo.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_orb.add_child(_halo)
 	# кольцо цвета команды под шаром
 	_cyl(self, 0.9, 1.0, 0.22, Vector3(0, 5.45, 0), _glow(col), 14)
 
@@ -293,20 +310,58 @@ func _build_barrier(col: Color) -> void:
 render_mode unshaded, blend_add, cull_disabled, depth_draw_never, shadows_disabled;
 uniform vec3 col = vec3(0.4, 0.8, 1.0);
 uniform float hit = 0.0;
+uniform vec3 hit_pos = vec3(0.0, -1000.0, 0.0);
 uniform float fade = 1.0;
+varying vec3 lpos;
+varying vec3 wpos;
+void vertex() {
+	lpos = VERTEX;
+	wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+}
+vec3 h3(vec3 p) {
+	p = vec3(dot(p, vec3(127.1, 311.7, 74.7)), dot(p, vec3(269.5, 183.3, 246.1)), dot(p, vec3(113.5, 271.9, 124.6)));
+	return fract(sin(p) * 43758.5453);
+}
+// соты: насколько точка близка к границе ячеек (ячейки в объёме, не растягиваются у макушки)
+float cells(vec3 x) {
+	vec3 p = floor(x);
+	vec3 f = fract(x);
+	float d1 = 8.0;
+	float d2 = 8.0;
+	for (int k = -1; k <= 1; k++) {
+		for (int j = -1; j <= 1; j++) {
+			for (int i = -1; i <= 1; i++) {
+				vec3 b = vec3(float(i), float(j), float(k));
+				vec3 r = b + h3(p + b) * 0.8 - f;
+				float d = dot(r, r);
+				if (d < d1) {
+					d2 = d1;
+					d1 = d;
+				} else if (d < d2) {
+					d2 = d;
+				}
+			}
+		}
+	}
+	return sqrt(d2) - sqrt(d1);
+}
 void fragment() {
-	float fr = pow(1.0 - abs(dot(NORMAL, VIEW)), 2.2);
-	vec2 uv = UV * vec2(36.0, 18.0) + vec2(0.0, TIME * 0.25);
-	vec2 g = abs(fract(uv) - 0.5);
-	float line = smoothstep(0.44, 0.5, max(g.x, g.y));
-	float a = (fr * 0.75 + line * (0.12 + hit * 0.5) + 0.03 + hit * 0.25) * fade;
-	ALBEDO = col * 1.6;
-	ALPHA = clamp(a, 0.0, 1.0);
+	float fr = pow(1.0 - abs(dot(NORMAL, VIEW)), 2.4);
+	float line = 1.0 - smoothstep(0.0, 0.09, cells(lpos * 0.55));
+	// полоса бежит снизу вверх
+	float scan = smoothstep(0.85, 1.0, sin(lpos.y * 0.6 - TIME * 1.5) * 0.5 + 0.5) * 0.25;
+	// попадание: яркое пятно и волна, расходящаяся от места удара
+	float dh = distance(wpos, hit_pos);
+	float ring = (1.0 - smoothstep(0.0, 0.9, abs(dh - (1.0 - hit) * 7.0))) * hit;
+	float near = exp(-dh * 0.45) * hit;
+	float a = fr * 0.85 + line * (0.3 + scan + hit * 0.35 + near * 1.5) + 0.02 + ring * 0.9 + near * 0.6;
+	ALBEDO = mix(col, vec3(1.0, 0.95, 0.9), line * 0.25 + near * 0.4) * 1.7;
+	ALPHA = clamp(a * fade, 0.0, 1.0);
 }
 """
 	_barrier_mat = ShaderMaterial.new()
 	_barrier_mat.shader = sh
-	_barrier_mat.set_shader_parameter("col", Vector3(col.r, col.g, col.b).lerp(Vector3(0.5, 0.85, 1.0), 0.5))
+	_barrier_mat.set_shader_parameter("col", Vector3(col.r, col.g, col.b).lerp(Vector3(0.5, 0.85, 1.0), 0.15))
 	_barrier = MeshInstance3D.new()
 	var sm := SphereMesh.new()
 	sm.radius = 8.6
@@ -353,7 +408,16 @@ func take_damage(amount: float, pos: Vector3, _dir: Vector3, _kind := "", src: N
 		return
 	if protected():
 		if _barrier_on:
-			_barrier_hit = minf(_barrier_hit + 0.5, 1.0)
+			_barrier_hit = 1.0
+			# место удара на куполе: искры и волна оттуда
+			var dv := pos - global_position
+			if dv.length() < 0.1:
+				dv = Vector3.UP
+			dv = dv.normalized()
+			var hp := global_position + Vector3(dv.x * 8.6, dv.y * 8.6 * 0.95, dv.z * 8.6)
+			_barrier_mat.set_shader_parameter("hit_pos", hp)
+			if _barrier.visible:
+				Fx.spark(hp, dv, true, false)
 		return
 	if src != null and is_instance_valid(src):
 		last_attacker = src
@@ -590,6 +654,8 @@ func _update_core(delta: float) -> void:
 			else:
 				_zap_cd = 0.3
 	_orb_mat.emission_energy_multiplier = glow
+	if _halo != null:
+		_halo.scale = Vector3.ONE * (2.8 + glow * 0.75)
 
 
 # цель Теслы: сначала мехи, потом крипы; только видимые команде ядра

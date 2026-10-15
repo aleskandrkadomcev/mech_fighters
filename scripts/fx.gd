@@ -53,6 +53,8 @@ shader_type spatial;
 render_mode unshaded, depth_draw_never, cull_disabled, shadows_disabled;
 uniform float fade = 1.0;
 uniform float seed = 0.0;
+uniform sampler2D burst : filter_linear_mipmap;
+uniform float has_burst = 0.0;
 float h(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7)) + seed) * 43758.5453); }
 float n(vec2 p) {
 	vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
@@ -62,12 +64,13 @@ void fragment() {
 	vec2 c = UV * 2.0 - 1.0;
 	float r = length(c);
 	float a = atan(c.y, c.x);
-	// рваный край: радиус гуляет по углу
-	float edge = 0.62 + 0.3 * n(vec2(a * 2.5, seed));
-	float m = 1.0 - smoothstep(edge * 0.55, edge, r);
-	m *= 0.75 + 0.25 * n(c * 6.0);
-	ALBEDO = mix(vec3(0.05, 0.04, 0.035), vec3(0.16, 0.1, 0.06), smoothstep(0.0, edge, r));
-	ALPHA = m * 0.8 * fade;
+	// пятно с рваным краем, поверх — звёздчатые лучи копоти от взрыва (спрайт scorch_02)
+	float edge = 0.5 + 0.25 * n(vec2(a * 2.5, seed));
+	float m = 1.0 - smoothstep(edge * 0.2, edge, r);
+	float rays = texture(burst, UV).a * has_burst;
+	m = max(m * (0.6 + 0.4 * n(c * 6.0)), rays * 0.8 * (0.55 + 0.45 * n(c * 9.0)));
+	ALBEDO = mix(vec3(0.04, 0.035, 0.03), vec3(0.14, 0.1, 0.07), smoothstep(0.0, 0.9, r));
+	ALPHA = clamp(m * 0.72 * fade, 0.0, 1.0);
 }
 """
 
@@ -114,36 +117,18 @@ func spark(pos: Vector3, normal: Vector3, on_target: bool, sound := true) -> voi
 	var scene := get_tree().current_scene
 	if scene == null:
 		return
-	var mat := _mat_hit if on_target else _mat_wall
-
-	var fl := _mesh_node(_flash_mesh, mat, pos)
-	fl.scale = Vector3.ONE * (0.9 if on_target else 0.5)
-	var tw := fl.create_tween()
-	tw.tween_property(fl, "scale", Vector3.ONE * 0.05, 0.09)
-	tw.tween_callback(fl.queue_free)
-
-	var p := CPUParticles3D.new()
-	p.mesh = _spark_mesh
-	p.material_override = mat
-	p.one_shot = true
-	p.explosiveness = 1.0
-	p.amount = 10 if on_target else 5
-	p.lifetime = 0.28
-	p.direction = normal
-	p.spread = 50.0
-	p.initial_velocity_min = 5.0
-	p.initial_velocity_max = 12.0
-	p.gravity = Vector3(0, -22, 0)
-	p.scale_amount_min = 0.5
-	p.scale_amount_max = 1.2
-	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	p.position = pos          # место задаём до добавления в сцену, иначе частицы рисуются в центре карты
-	scene.add_child(p)
-	p.emitting = true
-	get_tree().create_timer(0.6).timeout.connect(p.queue_free)
-
 	if on_target:
-		_flare(pos, "star_07", 2.2, Color(1.0, 0.8, 0.45, 1.0), 0.1)
+		# броня: веер оранжевых искр и короткая вспышка
+		_streaks(pos, normal, 9, Color(1.0, 0.62, 0.22), 6.0, 15.0, 0.28, 60.0, 0.75)
+		_flare(pos, "circle_05", 1.6, Color(1.0, 0.55, 0.2, 1.0), 0.09)
+	else:
+		# земля или стена: пара искр и облачко пыли (бурой с земли, серой со стены)
+		var ground := normal.y > 0.6
+		_streaks(pos, normal, 4, Color(1.0, 0.7, 0.35), 4.0, 10.0, 0.2, 55.0, 0.5)
+		_emit(pos + normal * 0.2, _quad(), _sprite_mat("smoke_07"), 3, 0.8, {"dir": normal, "spread": 40.0,
+			"v0": 0.8, "v1": 2.2, "damp": 1.5, "g": Vector3(0, -0.4 if ground else 0.3, 0), "s0": 0.6, "s1": 1.1,
+			"grow": [0.5, 1.6], "spin": 40.0, "ramp": _dust_ramp(Color(0.42, 0.34, 0.25) if ground else Color(0.55, 0.53, 0.5))})
+		_flare(pos, "circle_05", 0.7, Color(1.0, 0.6, 0.3, 1.0), 0.06)
 	if sound:
 		Sfx.play_at("hit" if on_target else "wall", pos, -6.0 if on_target else -14.0, 0.12)
 
@@ -156,86 +141,43 @@ func explosion(pos: Vector3, radius: float) -> void:
 	var scene := get_tree().current_scene
 	if scene == null:
 		return
-
-	# огненный шар: быстро раздувается и гаснет
-	var ball_mat := _unshaded(Color(2.4, 1.6, 0.6, 0.95), true)
-	var ball := _mesh_node(_flash_mesh, ball_mat, pos + Vector3.UP * 0.4)
-	ball.scale = Vector3.ONE * radius * 0.5
-	var tw := ball.create_tween()
-	tw.tween_property(ball, "scale", Vector3.ONE * radius * 1.5, 0.12).set_ease(Tween.EASE_OUT)
-	tw.parallel().tween_property(ball_mat, "albedo_color", Color(1.5, 0.5, 0.1, 0.0), 0.3)
-	tw.tween_callback(ball.queue_free)
+	var r := radius
+	# вспышка
+	_flare(pos + Vector3.UP * 0.9, "star_09", r * 3.0, Color(1.0, 0.85, 0.6, 1.0), 0.12)
+	_flare(pos + Vector3.UP * 0.7, "circle_05", r * 3.4, Color(1.0, 0.5, 0.15, 1.0), 0.25)
+	# огненный шар: плотные клубы раздуваются, темнеют и уходят в копоть
+	_emit(pos + Vector3.UP * 0.6, _quad(), _sprite_mat("smoke_07"), 14, 0.75, {"sphere": r * 0.25, "v0": r * 0.6, "v1": r * 1.4,
+		"damp": r * 2.0, "g": Vector3(0, 3.0, 0), "s0": r * 0.5, "s1": r * 0.85, "grow": [0.7, 1.6], "spin": 60.0, "ramp": _fire_ramp()})
+	# раскалённое ядро шара светится поверх клубов и быстро гаснет
+	_emit(pos + Vector3.UP * 0.7, _quad(), _sprite_mat("smoke_07", true), 8, 0.35, {"sphere": r * 0.2, "v0": r * 0.4, "v1": r * 1.0,
+		"damp": r * 2.0, "s0": r * 0.45, "s1": r * 0.75, "grow": [0.8, 1.4], "spin": 60.0, "ramp": _hot_ramp()})
+	# языки пламени
+	_emit(pos + Vector3.UP * 0.6, _quad(), _sprite_mat("fire_01", true), 8, 0.5, {"sphere": r * 0.3, "v0": r * 0.8, "v1": r * 1.6,
+		"damp": r * 2.0, "g": Vector3(0, 4.0, 0), "s0": r * 0.4, "s1": r * 0.7, "grow": [0.6, 1.2], "spin": 90.0, "ramp": _hot_ramp()})
+	# столб тёмного дыма
+	_emit(pos + Vector3.UP * 0.9, _quad(), _sprite_mat("smoke_04"), 10, 2.4, {"burst": 0.75, "sphere": r * 0.35, "spread": 45.0,
+		"v0": 1.0, "v1": 3.2, "damp": 0.6, "g": Vector3(0.4, 1.2, 0.2), "s0": r * 0.7, "s1": r * 1.2, "grow": [0.7, 2.2],
+		"spin": 25.0, "ramp": _smoke_ramp2()})
+	# обломки разлетаются и падают
+	_emit(pos + Vector3.UP * 0.4, _chunk(), _chunk_material(), 10, 1.1, {"spread": 70.0, "v0": 7.0, "v1": 15.0,
+		"g": Vector3(0, -24, 0), "s0": 0.5, "s1": 1.4, "spin": 400.0})
+	# искры и угли
+	_streaks(pos + Vector3.UP * 0.6, Vector3.UP, 18, Color(1.0, 0.55, 0.15), 9.0, 20.0, 0.7, 80.0, 0.9)
 
 	# ударная волна по земле: показывает реальный радиус урона
-	var ring_mat := _unshaded(Color(1.0, 0.6, 0.25, 0.9), true)
+	var ring_mat := _unshaded(Color(1.0, 0.6, 0.25, 0.5), true)
 	var ground := Vector3(pos.x, 0.12, pos.z)
 	var ring := _mesh_node(_ring_mesh, ring_mat, ground)
-	ring.scale = Vector3(radius * 0.2, 1, radius * 0.2)
+	ring.scale = Vector3(r * 0.2, 1, r * 0.2)
 	var tw2 := ring.create_tween()
-	tw2.tween_property(ring, "scale", Vector3(radius, 1, radius), 0.22).set_ease(Tween.EASE_OUT)
+	tw2.tween_property(ring, "scale", Vector3(r, 1, r), 0.22).set_ease(Tween.EASE_OUT)
 	tw2.parallel().tween_property(ring_mat, "albedo_color:a", 0.0, 0.4)
 	tw2.tween_callback(ring.queue_free)
 
-	# осколки
-	var p := CPUParticles3D.new()
-	p.mesh = _spark_mesh
-	p.material_override = _mat_hit
-	p.one_shot = true
-	p.explosiveness = 1.0
-	p.amount = 22
-	p.lifetime = 0.55
-	p.direction = Vector3.UP
-	p.spread = 75.0
-	p.initial_velocity_min = 8.0
-	p.initial_velocity_max = 20.0
-	p.gravity = Vector3(0, -30, 0)
-	p.scale_amount_min = 0.8
-	p.scale_amount_max = 2.0
-	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	p.position = pos + Vector3.UP * 0.3
-	scene.add_child(p)
-	p.emitting = true
-	get_tree().create_timer(1.0).timeout.connect(p.queue_free)
-
-	# языки огня и дым: спрайты, если есть
-	_flare(pos + Vector3.UP * 0.6, "fire_01", radius * 2.2, Color(1.0, 0.65, 0.3, 1.0), 0.28)
-	_flare(pos + Vector3.UP * 0.8, "flare_01", radius * 3.5, Color(1.0, 0.8, 0.5, 1.0), 0.12)
-	var smoke_mat := _unshaded(Color(1, 1, 1, 1), true)
-	smoke_mat.vertex_color_use_as_albedo = true
-	var s := CPUParticles3D.new()
-	var stex := Art.fx_tex("smoke_04")
-	if stex != null:
-		var qm := QuadMesh.new()
-		qm.size = Vector2(2, 2)
-		s.mesh = qm
-		smoke_mat.albedo_texture = stex
-		smoke_mat.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
-		s.angle_max = 360.0
-	else:
-		s.mesh = _smoke_mesh
-	s.material_override = smoke_mat
-	s.one_shot = true
-	s.explosiveness = 0.9
-	s.amount = 9
-	s.lifetime = 1.1
-	s.direction = Vector3.UP
-	s.spread = 60.0
-	s.initial_velocity_min = 1.5
-	s.initial_velocity_max = 4.5
-	s.gravity = Vector3(0, 1.5, 0)
-	s.scale_amount_min = radius * 0.3
-	s.scale_amount_max = radius * 0.55
-	s.color_ramp = _smoke_ramp
-	s.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	s.position = pos + Vector3.UP * 0.5
-	scene.add_child(s)
-	s.emitting = true
-	get_tree().create_timer(1.6).timeout.connect(s.queue_free)
-
-	_flash_light(pos + Vector3.UP * 1.5, Color(1.0, 0.6, 0.25), radius * 3.0, 0.35)
+	_flash_light(pos + Vector3.UP * 1.5, Color(1.0, 0.6, 0.25), r * 3.0, 0.35)
 	shake_at.emit(pos, Cfg.shake_explosion)
 	if pos.y < 3.5:
-		scorch(Vector3(pos.x, 0, pos.z), radius * 0.8)
+		scorch(Vector3(pos.x, 0, pos.z), r * 0.8)
 
 
 # тёмное пятно гари на земле после взрыва, медленно выцветает
@@ -250,6 +192,10 @@ func scorch(pos: Vector3, radius: float) -> void:
 	var mat := ShaderMaterial.new()
 	mat.shader = _scorch_shader
 	mat.set_shader_parameter("seed", randf() * 100.0)
+	var bt := Art.fx_tex("scorch_02")
+	if bt != null:
+		mat.set_shader_parameter("burst", bt)
+		mat.set_shader_parameter("has_burst", 1.0)
 	var mi := MeshInstance3D.new()
 	mi.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	mi.mesh = _scorch_mesh
@@ -257,7 +203,7 @@ func scorch(pos: Vector3, radius: float) -> void:
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	mi.position = pos + Vector3.UP * (0.03 + randf() * 0.02)
 	mi.rotation.y = randf() * TAU
-	mi.scale = Vector3.ONE * radius
+	mi.scale = Vector3.ONE * radius * 1.35
 	scene.add_child(mi)
 	_scorches.append(mi)
 	var tw := mi.create_tween()
@@ -486,17 +432,15 @@ func rail_beam(from: Vector3, to: Vector3, team: int) -> void:
 	var dir := d / len
 	# ящик растягиваем по его собственным осям (умножение справа). Basis.scaled() тянет по осям МИРА:
 	# выстрел вдоль X рисовался полосой длиной во весь выстрел поперёк, по Z, «через всю карту»
-	var look := Basis.looking_at(dir, Vector3.UP if absf(dir.y) < 0.99 else Vector3.RIGHT)
+	# широкое свечение и тонкое белое ядро, оба мягкие по краям и гаснут
 	for layer in 2:
-		var mat := _unshaded(Color(c.r * 3.0, c.g * 3.0, c.b * 3.0, 0.9) if layer == 0 else Color(1, 1, 1, 0.95), true)
-		var bm := BoxMesh.new()
-		bm.size = Vector3(1, 1, 1)
-		var mi := _mesh_node(bm, mat, from + d * 0.5)
-		var w := 0.32 if layer == 0 else 0.1
-		mi.global_transform = Transform3D(look * Basis.from_scale(Vector3(w, w, len)), from + d * 0.5)
+		var mat := beam_material(c if layer == 0 else Color(0.92, 0.97, 1.0), 3.5 if layer == 0 else 4.0, 1.4 if layer == 0 else 1.0, 0.35)
+		var mi := _mesh_node(_unit_quad(), mat, from + d * 0.5)
+		place_beam(mi, from, to, 1.8 if layer == 0 else 0.45)
 		var tw := mi.create_tween()
-		tw.tween_property(mat, "albedo_color:a", 0.0, 0.35).set_ease(Tween.EASE_IN)
+		tw.tween_method(func(v: float): mat.set_shader_parameter("fade", v), 1.0, 0.0, 0.4).set_ease(Tween.EASE_IN)
 		tw.tween_callback(mi.queue_free)
+	_streaks(to, -dir, 8, c, 5.0, 12.0, 0.3, 70.0, 0.8)
 	_flare(from, "flare_01", 4.0, Color(c.r, c.g, c.b, 1.0), 0.15)
 	_flare(to, "star_09", 3.0, Color(c.r, c.g, c.b, 1.0), 0.2)
 	_flash_light(from, c, 10.0, 0.15)
@@ -753,16 +697,17 @@ func ping(pos: Vector3, team: int) -> void:
 #  center: точка у земли под юнитом, radius: насколько широко, height: до какой высоты
 # ------------------------------------------------------------------
 
-var _zap_core: StandardMaterial3D
-var _zap_glow: StandardMaterial3D
+var _zap_core: Material
+var _zap_glow: Material
+var _zap_haze: Material
 
 
 func _zap_mats() -> void:
 	if _zap_core == null:
-		_zap_core = _unshaded(Color(0.75, 0.9, 1.0) * 1.8, true)
-		_zap_core.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-		_zap_glow = _unshaded(Color(0.25, 0.5, 1.0, 0.25), true)
-		_zap_glow.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		# ленты уже повёрнуты к камере, мягкие края по UV.x
+		_zap_core = beam_material(Color(0.85, 0.93, 1.0), 4.0, 0.8, 0.5, false)
+		_zap_glow = beam_material(Color(0.3, 0.55, 1.0), 2.2, 1.8, 0.0, false)
+		_zap_haze = beam_material(Color(0.25, 0.45, 1.0), 0.6, 2.5, 0.0, false)
 
 
 func zap(center: Vector3, radius: float, height: float) -> void:
@@ -794,7 +739,7 @@ func zap(center: Vector3, radius: float, height: float) -> void:
 	var im := ImmediateMesh.new()
 	var view := cam.global_position
 	for pass_i in 2:
-		var w := 0.06 if pass_i == 0 else 0.24
+		var w := 0.1 if pass_i == 0 else 0.45
 		im.surface_begin(Mesh.PRIMITIVE_TRIANGLES, _zap_core if pass_i == 0 else _zap_glow)
 		_ribbon(im, pts, w, view)
 		if not branch.is_empty():
@@ -814,12 +759,10 @@ func _ribbon(im: ImmediateMesh, pts: Array[Vector3], w: float, view: Vector3) ->
 		var a := pts[i]
 		var b := pts[i + 1]
 		var side := (b - a).cross(view - a).normalized() * w * 0.5
-		im.surface_add_vertex(a - side)
-		im.surface_add_vertex(a + side)
-		im.surface_add_vertex(b + side)
-		im.surface_add_vertex(a - side)
-		im.surface_add_vertex(b + side)
-		im.surface_add_vertex(b - side)
+		# UV.x поперёк ленты: шейдер делает мягкие края и яркое ядро
+		for v in [[a - side, 0.0], [a + side, 1.0], [b + side, 1.0], [a - side, 0.0], [b + side, 1.0], [b - side, 0.0]]:
+			im.surface_set_uv(Vector2(v[1], 0.5))
+			im.surface_add_vertex(v[0])
 
 
 # ------------------------------------------------------------------
@@ -829,8 +772,10 @@ func _ribbon(im: ImmediateMesh, pts: Array[Vector3], w: float, view: Vector3) ->
 func tesla_bolt(from: Vector3, to: Vector3) -> void:
 	for i in 3:
 		get_tree().create_timer(i * 0.07, false).timeout.connect(_bolt.bind(from, to, 1.0 - i * 0.2))
-	_flare(to, "star_07", 3.5, Color(0.6, 0.85, 1.0, 1.0), 0.15)
-	_flare(from, "circle_05", 3.0, Color(0.5, 0.8, 1.0, 1.0), 0.2)
+	_flare(to, "star_07", 4.5, Color(0.6, 0.85, 1.0, 1.0), 0.18)
+	_flare(to, "circle_05", 5.0, Color(0.35, 0.6, 1.0, 1.0), 0.25)
+	_flare(from, "circle_05", 4.0, Color(0.5, 0.8, 1.0, 1.0), 0.22)
+	_streaks(to, Vector3.UP, 12, Color(0.65, 0.85, 1.0), 5.0, 13.0, 0.35, 90.0, 0.8)
 	_flash_light(to, Color(0.5, 0.75, 1.0), 12.0, 0.18)
 	shake_at.emit(to, 0.15)
 
@@ -842,27 +787,257 @@ func _bolt(from: Vector3, to: Vector3, k: float) -> void:
 		return
 	_zap_mats()
 	var span := from.distance_to(to)
-	var n := clampi(int(span / 1.6), 6, 24)
+	var n := clampi(int(span / 1.2), 8, 30)
 	var pts: Array[Vector3] = [from]
 	for i in range(1, n):
 		var t := float(i) / n
-		var amp := span * 0.06 * sin(t * PI)
+		var amp := span * 0.07 * sin(t * PI)
 		pts.append(from.lerp(to, t) + Vector3(randf_range(-1, 1), randf_range(-0.6, 0.6), randf_range(-1, 1)) * amp)
 	pts.append(to)
+	# отростки: короткие ломаные от случайных точек основной молнии
+	var branches: Array = []
+	for b in 3:
+		var j := randi_range(2, n - 2)
+		var br: Array[Vector3] = [pts[j]]
+		var dir := Vector3(randf_range(-1, 1), randf_range(-0.8, 0.2), randf_range(-1, 1)).normalized()
+		for q in 3:
+			br.append(br[-1] + (dir + Vector3(randf_range(-0.5, 0.5), randf_range(-0.4, 0.4), randf_range(-0.5, 0.5))) * span * 0.05)
+		branches.append(br)
 	var im := ImmediateMesh.new()
 	var view := cam.global_position
-	for pass_i in 2:
-		var w := (0.16 if pass_i == 0 else 0.7) * k
-		im.surface_begin(Mesh.PRIMITIVE_TRIANGLES, _zap_core if pass_i == 0 else _zap_glow)
+	for pass_i in 3:
+		var w: float = [0.32, 1.5, 3.6][pass_i] * k
+		im.surface_begin(Mesh.PRIMITIVE_TRIANGLES, [_zap_core, _zap_glow, _zap_haze][pass_i])
 		_ribbon(im, pts, w, view)
-		# пара отростков
-		for b in 2:
-			var j := randi_range(2, n - 2)
-			var p0 := pts[j]
-			var br: Array[Vector3] = [p0, p0 + Vector3(randf_range(-1, 1), randf_range(-0.8, 0.3), randf_range(-1, 1)) * span * 0.12]
-			_ribbon(im, br, w * 0.6, view)
+		for br in branches:
+			_ribbon(im, br, w * 0.55, view)
 		im.surface_end()
 	var mi := _mesh_node(im, null, Vector3.ZERO)
 	var tw := mi.create_tween()
 	tw.tween_interval(0.07)
 	tw.tween_callback(mi.queue_free)
+
+
+# ------------------------------------------------------------------
+#  Кирпичики эффектов: светящийся луч с мягкими краями, облачка и искры частицами
+# ------------------------------------------------------------------
+
+const BEAM_SHADER := """shader_type spatial;
+render_mode unshaded, blend_add, cull_disabled, depth_draw_never, shadows_disabled;
+uniform vec3 col = vec3(1.0, 0.5, 0.2);
+uniform float energy = 3.0;
+uniform float soft = 1.6;
+uniform float core = 0.3;
+uniform float fade = 1.0;
+uniform bool billboard = true;
+uniform float tip = 0.0;
+void vertex() {
+	// плоскость вдоль своей оси Y, развёрнута к камере (длина — ось Y узла, ширина — ось X)
+	if (billboard) {
+		vec3 axis = MODEL_MATRIX[1].xyz;
+		vec3 c = MODEL_MATRIX[3].xyz;
+		vec3 side = cross(axis, INV_VIEW_MATRIX[3].xyz - c);
+		float sl = length(side);
+		side = sl > 0.00001 ? side / sl : vec3(1.0, 0.0, 0.0);
+		side *= length(MODEL_MATRIX[0].xyz);
+		vec3 nrm = normalize(cross(side, axis) + vec3(0.0, 0.00001, 0.0));
+		MODELVIEW_MATRIX = VIEW_MATRIX * mat4(vec4(side, 0.0), vec4(axis, 0.0), vec4(nrm, 0.0), vec4(c, 1.0));
+	}
+}
+void fragment() {
+	float e = 1.0 - abs(UV.x * 2.0 - 1.0);
+	float ends = 1.0;
+	if (tip > 0.0) {
+		ends = smoothstep(0.0, tip, UV.y) * smoothstep(0.0, tip, 1.0 - UV.y);
+	}
+	float glow = pow(e, soft) * ends;
+	float hot = smoothstep(1.0 - core, 1.0, e) * ends;
+	ALBEDO = col * energy + vec3(hot * energy * 0.7);
+	ALPHA = clamp(glow * fade, 0.0, 1.0);
+}
+"""
+
+var _beam_shader: Shader
+var _sprite_mats := {}
+var _ramps := {}
+var _unit_q: QuadMesh
+var _part_quad: QuadMesh
+var _streak_quad: QuadMesh
+var _chunk_box: BoxMesh
+var _chunk_mat: StandardMaterial3D
+
+
+# светящийся луч: яркое ядро, к краям мягко гаснет. billboard — плоскость сама повёрнута к камере
+# (лазер, рельса, трассер, искра); без него края задаёт UV.x (ленты молнии)
+func beam_material(col: Color, energy := 3.0, soft := 1.6, core := 0.3, billboard := true, tip := 0.0) -> ShaderMaterial:
+	if _beam_shader == null:
+		_beam_shader = Shader.new()
+		_beam_shader.code = BEAM_SHADER
+	var m := ShaderMaterial.new()
+	m.shader = _beam_shader
+	m.set_shader_parameter("col", Vector3(col.r, col.g, col.b))
+	m.set_shader_parameter("energy", energy)
+	m.set_shader_parameter("soft", soft)
+	m.set_shader_parameter("core", core)
+	m.set_shader_parameter("billboard", billboard)
+	m.set_shader_parameter("tip", tip)
+	return m
+
+
+# поставить луч (плоскость 1×1 с beam_material) от from до to шириной width
+func place_beam(mi: Node3D, from: Vector3, to: Vector3, width: float) -> void:
+	var d := to - from
+	if d.length() < 0.001:
+		d = Vector3(0, 0, -0.001)
+	var perp := d.cross(Vector3.UP)
+	if perp.length() < 0.0001:
+		perp = d.cross(Vector3.RIGHT)
+	perp = perp.normalized() * width
+	mi.global_transform = Transform3D(Basis(perp, d, perp.cross(d).normalized()), from + d * 0.5)
+
+
+func _unit_quad() -> QuadMesh:
+	if _unit_q == null:
+		_unit_q = QuadMesh.new()
+		_unit_q.size = Vector2.ONE
+	return _unit_q
+
+
+func _quad() -> QuadMesh:
+	if _part_quad == null:
+		_part_quad = QuadMesh.new()
+		_part_quad.size = Vector2.ONE
+	return _part_quad
+
+
+func _chunk() -> BoxMesh:
+	if _chunk_box == null:
+		_chunk_box = BoxMesh.new()
+		_chunk_box.size = Vector3(0.22, 0.16, 0.2)
+	return _chunk_box
+
+
+func _chunk_material() -> StandardMaterial3D:
+	if _chunk_mat == null:
+		_chunk_mat = StandardMaterial3D.new()
+		_chunk_mat.albedo_color = Color(0.08, 0.072, 0.065)
+		_chunk_mat.roughness = 0.9
+	return _chunk_mat
+
+
+# спрайт из assets/fx для частиц: всегда лицом к камере, цвет и прозрачность из частицы
+func _sprite_mat(tex: String, add := false) -> StandardMaterial3D:
+	var key := tex + ("+" if add else "")
+	if _sprite_mats.has(key):
+		return _sprite_mats[key]
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.vertex_color_use_as_albedo = true
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	if add:
+		m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	m.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	m.albedo_texture = Art.fx_tex(tex)
+	_sprite_mats[key] = m
+	return m
+
+
+func _ramp(key: String, stops: Array) -> Gradient:
+	if _ramps.has(key):
+		return _ramps[key]
+	var g := Gradient.new()
+	var offs := PackedFloat32Array()
+	var cols := PackedColorArray()
+	for st in stops:
+		offs.append(st[0])
+		cols.append(st[1])
+	g.offsets = offs
+	g.colors = cols
+	_ramps[key] = g
+	return g
+
+
+# огонь: бело-жёлтый, оранжевый, тёмно-красный и в копоть (ярче 1 — светится)
+func _fire_ramp() -> Gradient:
+	return _ramp("fire", [[0.0, Color(1.6, 1.3, 0.85, 1.0)], [0.18, Color(1.5, 0.75, 0.22, 1.0)], [0.45, Color(0.7, 0.22, 0.06, 0.9)],
+		[0.75, Color(0.18, 0.1, 0.07, 0.6)], [1.0, Color(0.08, 0.07, 0.06, 0.0)]])
+
+
+# свечение огня (для сложения цветов): жёлто-белое, оранжевое, гаснет
+func _hot_ramp() -> Gradient:
+	return _ramp("hot", [[0.0, Color(1.0, 0.85, 0.5, 1.0)], [0.3, Color(1.0, 0.5, 0.15, 0.8)], [1.0, Color(0.6, 0.15, 0.03, 0.0)]])
+
+
+func _smoke_ramp2() -> Gradient:
+	return _ramp("smoke", [[0.0, Color(0.14, 0.12, 0.1, 0.0)], [0.12, Color(0.16, 0.14, 0.12, 0.8)], [0.5, Color(0.24, 0.22, 0.2, 0.55)],
+		[1.0, Color(0.32, 0.3, 0.28, 0.0)]])
+
+
+func _dust_ramp(c: Color) -> Gradient:
+	return _ramp("dust_" + c.to_html(), [[0.0, Color(c.r, c.g, c.b, 0.0)], [0.15, Color(c.r, c.g, c.b, 0.6)], [1.0, Color(c.r * 1.1, c.g * 1.1, c.b * 1.1, 0.0)]])
+
+
+# на низкой и средней графике частиц меньше
+func _gfx_k() -> float:
+	return Cfg.gfx(0.5, 0.75, 1.0)
+
+
+# одноразовый выброс частиц. cfg: dir, spread, v0, v1, g, damp, s0, s1, grow [от, до], spin (градусов/с),
+# sphere (радиус облака вылета), burst (0..1, одновременность), ramp (цвет по жизни), align (вытянуть вдоль скорости)
+func _emit(pos: Vector3, mesh: Mesh, mat: Material, amount: int, life: float, cfg := {}) -> CPUParticles3D:
+	var scene := get_tree().current_scene
+	var p := CPUParticles3D.new()
+	p.mesh = mesh
+	p.material_override = mat
+	p.one_shot = true
+	p.explosiveness = cfg.get("burst", 1.0)
+	p.amount = maxi(int(round(amount * _gfx_k())), 1)
+	p.lifetime = life
+	p.direction = cfg.get("dir", Vector3.UP)
+	p.spread = cfg.get("spread", 180.0)
+	p.initial_velocity_min = cfg.get("v0", 1.0)
+	p.initial_velocity_max = cfg.get("v1", 2.0)
+	p.gravity = cfg.get("g", Vector3.ZERO)
+	p.damping_min = cfg.get("damp", 0.0)
+	p.damping_max = cfg.get("damp", 0.0)
+	p.scale_amount_min = cfg.get("s0", 1.0)
+	p.scale_amount_max = cfg.get("s1", 1.0)
+	if cfg.has("grow"):
+		var c := Curve.new()
+		c.max_value = 4.0
+		c.add_point(Vector2(0.0, cfg["grow"][0]))
+		c.add_point(Vector2(1.0, cfg["grow"][1]))
+		p.scale_amount_curve = c
+	if cfg.has("ramp"):
+		p.color_ramp = cfg["ramp"]
+	if cfg.get("spin", 0.0) > 0.0:
+		p.angle_min = 0.0
+		p.angle_max = 360.0
+		p.angular_velocity_min = -cfg["spin"]
+		p.angular_velocity_max = cfg["spin"]
+	if cfg.get("sphere", 0.0) > 0.0:
+		p.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+		p.emission_sphere_radius = cfg["sphere"]
+	p.particle_flag_align_y = cfg.get("align", false)
+	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	p.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
+	p.position = pos
+	scene.add_child(p)
+	p.emitting = true
+	get_tree().create_timer(life * 1.3 + 0.2).timeout.connect(p.queue_free)
+	return p
+
+
+# искры: светящиеся чёрточки, вытянутые вдоль полёта, падают
+func _streaks(pos: Vector3, dir: Vector3, n: int, col: Color, v0: float, v1: float, life: float, spread := 55.0, size := 0.7) -> void:
+	if get_tree().current_scene == null:
+		return
+	if _streak_quad == null:
+		_streak_quad = QuadMesh.new()
+		_streak_quad.size = Vector2(0.09, 1.0)
+	var key := "streak_" + col.to_html()
+	if not _sprite_mats.has(key):
+		_sprite_mats[key] = beam_material(col, 4.0, 1.2, 0.5, true, 0.35)
+	_emit(pos, _streak_quad, _sprite_mats[key], n, life, {"dir": dir, "spread": spread, "v0": v0, "v1": v1,
+		"g": Vector3(0, -18, 0), "s0": size * 0.6, "s1": size, "align": true, "grow": [1.0, 0.3]})

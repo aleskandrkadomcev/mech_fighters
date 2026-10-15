@@ -50,6 +50,13 @@ static func _mat(key: String, c: Color, tex: Texture2D = null) -> StandardMateri
 	return m
 
 
+static func _glow_mat(ours: bool) -> ShaderMaterial:
+	var key := "tr_glow_%s" % ours
+	if not _mats.has(key):
+		_mats[key] = Fx.beam_material(Color(1.0, 0.62, 0.22) if ours else Color(1.0, 0.28, 0.22), 2.6, 1.5, 0.25, true, 0.45)
+	return _mats[key]
+
+
 func _ready() -> void:
 	var friend := team == Fx.player_team
 	if style == "plasma":
@@ -87,6 +94,15 @@ func _ready() -> void:
 		mi.position = Vector3(0, 0, 0.9)
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(mi)
+		# свечение: мягкая чёрточка за головой снаряда, шире и длиннее ядра
+		var g := MeshInstance3D.new()
+		g.mesh = Fx._unit_quad()
+		g.material_override = _glow_mat(team == 0)
+		var gl := 3.2 + tracer * 6.0
+		var gw := 0.55 + tracer * 2.0
+		g.transform = Transform3D(Basis(Vector3(gw, 0, 0), Vector3(0, 0, gl), Vector3(0, -1, 0)), Vector3(0, 0, gl * 0.45))
+		g.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(g)
 	global_position = _start
 	if vel.length() > 0.01:
 		look_at(_start + vel, Vector3.UP)

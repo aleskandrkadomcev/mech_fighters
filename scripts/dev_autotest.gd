@@ -42,6 +42,7 @@ var _gfxbench := false           # графика: драка у турели н
 var _boom := false               # взрыв рядом с игроком на 5-м кадре (проверка следа гари)
 var _moba_secs := 60
 var _perf := false               # с mobatest: каждые 20 с сколько узлов, объектов, ресурсов и время кадра
+var _fxreel := false             # --fxreel: эффекты одним запуском — драка со взрывами, штурм базы, своя база
 var _aimtest := false            # --aimtest: прицел (земля / середина хитбокса), пределы стволов, гранатомёт
 var _fancheck := false           # --fancheck: веер обзора с пропуском лучей совпадает с полным (все лучи)
 var _cpubench := false           # --cpubench: что сколько стоит в обычном бою (окно, по очереди выключает тени, траву, крипов...)
@@ -149,6 +150,12 @@ func setup(main_node: Node3D, args: PackedStringArray) -> void:
 			_fancheck = true
 		elif a == "--aimtest":
 			_aimtest = true
+		elif a == "--fxreel":
+			_fxreel = true
+			_nohud = true
+			_target = FX_REEL[_reel_i][0]
+			for f in FX_REEL[_reel_i][1]:
+				_shots_left.append(f)
 		elif a == "--cpubench" or a == "--cpubench-gpu":
 			_cpubench = true
 			CB_RUNS = CB_RUNS_GPU if a == "--cpubench-gpu" else CB_RUNS_CPU
@@ -266,6 +273,8 @@ func _process(_delta: float) -> void:
 		_run_linktest()
 	if _gfxbench:
 		_run_gfxbench()
+	if _fxreel and _target == "fight" and (_frame == 30 or _frame == 95):
+		Fx.explosion(Vector3(58, 1.8, 0) if _frame == 30 else Vector3(61, 1.8, 8), 4.5)
 	if _boom and _frame == 5:
 		Fx.explosion(main.mech.global_position + Vector3(7, 1.8, 3), 4.5)
 		Fx.explosion(main.mech.global_position + Vector3(-6, 1.8, -4), 3.0)
@@ -277,7 +286,7 @@ func _process(_delta: float) -> void:
 		var shot_f := _frame     # пока ждём отрисовку, счётчик кадров может уйти вперёд
 		await RenderingServer.frame_post_draw
 		var img := get_viewport().get_texture().get_image()
-		img.save_png("%s/f%04d.png" % [_shot_dir, shot_f])
+		img.save_png(("%s/%s_f%04d.png" % [_shot_dir, _target, shot_f]) if _fxreel else ("%s/f%04d.png" % [_shot_dir, shot_f]))
 		_shots_left.erase(shot_f)
 		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and not _linktest and _mechexport == "" and not _gfxbench and not _cpubench and not _fancheck and not _aimtest:
 			get_tree().quit()
@@ -1420,10 +1429,32 @@ func _run_targetshot() -> void:
 		if a[0].stun_left > 0.0 and not a[0].get_meta("was_stun", false):
 			print("[TARGET] f=%d молния в %s" % [_frame, Parts.pname(a[0].build["mech"])])
 			if _shot_dir != "":
-				_shots_left.append_array([_frame + 2, _frame + 6])   # молния видна доли секунды: снимаем сразу
+				for f in [_frame + 2, _frame + 6]:     # молния видна доли секунды: снимаем сразу
+					if not _shots_left.has(f):         # два меха под молнией в один кадр — не снимать дважды
+						_shots_left.append(f)
 		a[0].set_meta("was_stun", a[0].stun_left > 0.0)
 	var end_f: int = {"fight": 200, "base": 500, "calm": 220}.get(_target, 300)
 	if _frame >= end_f and _shots_left.is_empty():
+		if _fxreel:
+			_reel_next()
+		else:
+			get_tree().quit()
+
+
+# --fxreel: постановки по очереди (бой перезапускается), снимки с именем постановки
+const FX_REEL := [["fight", [33, 38, 45, 60, 100, 103, 110, 140, 175]], ["base", [150, 300, 450]], ["calm", [60, 130]]]
+static var _reel_i := 0
+var _reel_done := false
+
+
+func _reel_next() -> void:
+	if _reel_done:
+		return
+	_reel_done = true
+	_reel_i += 1
+	if _reel_i < FX_REEL.size():
+		get_tree().reload_current_scene()
+	else:
 		get_tree().quit()
 
 
