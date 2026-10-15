@@ -662,9 +662,17 @@ func _think_hunt(delta: float, pos: Vector3) -> Vector3:
 	var goal := Vector3.ZERO
 	var known := _nearest_seen_enemy(pos)
 	var crate = main.crate_warning_pos()
-	if known != null:
+	var dock = _dock_goal()
+	var poi = _poi_goal(pos)
+	if dock != null:
+		dbg = "dock"
+		goal = dock
+	elif known != null:
 		dbg = "hunt"
 		goal = known.global_position
+	elif poi != null:
+		dbg = "poi"
+		goal = poi
 	elif crate != null and mech.ammo_ratio() < 0.5:
 		dbg = "crate"
 		goal = crate
@@ -683,6 +691,32 @@ func _think_hunt(delta: float, pos: Vector3) -> Vector3:
 	mech._run = to.length() > 25.0 and mech.energy > 40.0
 	mech.aim_point = Vector3(goal.x, Cfg.aim_height, goal.z)
 	return _follow_path(delta, pos, goal, to.normalized())
+
+
+# PvP: побитый или пустой бот идёт чиниться к своему ремонтному доку и стоит там, пока не починится
+func _dock_goal():
+	var full: bool = mech.hp >= mech.max_hp() * 0.95 and mech.ammo_ratio() >= 0.9
+	var hurt: bool = mech.hp < mech.max_hp() * 0.6 or mech.ammo_ratio() < 0.4
+	for p in mech.get_tree().get_nodes_in_group("pois"):
+		if p.kind == "dock" and p.owner_team == mech.team:
+			if hurt or (dbg == "dock" and not full):
+				return p.global_position
+	return null
+
+
+# ближайшая точка, которая не наша (радар, док): её стоит захватить
+func _poi_goal(pos: Vector3):
+	var best = null
+	var best_d := 1e9
+	for p in mech.get_tree().get_nodes_in_group("pois"):
+		if p.owner_team == mech.team:
+			continue
+		var pp: Vector3 = p.global_position
+		var d := Vector3(pp.x - pos.x, 0, pp.z - pos.z).length()
+		if d < best_d:
+			best_d = d
+			best = pp
+	return best
 
 
 # ближайший враг, которого сейчас видит команда бота (на любом расстоянии)

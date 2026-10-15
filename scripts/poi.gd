@@ -2,8 +2,11 @@ extends Node3D
 ## Точка интереса. Встань на неё без врагов рядом и подержи: точка станет твоей командой.
 ## Пока точка твоя, вся команда получает бонус (какой — задаёт kind) и видит вокруг точки.
 ## Если на точке стоят обе команды, захват замирает.
+## Виды: regen — Реактор (+восстановление энергии), damage — Арсенал (+урон),
+## radar — Радар (раз в poi_radar_period секунд скан: команда видит всех врагов, даже невидимок; см. vision.gd),
+## dock — Ремонтный док (чинит и пополняет патроны своим мехам в круге).
 
-var kind := "regen"              # "regen" = Реактор (+восстановление энергии), "damage" = Арсенал (+урон)
+var kind := "regen"
 var title := "Реактор"
 var owner_team := -1             # -1 ничья
 var progress := 0.0              # -1..1: к команде 0 минус, к команде 1 плюс
@@ -11,6 +14,9 @@ var _ring_mat: StandardMaterial3D
 var _core_mat: StandardMaterial3D
 var _ring: MeshInstance3D
 var _label: Label3D
+var scan_left := 0.0             # радар: сколько ещё секунд идёт скан (vision.gd показывает врагов)
+var _scan_t := 0.0               # радар: до следующего скана
+var _dish: Node3D                # радар: вращающаяся антенна (только вид)
 
 
 func _ready() -> void:
@@ -79,6 +85,48 @@ func _ready() -> void:
 	core.material_override = _core_mat
 	core.position.y = 2.3
 	add_child(core)
+	if kind == "radar":
+		# антенна радара на крыше маяка, крутится (_process)
+		_dish = Node3D.new()
+		_dish.position.y = 4.15
+		add_child(_dish)
+		var mast := MeshInstance3D.new()
+		var mm := CylinderMesh.new()
+		mm.top_radius = 0.12
+		mm.bottom_radius = 0.16
+		mm.height = 0.8
+		mast.mesh = mm
+		mast.material_override = frame
+		mast.position.y = 0.4
+		_dish.add_child(mast)
+		var plate := MeshInstance3D.new()
+		var pm := BoxMesh.new()
+		pm.size = Vector3(3.2, 1.1, 0.14)
+		plate.mesh = pm
+		plate.material_override = frame
+		plate.position = Vector3(0, 1.0, 0.25)
+		plate.rotation.x = -0.35
+		_dish.add_child(plate)
+	elif kind == "dock":
+		# ремонтный док: две стрелы-манипулятора над площадкой
+		for sgn in [-1.0, 1.0]:
+			var arm := MeshInstance3D.new()
+			var am := BoxMesh.new()
+			am.size = Vector3(0.3, 0.3, 4.2)
+			arm.mesh = am
+			arm.material_override = frame
+			arm.position = Vector3(sgn * 0.6, 3.6, 1.6)
+			arm.rotation.x = 0.25
+			add_child(arm)
+			var tool := MeshInstance3D.new()
+			var tm2 := CylinderMesh.new()
+			tm2.top_radius = 0.18
+			tm2.bottom_radius = 0.1
+			tm2.height = 0.7
+			tool.mesh = tm2
+			tool.material_override = _core_mat
+			tool.position = Vector3(sgn * 0.6, 2.9, 3.5)
+			add_child(tool)
 
 	_label = Label3D.new()
 	_label.text = title
@@ -93,9 +141,19 @@ func _ready() -> void:
 
 
 func bonus_text() -> String:
-	if kind == "regen":
-		return "+%d%% восстановления энергии" % int(round(Cfg.poi_regen_bonus * 100))
+	match kind:
+		"regen":
+			return "+%d%% восстановления энергии" % int(round(Cfg.poi_regen_bonus * 100))
+		"radar":
+			return "скан раз в %d с: все враги видны" % int(round(Cfg.poi_radar_period))
+		"dock":
+			return "ремонт и патроны своим в круге"
 	return "+%d%% урона" % int(round(Cfg.poi_damage_bonus * 100))
+
+
+func _process(delta: float) -> void:
+	if _dish != null:
+		_dish.rotation.y += delta * (1.6 if owner_team >= 0 else 0.4)
 
 
 func _physics_process(delta: float) -> void:
@@ -135,11 +193,35 @@ func _physics_process(delta: float) -> void:
 	_core_mat.albedo_color = own
 	_core_mat.emission = own
 
+	if owner_team < 0:
+		scan_left = 0.0
+		return
+	if kind == "radar":
+		scan_left = maxf(scan_left - delta, 0.0)
+		_scan_t -= delta
+		if _scan_t <= 0.0:
+			_scan_t = Cfg.poi_radar_period
+			scan_left = Cfg.poi_radar_reveal
+			# волна скана видна только команде-владельцу: враг не знает, что его засветили
+			if owner_team == Fx.player_team:
+				Fx.pulse(global_position + Vector3.UP * 4.5, 30.0)
+				Sfx.play_at("ping", global_position, -4.0, 0.0)
+	elif kind == "dock":
+		for m in get_tree().get_nodes_in_group("mechs"):
+			if m.dead or m.team != owner_team:
+				continue
+			var d: Vector3 = m.global_position - global_position
+			d.y = 0
+			if d.length() <= Cfg.poi_radius:
+				m.heal(Cfg.poi_dock_heal * delta)
+				m.add_ammo(Cfg.poi_dock_refill * delta)
+
 
 func _set_owner(t: int) -> void:
 	if t == owner_team:
 		return
 	owner_team = t
+	_scan_t = 0.0      # радар сканирует сразу после захвата
 	if t >= 0:
 		Fx.burst(global_position + Vector3.UP * 2.0, Cfg.player_color if t == 0 else Cfg.enemy_color, Cfg.poi_radius)
 		Sfx.play_at("emp", global_position, -6.0, 0.0)

@@ -35,7 +35,6 @@ const MapArt := preload("res://scripts/map_art.gd")
 const Art := preload("res://scripts/art.gd")
 
 const WALL_EXTRA := 30.0          # насколько стены и укрытия выше для выстрелов, чем на вид
-const POI_TITLES := {"regen": "Реактор", "damage": "Арсенал"}
 const BOT_NAMES := ["Ржавый", "Гром", "Шершень", "Клык", "Пепел", "Вольт", "Кремень", "Дизель", "Штиль", "Карась"]
 
 var map := {}                     # данные карты из файла
@@ -106,7 +105,7 @@ func _ready() -> void:
 	for p in map["pois"]:
 		var poi := Poi.new()
 		poi.kind = p[2] if p.size() > 2 else "regen"
-		poi.title = POI_TITLES.get(poi.kind, "Точка")
+		poi.title = Maps.POI_NAMES.get(poi.kind, "Точка")
 		poi.position = Vector3(float(p[0]), 0, float(p[1]))
 		add_child(poi)
 

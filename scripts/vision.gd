@@ -182,6 +182,12 @@ func _update() -> void:
 				continue
 			if mn.triggered or _seen_by(viewers, mn.global_position, 0.5, true):
 				vis[mn.get_instance_id()] = true
+		# радар команды сканирует: видны все враги, даже невидимки и те, что в тумане
+		for p in get_tree().get_nodes_in_group("pois"):
+			if p.kind == "radar" and p.owner_team == team and p.scan_left > 0.0:
+				for m in get_tree().get_nodes_in_group("mechs"):
+					if not m.dead and m.team != team:
+						vis[m.get_instance_id()] = true
 		if team == player_team:
 			for pk in get_tree().get_nodes_in_group("pickups"):
 				if _seen_by(viewers, pk.global_position, 0.5, false):

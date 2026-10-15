@@ -9,7 +9,7 @@ extends Node
 ##   spawns      [x, z, команда]                       точки появления (только для PvP)
 ##   covers      [x, z, ширина, высота, глубина, вид]   вид: wall (стена), barrier (барьер), rock (скала)
 ##   structures  [деталь, команда, x, z, линия]         деталь: turret_t1/t2/t3, hq; линия: top/mid/bot/base
-##   pois        [x, z, вид]                           вид: regen (Реактор), damage (Арсенал)
+##   pois        [x, z, вид]                           вид: regen (Реактор), damage (Арсенал), radar (Радар), dock (Ремонтный док)
 ##   crates      [x, z]                                куда падают ящики
 ##   lanepoints  [x, z, линия]                         через какие точки идёт линия (кроме турелей)
 ##   decor       [вид, x, z, поворот]                  низкие постройки (контейнеры, генераторы...)
@@ -18,6 +18,7 @@ extends Node
 ##   targets     [x, z]                                мишени для пристрелки
 ##   walkers     [x1, z1, x2, z2, скорость]            ходячие мишени
 
+const POI_NAMES := {"regen": "Реактор", "damage": "Арсенал", "radar": "Радар", "dock": "Ремонтный док"}
 const DIR_RES := "res://maps"
 const DIR_USER := "user://maps"
 const DEFAULT := "res://maps/classic.json"

@@ -15,7 +15,7 @@ const GameMenu := preload("res://scripts/game_menu.gd")
 const TOOLS := [
 	["Укрытия", [["wall", "Стена (разрушаемая)"], ["barrier", "Барьер (разрушаемый)"], ["rock", "Скала"]]],
 	["Постройки", [["hq", "Штаб"], ["turret_t1", "Турель 1"], ["turret_t2", "Турель 2 (ЭМИ)"], ["turret_t3", "Турель 3 (осадная)"]]],
-	["Точки", [["poi_regen", "Реактор"], ["poi_damage", "Арсенал"], ["crate", "Место ящика"], ["lanepoint", "Точка линии"]]],
+	["Точки", [["poi_regen", "Реактор"], ["poi_damage", "Арсенал"], ["poi_radar", "Радар"], ["poi_dock", "Ремонтный док"], ["crate", "Место ящика"], ["lanepoint", "Точка линии"]]],
 	["Украшения", [["decor_container", "Контейнер"], ["decor_generator", "Генератор"], ["decor_tank", "Цистерна"],
 		["decor_terminal", "Терминал"], ["decor_crates", "Ящики"], ["decor_antenna", "Антенна"], ["lamp", "Фонарь"], ["target", "Мишень"]]],
 	["Инструменты", [["select", "Выбор и перенос"], ["erase", "Ластик"]]],
@@ -887,7 +887,7 @@ func _update_sel_label() -> void:
 		"structures":
 			t = Parts.pname(it[0]) + ", " + ("своя команда" if int(it[1]) == 0 else "враги") + ", линия: " + Maps.LANE_NAMES.get(it[4] if it.size() > 4 else "mid", "")
 		"pois":
-			t = "Реактор" if it[2] == "regen" else "Арсенал"
+			t = Maps.POI_NAMES.get(it[2], "Точка")
 		"lanepoints":
 			t = "Точка линии: " + Maps.LANE_NAMES.get(it[2], "")
 		"decor":
@@ -999,7 +999,7 @@ func _rebuild_objects() -> void:
 		var pos := Vector3(float(p[0]), 0, float(p[1]))
 		_add_cyl(root, Cfg.poi_radius, 0.2, pos, Color(0.3, 0.4, 0.55))
 		_add_cyl(root, 1.4, 3.0, pos, Color(0.5, 0.8, 1.0))
-		_add_label(root, "Реактор" if p[2] == "regen" else "Арсенал", pos, Color(0.6, 0.9, 1.0))
+		_add_label(root, Maps.POI_NAMES.get(p[2], "Точка"), pos, Color(0.6, 0.9, 1.0))
 	for p in data["crates"]:
 		_add_box(root, Vector3(2.4, 1.6, 2.4), Vector3(float(p[0]), 0, float(p[1])), Color(1.0, 0.8, 0.25))
 	for p in data["lanepoints"]:
