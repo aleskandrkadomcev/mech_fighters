@@ -8,7 +8,10 @@
 #   2. вырезает лишнее (пушки модели, рога, фигурку пилота), при нужде зеркалит ногу;
 #   3. делит на части: hull (корпус), pelvis (таз, может не быть), thigh/shin/foot _l/_r (бедро, голень, ступня);
 #   4. переводит в метры игры (x вправо, y вверх, z назад) — части остаются в позе модели;
-#   5. упрощает, ужимает текстуру;
+#   5. запекает с исходной (миллионной) модели затенение щелей и углублений и затемняет им окраску:
+#      у исходника тёмные линии на корпусе — это тени щелей между деталями, после упрощения их нет;
+#      упрощает; окраска и карта рельефа 2048, шероховатость 1024; корпус матовее (глянец отражал небо
+#      и заливал окраску серым);
 #   6. добавляет точки (пустые узлы): суставы j_hip/j_knee/j_ankle _l/_r, крепления пушек gun_l/gun_r,
 #      модулей mod_0.., двигателей рывка jet_0.., полосы цвета команды accent_0.. (масштаб узла = размер полосы).
 # Игра (mech_visual.gd) сама переносит части в кости по суставам.
@@ -19,6 +22,11 @@ from mathutils import Vector, Matrix
 from mathutils.bvhtree import BVHTree
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TEX = 2048           # окраска и карта рельефа (исходник 4096: в бою мех мелкий, 4096 только съест видеопамять)
+TEX_ORM = 1024       # металличность и шероховатость
+AO_DIST = 0.18       # затенение щелей: на каком расстоянии (метры игры) деталь затеняет соседнюю
+AO_K = 0.7           # насколько щели темнеют (0 — никак, 1 — до чёрного)
+ROUGH_MIN, ROUGH_MAX = 0.5, 0.9   # шероховатость сжимается в этот промежуток (исходник почти глянец 0,15)
 
 # Координаты ниже — в повёрнутой модели (перёд -Y, верх Z, x от середины корпуса), в единицах модели.
 # Точки с x даются для стороны +X; вторая сторона получается зеркально.
@@ -38,7 +46,7 @@ MODELS = {
 		mods=[(0.11, 0.17), (-0.11, 0.17), (0.0, 0.26)],
 		jets=[(0.09, 0.335, 0.52), (-0.09, 0.335, 0.52)],
 		accents=[(0.135, -0.12, 0.012, 0.32)],
-		target=dict(hull=9000, pelvis=1200, thigh=3000, shin=3000, foot=2200), tex=1024),
+		target=dict(hull=9000, pelvis=1200, thigh=3000, shin=3000, foot=2200)),
 	# средний: короб-кабина с глазом, зелёные плечевые короба (оставлены как броня), пушки на руках и рога убраны,
 	# нога в три звена (среднее звено жёсткое), колено вперёд
 	"mid_87e20": dict(
@@ -57,7 +65,7 @@ MODELS = {
 		mods=[(0.1, 0.24), (-0.1, 0.24)],
 		jets=[(0.08, 0.3, 0.6), (-0.08, 0.3, 0.6)],
 		accents=[(0.24, -0.05, 0.012, 0.25)],
-		target=dict(hull=8000, pelvis=800, thigh=2200, shin=2200, foot=1600), tex=1024),
+		target=dict(hull=8000, pelvis=800, thigh=2200, shin=2200, foot=1600)),
 	# лёгкий: узкая кабина-киль, плечевая балка с коробами-антеннами, пушки по бокам убраны, колено назад
 	"light_046748": dict(
 		src="046748ee491dacc70805450925209a16.glb", rotz=0, x0=0.0, scale=3.7,
@@ -73,7 +81,7 @@ MODELS = {
 		mods=[(0.11, 0.0), (-0.11, 0.0)],
 		jets=[(0.05, 0.16, 0.55), (-0.05, 0.16, 0.55)],
 		accents=[(0.17, -0.02, 0.01, 0.14)],
-		target=dict(hull=7500, pelvis=700, thigh=2000, shin=1800, foot=1500), tex=1024),
+		target=dict(hull=7500, pelvis=700, thigh=2000, shin=1800, foot=1500)),
 	# лёгкий: кабина со стеклом, одна нога (вторую зеркалим), пушки по бокам и фигурка пилота убраны, колено назад
 	"light_cc59ad": dict(
 		src="cc59ad415fc69c3dd3d1c5577687ad4a.glb", rotz=90, x0=-0.057, scale=3.9,
@@ -93,7 +101,7 @@ MODELS = {
 		mods=[(0.08, 0.15), (-0.08, 0.15)],
 		jets=[(0.06, 0.26, 0.55), (-0.06, 0.26, 0.55)],
 		accents=[(0.07, -0.02, 0.01, 0.16)],
-		target=dict(hull=8000, pelvis=0, thigh=1800, shin=2000, foot=1500), tex=1024),
+		target=dict(hull=8000, pelvis=0, thigh=1800, shin=2000, foot=1500)),
 }
 
 argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
@@ -262,7 +270,8 @@ def cut(name):
 		b = np.stack([-co[:, 0] * S, -(co[:, 1] - yc) * S, co[:, 2] * S], axis=1)
 		o.data.vertices.foreach_set('co', b.ravel())
 		o.data.update()
-	# 5. упрощение
+	# 5. затенение щелей с исходной модели (до упрощения), потом упрощение
+	ao = bake_ao(objs, mat0)
 	for nm, o in objs.items():
 		t0 = tris(o)
 		target = cfg["target"][nm.split("_")[0]]
@@ -316,10 +325,8 @@ def cut(name):
 			empty("accent_%d" % k, gp, Vector((w * S, 0.05, ln * S)))
 			k += 1
 	bm.free()
-	# 7. текстуры поменьше
-	for img in bpy.data.images:
-		if img.size[0] > cfg["tex"]:
-			img.scale(cfg["tex"], cfg["tex"])
+	# 7. текстуры: окраска с затенением щелей, рельеф, матовость
+	fix_textures(ao)
 	if SHOTS:
 		shots(name, objs, empties)
 	# 8. выгрузка
@@ -330,6 +337,83 @@ def cut(name):
 	bpy.ops.export_scene.gltf(filepath=dst, export_format='GLB', use_selection=True, export_normals=True,
 		export_materials='EXPORT', export_yup=True, export_apply=True, export_image_format='JPEG')
 	print("TOTAL %s: треугольников %d -> %s" % (name, sum(tris(o) for o in objs.values()), dst))
+
+
+def bake_ao(objs, mat):
+	"""затенение щелей и углублений с исходной модели в раскладку текстуры -> массив TEX×TEX (0..1)"""
+	sc = bpy.context.scene
+	sc.render.engine = 'CYCLES'
+	try:
+		prefs = bpy.context.preferences.addons['cycles'].preferences
+		for dt in ('OPTIX', 'CUDA'):
+			try:
+				prefs.compute_device_type = dt
+				prefs.get_devices()
+				if any(d.type == dt for d in prefs.devices):
+					for d in prefs.devices:
+						d.use = d.type == dt
+					sc.cycles.device = 'GPU'
+					print("AO: видеокарта (%s)" % dt)
+					break
+			except Exception:
+				pass
+	except Exception:
+		pass
+	sc.cycles.samples = 48
+	w = bpy.data.worlds.new("ao")
+	sc.world = w
+	w.light_settings.distance = AO_DIST
+	img = bpy.data.images.new("ao_bake", TEX, TEX, alpha=False)
+	img.colorspace_settings.name = 'Non-Color'
+	nt = mat.node_tree
+	node = nt.nodes.new('ShaderNodeTexImage')
+	node.image = img
+	nt.nodes.active = node
+	bpy.ops.object.select_all(action='DESELECT')
+	for o in objs.values():
+		o.select_set(True)
+	bpy.context.view_layer.objects.active = next(iter(objs.values()))
+	sc.render.bake.margin = 6
+	sc.render.bake.use_clear = True
+	bpy.ops.object.bake(type='AO')
+	buf = np.empty(TEX * TEX * 4, dtype=np.float32)
+	img.pixels.foreach_get(buf)
+	nt.nodes.remove(node)
+	bpy.data.images.remove(img)
+	ao = buf.reshape(TEX, TEX, 4)[:, :, 0]
+	print("AO: средняя %.2f, тёмных (<0.5) %.1f%%" % (float(ao.mean()), float((ao < 0.5).mean() * 100)))
+	return ao
+
+
+def fix_textures(ao):
+	"""окраска 2048 с затенением щелей, рельеф 2048, шероховатость 1024 и матовее"""
+	for img in list(bpy.data.images):
+		nm = img.name.lower()
+		if img.size[0] == 0:
+			continue
+		if "roughness" in nm:
+			if img.size[0] != TEX_ORM:
+				img.scale(TEX_ORM, TEX_ORM)
+			px = np.empty(TEX_ORM * TEX_ORM * 4, dtype=np.float32)
+			img.pixels.foreach_get(px)
+			px = px.reshape(-1, 4)
+			px[:, 1] = ROUGH_MIN + (ROUGH_MAX - ROUGH_MIN) * px[:, 1]
+			img.pixels.foreach_set(px.ravel())
+			img.update()
+		elif "normal" in nm:
+			if img.size[0] != TEX:
+				img.scale(TEX, TEX)
+		else:
+			if img.size[0] != TEX:
+				img.scale(TEX, TEX)
+			px = np.empty(TEX * TEX * 4, dtype=np.float32)
+			img.pixels.foreach_get(px)
+			px = px.reshape(TEX, TEX, 4)
+			k = (1.0 - AO_K) + AO_K * ao
+			px[:, :, :3] *= k[:, :, None]
+			img.pixels.foreach_set(px.ravel())
+			img.update()
+		print("TEX %-60s %d" % (img.name, img.size[0]))
 
 
 def shots(name, objs, empties):

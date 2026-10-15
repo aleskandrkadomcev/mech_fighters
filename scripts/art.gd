@@ -311,6 +311,31 @@ static func grass_bush_mesh(blades := 24) -> ArrayMesh:
 # Склеиваются только «листья» (детали без своих детей) с материалом из списка mats.
 # Узлы-контейнеры (бёдра, подвесы пушек, радар) остаются и двигаются как раньше.
 # keep: детали, которые нельзя трогать (на них ссылается код: вспышки, лучи, кольца)
+# кусок модели с таблицей номеров вершин. Склеивать можно только такие: если в одну модель
+# попадут кусок без таблицы (скошенная коробка) и кусок с таблицей (цилиндр), таблица итоговой
+# модели укажет только на вершины второго, и коробка пропадёт (так пропал корпус у крипа)
+static func _indexed(mesh: Mesh, surface: int) -> Mesh:
+	var arr := mesh.surface_get_arrays(surface)
+	if arr[Mesh.ARRAY_INDEX] != null and (arr[Mesh.ARRAY_INDEX] as PackedInt32Array).size() > 0:
+		if surface == 0 and mesh.get_surface_count() == 1:
+			return mesh
+		var one := ArrayMesh.new()
+		one.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+		return one
+	var key := mesh.get_instance_id() * 8 + surface
+	if _indexed_cache.has(key):
+		return _indexed_cache[key]
+	var st := SurfaceTool.new()
+	st.create_from(mesh, surface)
+	st.index()
+	var out := st.commit()
+	_indexed_cache[key] = out
+	return out
+
+
+static var _indexed_cache := {}
+
+
 static func merge_meshes(root: Node, mats: Array, keep: Array = []) -> void:
 	var groups := {}
 	for c in root.get_children():
@@ -332,7 +357,7 @@ static func merge_meshes(root: Node, mats: Array, keep: Array = []) -> void:
 			st.begin(Mesh.PRIMITIVE_TRIANGLES)
 			for mi in list:
 				for s in mi.mesh.get_surface_count():
-					st.append_from(mi.mesh, s, mi.transform)
+					st.append_from(_indexed(mi.mesh, s), 0, mi.transform)
 			var am := st.commit()
 			var out := MeshInstance3D.new()
 			out.mesh = am

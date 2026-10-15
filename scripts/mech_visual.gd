@@ -820,7 +820,8 @@ func _model_part(parent: Node3D, part: String) -> MeshInstance3D:
 		if src is StandardMaterial3D:
 			if not _model_mats.has(src):
 				var m: StandardMaterial3D = src.duplicate()
-				m.albedo_color = m.albedo_color * _team_paint
+				var kb: float = Cfg.mech_model_bright
+				m.albedo_color = m.albedo_color * _team_paint * Color(kb, kb, kb, 1.0)
 				m.emission_enabled = true
 				m.emission = Color(0, 0, 0)
 				_model_mats[src] = m

@@ -43,6 +43,7 @@ var _boom := false               # взрыв рядом с игроком на 
 var _moba_secs := 60
 var _perf := false               # с mobatest: каждые 20 с сколько узлов, объектов, ресурсов и время кадра
 var _fxreel := false             # --fxreel: эффекты одним запуском — драка со взрывами, штурм базы, своя база
+var _creeptest := false          # --creeptest: у крипа после склейки деталей есть корпус, гусеницы и башня
 var _aimtest := false            # --aimtest: прицел (земля / середина хитбокса), пределы стволов, гранатомёт
 var _fancheck := false           # --fancheck: веер обзора с пропуском лучей совпадает с полным (все лучи)
 var _cpubench := false           # --cpubench: что сколько стоит в обычном бою (окно, по очереди выключает тени, траву, крипов...)
@@ -150,6 +151,8 @@ func setup(main_node: Node3D, args: PackedStringArray) -> void:
 			_fancheck = true
 		elif a == "--aimtest":
 			_aimtest = true
+		elif a == "--creeptest":
+			_creeptest = true
 		elif a == "--fxreel" or a.begins_with("--fxreel="):
 			_fxreel = true
 			_nohud = true
@@ -225,6 +228,8 @@ func _process(_delta: float) -> void:
 		_run_fancheck()
 	if _aimtest:
 		_run_aimtest()
+	if _creeptest and _frame == 5:
+		_run_creeptest()
 	if _demo:
 		_run_demo()
 	if _inputtest:
@@ -296,7 +301,7 @@ func _process(_delta: float) -> void:
 		var img := get_viewport().get_texture().get_image()
 		img.save_png(("%s/%s_f%04d.png" % [_shot_dir, _target, shot_f]) if _fxreel else ("%s/f%04d.png" % [_shot_dir, shot_f]))
 		_shots_left.erase(shot_f)
-		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and not _linktest and _mechexport == "" and not _gfxbench and not _cpubench and not _fancheck and not _aimtest:
+		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and not _linktest and _mechexport == "" and not _gfxbench and not _cpubench and not _fancheck and not _aimtest and not _creeptest:
 			get_tree().quit()
 
 
@@ -1233,9 +1238,21 @@ func _run_gallery() -> void:
 			mm.torso_yaw = PI if i < 5 else 0.0
 			mm.legs_yaw = mm.torso_yaw
 			print("[GAL] %s: %s + %s" % [Parts.pname(ids[i]), Parts.pname(w), Parts.pname(w2)])
+		# два крипа посередине: видно корпус между гусеницами
+		for t in 2:
+			var c = main.Creep.new()
+			c.team = t
+			c.lane = "mid"
+			c.path = main.lane_path(t, "mid")
+			c.nav = main.nav
+			c.position = Vector3(-4.0 + t * 8.0, 0, 0)
+			main.add_child(c)
+			c.stun(99.0)
 	if _frame == 6:
 		for mm in get_tree().get_nodes_in_group("mechs"):
 			mm.seen = true
+	if _frame == 45:
+		Cfg.cam_distance = 24.0     # второй снимок ближе (если в --shots есть кадр позже 45)
 	if _frame >= 40 and _shots_left.is_empty():
 		get_tree().quit()
 
@@ -2399,3 +2416,45 @@ func _run_aimtest() -> void:
 		probe.queue_free()
 		print("[AIM] итог: %s" % ("ВСЁ ВЕРНО" if _at_fails == 0 else "ошибок %d" % _at_fails))
 		get_tree().quit()
+
+
+# ------------------------------------------------------------------
+#  Крип (--creeptest): после склейки деталей у него должны остаться корпус, гусеницы и башня.
+#  Печатает каждую модель крипа: материал, сколько вершин и габарит
+# ------------------------------------------------------------------
+
+func _run_creeptest() -> void:
+	var c = main.Creep.new()
+	c.team = 1
+	c.lane = "mid"
+	c.path = main.lane_path(1, "mid")
+	c.nav = main.nav
+	c.position = Vector3(0, 0, -20)
+	main.add_child(c)
+	var body_ok := false
+	var fails := 0
+	for mi in c.find_children("*", "MeshInstance3D", true, false):
+		var m: MeshInstance3D = mi
+		var box: AABB = m.mesh.get_aabb() if m.mesh != null else AABB()
+		var verts := 0
+		var lost := 0          # вершины, на которые не ссылается ни один треугольник (не рисуются)
+		if m.mesh != null:
+			for si in m.mesh.get_surface_count():
+				var arr := m.mesh.surface_get_arrays(si)
+				var nv := (arr[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
+				verts += nv
+				if arr[Mesh.ARRAY_INDEX] != null and (arr[Mesh.ARRAY_INDEX] as PackedInt32Array).size() > 0:
+					var used := {}
+					for ix in arr[Mesh.ARRAY_INDEX]:
+						used[ix] = true
+					lost += nv - used.size()
+		var col: Color = m.material_override.albedo_color if m.material_override is StandardMaterial3D else Color.BLACK
+		print("[CREEP] %s: вершин %d, из них не рисуются %d, габарит %s, цвет %s" % [m.get_parent().name, verts, lost, box.size, col])
+		if lost > 0:
+			fails += 1
+		# корпус: модель светлой брони шириной больше 1,4 и длиной больше 2,2
+		if col.r > 0.3 and box.size.x > 1.4 and box.size.z > 2.2 and verts > 0 and lost == 0:
+			body_ok = true
+	print("[CREEP] корпус на месте — %s" % ("ВЕРНО" if body_ok else "ОШИБКА"))
+	print("[CREEP] все склеенные детали рисуются — %s" % ("ВЕРНО" if fails == 0 else "ОШИБКА (%d моделей с пропавшими кусками)" % fails))
+	get_tree().quit()
