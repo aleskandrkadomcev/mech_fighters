@@ -35,6 +35,8 @@ var _timer: Label
 var _dash_slot: Dictionary
 var _tp_slot: Dictionary
 var _hitmark: Control
+var _hitmark_shown := false
+var _vignette_last := -1.0
 var _hitmark_t := 0.0
 var _hitmark_kill := false
 var _hint_full := true
@@ -409,20 +411,23 @@ func _process(delta: float) -> void:
 			parts.append("%s  %s  %d / %d" % [key, w["name"], int(mech.ammo[i]), int(mx)])
 		else:
 			parts.append("%s  %s  ∞" % [key, w["name"]])
-	_ammo.text = "        ".join(parts)
+	_txt(_ammo, "        ".join(parts))
 	var empty: bool = (mech.ammo_max(0) > 0.0 and mech.ammo[0] < 1.0) or (mech.ammo_max(1) > 0.0 and mech.ammo[1] < 1.0)
-	_ammo.add_theme_color_override("font_color", COL_DENY if (_ammo_deny > 0.0 or empty) else Color(1, 1, 1, 0.85))
+	_font_col(_ammo, COL_DENY if (_ammo_deny > 0.0 or empty) else Color(1, 1, 1, 0.85))
 
 	# здоровье
 	var hp: float = mech.hp
 	var hp_max: float = maxf(mech.max_hp(), 1.0)
 	var hk := clampf(hp / hp_max, 0.0, 1.0)
 	_hp.value = hk
-	_hp_fill.bg_color = Color(0.9, 0.25, 0.2).lerp(Color(0.4, 0.9, 0.4), hk)
-	_hp_label.text = "ЗДОРОВЬЕ  %d" % int(ceil(maxf(hp, 0.0)))
+	_bg(_hp_fill, Color(0.9, 0.25, 0.2).lerp(Color(0.4, 0.9, 0.4), hk))
+	_txt(_hp_label, "ЗДОРОВЬЕ  %d" % int(ceil(maxf(hp, 0.0))))
 	_hit_t = maxf(_hit_t - delta * 2.5, 0.0)
 	var low := clampf((0.3 - hk) / 0.3, 0.0, 1.0) * 0.22 if not mech.dead else 0.0
-	_vignette_mat.set_shader_parameter("strength", clampf(_hit_t * 0.8 + low, 0.0, 0.9))
+	var vig := clampf(_hit_t * 0.8 + low, 0.0, 0.9)
+	if vig != _vignette_last:
+		_vignette_last = vig
+		_vignette_mat.set_shader_parameter("strength", vig)
 
 	# счёт и экран смерти
 	if main != null:
@@ -430,28 +435,33 @@ func _process(delta: float) -> void:
 		for p in get_tree().get_nodes_in_group("pois"):
 			if p.owner_team == mech.team:
 				bonus.append("%s: %s" % [p.title, p.bonus_text()])
+		var score := ""
 		if main.pvp:
-			_score.text = "Свои %d : %d Враги   (до %d)\nУбито: %d    Смертей: %d" % [main.team_kills[mech.team], main.team_kills[1 - mech.team],
+			score = "Свои %d : %d Враги   (до %d)\nУбито: %d    Смертей: %d" % [main.team_kills[mech.team], main.team_kills[1 - mech.team],
 				Cfg.pvp_kills_to_win, main.kills, main.deaths]
 		else:
-			_score.text = "Убито: %d    Смертей: %d    Турели: наши %d, вражеские %d" % [main.kills, main.deaths, main.structures_left(mech.team), main.structures_left(1 - mech.team)]
+			score = "Убито: %d    Смертей: %d    Турели: наши %d, вражеские %d" % [main.kills, main.deaths, main.structures_left(mech.team), main.structures_left(1 - mech.team)]
 		if not bonus.is_empty():
-			_score.text += "\n" + "    ".join(bonus)
+			score += "\n" + "    ".join(bonus)
+		_txt(_score, score)
 		if mech.dead:
 			_death.visible = true
-			_death.text = "МЕХ УНИЧТОЖЕН\nвозрождение через %.1f" % main.respawn_left()
+			_txt(_death, "МЕХ УНИЧТОЖЕН\nвозрождение через %.1f" % main.respawn_left())
 		else:
 			_death.visible = false
 
 	# таймер боя (в PvP — сколько осталось) и отметка попадания
 	if main != null and main.pvp:
 		var left := int(ceil(main.time_left()))
-		_timer.text = "%d:%02d" % [left / 60, left % 60]
+		_txt(_timer, "%d:%02d" % [left / 60, left % 60])
 	else:
-		_timer.text = Battle.time_text()
+		_txt(_timer, Battle.time_text())
 	_hitmark_t = maxf(_hitmark_t - delta, 0.0)
-	_hitmark.position = get_viewport().get_mouse_position() - _hitmark.size * 0.5
-	_hitmark.queue_redraw()
+	# отметку перерисовываем, только пока она видна (и ещё раз, чтобы стереть)
+	if _hitmark_t > 0.0 or _hitmark_shown:
+		_hitmark.position = get_viewport().get_mouse_position() - _hitmark.size * 0.5
+		_hitmark.queue_redraw()
+		_hitmark_shown = _hitmark_t > 0.0
 
 	# рывок: заряды и перезарядка; телепорт: канал или перезарядка
 	if not _dash_slot.is_empty():
@@ -475,11 +485,14 @@ func _process(delta: float) -> void:
 		col = COL_DENY
 	elif locked:
 		col = Color(0.95, 0.5, 0.2)
-	_energy_fill.bg_color = col
-	_energy_label.text = "ЭНЕРГИЯ  %d" % int(en) if not locked else "ЭНЕРГИЯ  %d   бег недоступен" % int(en)
+	_bg(_energy_fill, col)
+	_txt(_energy_label, "ЭНЕРГИЯ  %d" % int(en) if not locked else "ЭНЕРГИЯ  %d   бег недоступен" % int(en))
 	_energy_tick.visible = Cfg.run_energy_cost > 0.0
-	_energy_tick.position = Vector2(_energy.size.x * clampf(Cfg.run_min_energy / en_max, 0.0, 1.0) - 1.0, 0)
-	_energy_tick.size = Vector2(2, _energy.size.y)
+	var tick_pos := Vector2(_energy.size.x * clampf(Cfg.run_min_energy / en_max, 0.0, 1.0) - 1.0, 0)
+	if _energy_tick.position != tick_pos:
+		_energy_tick.position = tick_pos
+	if _energy_tick.size != Vector2(2, _energy.size.y):
+		_energy_tick.size = Vector2(2, _energy.size.y)
 
 	# слоты абилок
 	if _slots.size() != mech.abilities.size():
@@ -493,24 +506,27 @@ func _process(delta: float) -> void:
 		var panel: Panel = s["panel"]
 		var shade: ColorRect = s["shade"]
 		var k := clampf(cd / cd_max, 0.0, 1.0)
-		shade.size = Vector2(panel.size.x, panel.size.y * k)
-		shade.position = Vector2(0, panel.size.y * (1.0 - k))
-		s["cd"].text = ("%.1f" % cd) if cd > 0.05 else ""
-		s["cd"].remove_theme_color_override("font_color")
+		var shade_size := Vector2(panel.size.x, panel.size.y * k)
+		var cd_text := ("%.1f" % cd) if cd > 0.05 else ""
+		var cd_col = null
 		# абилка действует прямо сейчас: голубая рамка и сколько осталось
 		var act: float = mech.ability_active(i)
 		var is_shield: bool = mech.abilities[i]["type"] == "shield"
 		if act > 0.0:
-			s["cd"].text = "ВКЛ" if is_shield else "%.1f" % act
-			s["cd"].add_theme_color_override("font_color", COL_ACTIVE)
-			shade.size = Vector2.ZERO
-		s["cost"].text = "%d эн." % int(cost)
+			cd_text = "ВКЛ" if is_shield else "%.1f" % act
+			cd_col = COL_ACTIVE
+			shade_size = Vector2.ZERO
+		_shade(shade, shade_size, Vector2(0, panel.size.y * (1.0 - k)))
+		_txt(s["cd"], cd_text)
+		_font_col(s["cd"], cd_col)
+		var cost_text := "%d эн." % int(cost)
 		var chm: float = mech.ability_charges_max(i)
 		if chm > 0.0:
-			s["cost"].text += "   ×%d" % int(mech.ability_charges[i])
+			cost_text += "   ×%d" % int(mech.ability_charges[i])
 		if is_shield:
-			s["cost"].text = "%d эн. +%s/с" % [int(cost), str(snappedf(mech.ability_param(i, "upkeep"), 0.1))]
-		s["cost"].add_theme_color_override("font_color", COL_ENERGY if enough else COL_DENY)
+			cost_text = "%d эн. +%s/с" % [int(cost), str(snappedf(mech.ability_param(i, "upkeep"), 0.1))]
+		_txt(s["cost"], cost_text)
+		_font_col(s["cost"], COL_ENERGY if enough else COL_DENY)
 		var border := Color(1, 1, 1, 0.75)
 		if cd > 0.0:
 			border = Color(1, 1, 1, 0.25)
@@ -520,26 +536,64 @@ func _process(delta: float) -> void:
 			border = COL_ACTIVE
 		if _deny_t > 0.0 and _deny_slot == i:
 			border = COL_DENY
-		s["style"].border_color = border
+		_border(s["style"], border)
 
 	if _dbg.visible:
 		var speed := Vector2(mech.velocity.x, mech.velocity.z).length()
-		_dbg.text = "скорость  %.1f м/с\nразброс  %.1f°\nэнергия  %d\nкадров  %d" % [speed, mech.get_spread_deg(), int(en), Engine.get_frames_per_second()]
+		_txt(_dbg, "скорость  %.1f м/с\nразброс  %.1f°\nэнергия  %d\nкадров  %d" % [speed, mech.get_spread_deg(), int(en), Engine.get_frames_per_second()])
 
 
 # состояние маленького слота (рывок, телепорт): затемнение, цифра перезарядки, подпись, активность
 func _slot_state(sl: Dictionary, k: float, cd_text: String, sub: String, active: float) -> void:
 	var panel: Panel = sl["panel"]
 	var shade: ColorRect = sl["shade"]
-	shade.size = Vector2(panel.size.x, panel.size.y * k)
-	shade.position = Vector2(0, panel.size.y * (1.0 - k))
-	sl["cd"].text = cd_text
-	sl["cd"].remove_theme_color_override("font_color")
-	sl["cost"].text = sub
+	var shade_size := Vector2(panel.size.x, panel.size.y * k)
+	var cd_col = null
 	var border := Color(1, 1, 1, 0.75) if k <= 0.0 else Color(1, 1, 1, 0.25)
 	if active > 0.0:
-		sl["cd"].text = "%.1f" % active
-		sl["cd"].add_theme_color_override("font_color", COL_ACTIVE)
-		shade.size = Vector2.ZERO
+		cd_text = "%.1f" % active
+		cd_col = COL_ACTIVE
+		shade_size = Vector2.ZERO
 		border = COL_ACTIVE
-	sl["style"].border_color = border
+	_shade(shade, shade_size, Vector2(0, panel.size.y * (1.0 - k)))
+	_txt(sl["cd"], cd_text)
+	_font_col(sl["cd"], cd_col)
+	_txt(sl["cost"], sub)
+	_border(sl["style"], border)
+
+
+# Интерфейс обновляется каждый кадр, но менять подпись, цвет, рамку или полоску можно только когда они
+# правда изменились: любая установка (даже того же цвета) заставляет движок заново собирать текст
+# и раскладку. Раньше так уходило около 2 мс на каждый кадр
+static func _txt(l: Label, t: String) -> void:
+	if l.text != t:
+		l.text = t
+
+
+# цвет надписи; null — цвет из темы (без своего цвета)
+static func _font_col(l: Label, c) -> void:
+	var old = l.get_meta("font_col", "unset")
+	if typeof(old) == typeof(c) and old == c:
+		return
+	l.set_meta("font_col", c)
+	if c == null:
+		l.remove_theme_color_override("font_color")
+	else:
+		l.add_theme_color_override("font_color", c)
+
+
+static func _bg(sb: StyleBoxFlat, c: Color) -> void:
+	if sb.bg_color != c:
+		sb.bg_color = c
+
+
+static func _border(sb: StyleBoxFlat, c: Color) -> void:
+	if sb.border_color != c:
+		sb.border_color = c
+
+
+static func _shade(r: Control, sz: Vector2, pos: Vector2) -> void:
+	if r.size != sz:
+		r.size = sz
+	if r.position != pos:
+		r.position = pos

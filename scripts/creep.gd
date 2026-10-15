@@ -39,8 +39,6 @@ var _mats: Array = []
 var _flash := 0.0
 var _knock := Vector3.ZERO
 var _yaw := 0.0
-var _tread_t := 0.0
-var _treads: Array = []
 
 static var _shared := {}
 
@@ -194,9 +192,6 @@ func _physics_process(delta: float) -> void:
 	if flat.length() > 0.5:
 		_yaw = rotate_toward(_yaw, _yaw_to(flat), deg_to_rad(200.0) * delta)
 	_hull.rotation.y = _yaw
-	_tread_t += flat.length() * delta
-	for i in _treads.size():
-		_treads[i].rotation.x = _tread_t * 2.0
 	var aim_yaw := _yaw
 	if _target != null and is_instance_valid(_target):
 		aim_yaw = _yaw_to(_target.global_position - pos)
@@ -272,10 +267,13 @@ func _route_to(delta: float, pos: Vector3, goal: Vector3) -> Vector3:
 func _separation(pos: Vector3) -> Vector3:
 	var push := Vector3.ZERO
 	var r := Cfg.creep_spacing
-	for o in get_tree().get_nodes_in_group("creeps"):
-		if o == self or o.team != team:
+	var g = get_tree().current_scene
+	if g == null or not g.has_method("units"):
+		return push
+	for u in g.units():
+		if u[4] or u[2] != team or u[0] == self:
 			continue
-		var d: Vector3 = pos - o.global_position
+		var d: Vector3 = pos - u[1]
 		d.y = 0
 		var l := d.length()
 		if l < r and l > 0.01:
@@ -296,23 +294,35 @@ func _pick_target() -> Node3D:
 	var g = get_tree().current_scene
 	var best: Node3D = null
 	var best_s := 1e9
-	for n in get_tree().get_nodes_in_group("creeps") + get_tree().get_nodes_in_group("mechs") + get_tree().get_nodes_in_group("structures"):
+	if g == null or not g.has_method("units"):
+		return null
+	# мехи и крипы — из общего списка тика (main.units), постройки — по группе
+	for u in g.units():
+		if u[2] == team:
+			continue
+		var n = u[0]
+		if not is_instance_valid(n) or n.dead or (u[4] and n.shield_left > 0.0):
+			continue
+		var d: float = (u[1] - pos).length() - u[3]
+		if d > vis:
+			continue
+		var score := d + (6.0 if u[4] else 0.0)
+		if score >= best_s:
+			continue
+		if not g.is_visible_to(team, n):
+			continue
+		best_s = score
+		best = n
+	for n in get_tree().get_nodes_in_group("structures"):
 		if n.team == team or n.dead:
 			continue
-		if n.is_in_group("mechs") and (n.is_landing() or n.shield_left > 0.0):
+		var d2: float = n.global_position.distance_to(pos) - n.get_hit_radius()
+		if d2 > rng + 6.0 or d2 >= best_s:
 			continue
-		var d: float = n.global_position.distance_to(pos) - n.get_hit_radius()
-		var is_struct: bool = n.is_in_group("structures")
-		if d > (rng + 6.0 if is_struct else vis):
+		if n.has_method("protected") and n.protected():
 			continue
-		if not is_struct and g != null and g.has_method("is_visible_to") and not g.is_visible_to(team, n):
-			continue
-		if is_struct and n.has_method("protected") and n.protected():
-			continue
-		var score := d + (6.0 if n.is_in_group("mechs") else 0.0)
-		if score < best_s:
-			best_s = score
-			best = n
+		best_s = d2
+		best = n
 	return best
 
 
@@ -393,7 +403,6 @@ func _build_visual() -> void:
 			wheel.rotation.z = PI / 2
 			wheel.position = Vector3(0.9 * s, 0.28, -0.9 + k * 0.6)
 			_hull.add_child(wheel)
-			_treads.append(wheel)
 	# башня
 	_turret = Node3D.new()
 	_turret.position = Vector3(0, 0.95, 0.1)
@@ -418,3 +427,7 @@ func _build_visual() -> void:
 	_turret.add_child(_muzzle)
 	for mi in _hull.find_children("*", "MeshInstance3D", true, false) + _turret.find_children("*", "MeshInstance3D", true, false):
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	# склеиваем детали корпуса и башни: по одной модели на материал (было 18 деталей на крипа, стало 6).
+	# Катки больше не крутятся: с высоты камеры этого не видно, а каждый каток был отдельной деталью
+	Art.merge_meshes(_hull, [body, dark, glow])
+	Art.merge_meshes(_turret, [body, dark, glow], [_muzzle])

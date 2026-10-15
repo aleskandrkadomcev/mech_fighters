@@ -437,19 +437,23 @@ func _pick_target() -> Node3D:
 	var best: Node3D = null
 	var best_d := 1e9
 	var g = get_tree().current_scene
-	for m in get_tree().get_nodes_in_group("mechs") + get_tree().get_nodes_in_group("creeps"):
-		if m.dead or m.team == team:
+	if g == null or not g.has_method("units"):
+		return null
+	var here := global_position
+	for u in g.units():
+		if u[2] == team:
 			continue
-		if m.is_in_group("mechs") and m.is_landing():
+		var m = u[0]
+		if not is_instance_valid(m) or m.dead:
 			continue
-		var d: float = (m.global_position - global_position).length() - m.get_hit_radius()
+		var d: float = (u[1] - here).length() - u[3]
 		if d > rng:
 			continue
-		if m.is_in_group("mechs"):
+		if u[4]:
 			d += 1000.0      # мехи после крипов
 		if d >= best_d:
 			continue
-		if g != null and g.has_method("is_visible_to") and not g.is_visible_to(team, m):
+		if not g.is_visible_to(team, m):
 			continue
 		best = m
 		best_d = d

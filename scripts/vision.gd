@@ -21,6 +21,14 @@ var _drawer: Node2D
 var _fans := {}                  # id наблюдателя -> {pos, r, dists}
 var _materials: Array = []
 var _px := 4.0                   # пикселей маски на метр
+var _fog_dark_set := -1.0       # какая темнота тумана уже стоит в материалах
+var _fan_viewers: Array = []     # кто строит веер обзора (команда игрока), из последнего пересчёта
+var _fan_cursor := 0             # с кого начинать пересчёт вееров в следующем кадре
+var _fan_epoch := 0              # сломали стену: все веера надо пересчитать
+const FAN_EVERY_MS := 100        # веер наблюдателя пересчитывается раз в 0,1 с
+const FAN_BUDGET_US := 600       # и не больше 0,6 мс работы за кадр (остальное в следующих кадрах)
+var _probe := SphereShape3D.new()  # круг обзора: какие укрытия в него попадают
+static var _fan_cache := {}      # число лучей -> {dirs, cols, idx}: одинаковое у всех вееров
 
 
 func _ready() -> void:
@@ -102,9 +110,16 @@ func is_visible_to(team: int, node: Node) -> bool:
 	return _vis[clampi(team, 0, 1)].has(node.get_instance_id())
 
 
+# веера обзора — только картинка тумана (кто кого видит, считает _update на тиках), поэтому строятся
+# здесь, понемногу в каждом кадре. Раньше все веера строились разом в одном тике из трёх,
+# и такой тик не успевал к обновлению монитора: кадр показывался дважды
 func _process(_delta: float) -> void:
-	for m in _materials:
-		m.set_shader_parameter("fog_dark", Cfg.fog_darkness)
+	# темнота тумана: в материалы только когда её поменяли (F2), а не каждый кадр во все ~40 материалов
+	if Cfg.fog_darkness != _fog_dark_set:
+		_fog_dark_set = Cfg.fog_darkness
+		for m in _materials:
+			m.set_shader_parameter("fog_dark", Cfg.fog_darkness)
+	_update_fans()
 	_drawer.queue_redraw()
 
 
@@ -139,10 +154,7 @@ func _viewers(team: int) -> Array:
 
 # стену сломали: обзор неподвижных (турелей, точек) надо пересчитать
 func invalidate_static() -> void:
-	for id in _fans.keys():
-		var n = _fans[id]["node"]
-		if not is_instance_valid(n) or not n.is_in_group("mechs"):
-			_fans.erase(id)
+	_fan_epoch += 1      # старые веера рисуются, пока их не пересчитают (доли секунды), без чёрной вспышки
 
 
 func _los(a: Vector3, b: Vector3) -> bool:
@@ -192,7 +204,7 @@ func _update() -> void:
 			for pk in get_tree().get_nodes_in_group("pickups"):
 				if _seen_by(viewers, pk.global_position, 0.5, false):
 					vis[pk.get_instance_id()] = true
-			_update_fans(viewers)
+			_set_fan_viewers(viewers)
 		_vis[team] = vis
 	# что показывать на экране игрока
 	for m in get_tree().get_nodes_in_group("mechs"):
@@ -209,34 +221,123 @@ func _update() -> void:
 #  Маска тумана
 # ------------------------------------------------------------------
 
-func _update_fans(viewers: Array) -> void:
+# новый список наблюдателей: веера тех, кого больше нет, убираем
+func _set_fan_viewers(viewers: Array) -> void:
+	_fan_viewers = viewers
 	var alive := {}
-	var space := get_viewport().get_world_3d().direct_space_state
 	for v in viewers:
-		var id: int = v["node"].get_instance_id()
-		alive[id] = true
-		var pos: Vector3 = v["pos"]
-		var r: float = v["r"]
-		var old = _fans.get(id)
-		var moving: bool = v["node"].is_in_group("mechs") or v["node"].is_in_group("creeps")
-		# неподвижные (турели, точки) считаем один раз
-		if old != null and not moving and old["pos"].distance_to(pos) < 0.1 and is_equal_approx(old["r"], r):
-			continue
-		var n_rays := RAYS_CREEP if v["node"].is_in_group("creeps") else RAYS
-		var dists := PackedFloat32Array()
-		dists.resize(n_rays)
-		var from := Vector3(pos.x, EYE, pos.z)
-		for i in n_rays:
-			var a := TAU * i / n_rays
-			var to := from + Vector3(cos(a), 0, sin(a)) * r
-			var q := PhysicsRayQueryParameters3D.create(from, to, 1)
-			var hit := space.intersect_ray(q)
-			# луч заходит чуть за стену, чтобы стена, которую видишь, была освещена
-			dists[i] = r if hit.is_empty() else minf(from.distance_to(hit["position"]) + 1.2, r)
-		_fans[id] = _make_fan(v["node"], pos, r, dists)
+		alive[v["node"].get_instance_id()] = true
 	for id in _fans.keys():
 		if not alive.has(id):
 			_fans.erase(id)
+
+
+# пересчёт вееров, которым пора (раз в 0,1 с), пока не кончится время кадра; по кругу, с места,
+# где остановились в прошлом кадре
+func _update_fans() -> void:
+	var n := _fan_viewers.size()
+	if n == 0:
+		return
+	var space := get_viewport().get_world_3d().direct_space_state
+	var t0 := Time.get_ticks_usec()
+	var now := Time.get_ticks_msec()
+	_fan_cursor = _fan_cursor % n
+	for k in n:
+		if Time.get_ticks_usec() - t0 > FAN_BUDGET_US:
+			return
+		var v: Dictionary = _fan_viewers[_fan_cursor]
+		_fan_cursor = (_fan_cursor + 1) % n
+		var node = v["node"]
+		if not is_instance_valid(node):
+			continue
+		var id: int = node.get_instance_id()
+		var moving: bool = node.is_in_group("mechs") or node.is_in_group("creeps")
+		var pos: Vector3 = node.global_position if moving else v["pos"]
+		var r: float = v["r"]
+		var old = _fans.get(id)
+		if old != null and old["epoch"] == _fan_epoch and is_equal_approx(old["r"], r):
+			# неподвижные (турели, точки) считаем один раз; мехи и крипы — раз в 0,1 с и только если
+			# сдвинулись (веер рисуется там, где наблюдатель сейчас)
+			if not moving and old["pos"].distance_to(pos) < 0.1:
+				continue
+			if moving and (now - old["t"] < FAN_EVERY_MS or old["pos"].distance_to(pos) < 0.05):
+				continue
+		var n_rays := RAYS_CREEP if node.is_in_group("creeps") else RAYS
+		_fans[id] = _make_fan(node, pos, r, _fan_dists(space, Vector3(pos.x, EYE, pos.z), r, n_rays))
+
+
+# дальность обзора по лучам веера. Луч пускаем, только если в его сторону есть укрытие внутри круга
+# обзора; в остальные стороны обзор и так полный. Результат тот же (тест fancheck), лучей меньше
+func _fan_dists(space: PhysicsDirectSpaceState3D, from: Vector3, r: float, n_rays: int) -> PackedFloat32Array:
+	var dists := PackedFloat32Array()
+	dists.resize(n_rays)
+	dists.fill(r)
+	var spans := _obstacle_spans(space, from, r)
+	if spans.is_empty():
+		return dists
+	var step := TAU / n_rays
+	var cast := PackedByteArray()
+	cast.resize(n_rays)
+	for s in spans:
+		for i in range(int(ceil(s.x / step)), int(floor((s.x + s.y) / step)) + 1):
+			cast[posmod(i, n_rays)] = 1
+	var q := PhysicsRayQueryParameters3D.new()
+	q.from = from
+	q.collision_mask = 1
+	for i in n_rays:
+		if cast[i] == 0:
+			continue
+		var a := step * i
+		q.to = from + Vector3(cos(a), 0, sin(a)) * r
+		var hit := space.intersect_ray(q)
+		# луч заходит чуть за стену, чтобы стена, которую видишь, была освещена
+		if not hit.is_empty():
+			dists[i] = minf(from.distance_to(hit["position"]) + 1.2, r)
+	return dists
+
+
+# в какие стороны от точки (углы как у лучей веера) лежат укрытия внутри круга обзора:
+# [Vector2(начало, ширина)]. Если укрытие не разобрать или их слишком много — все стороны
+func _obstacle_spans(space: PhysicsDirectSpaceState3D, from: Vector3, r: float) -> Array:
+	var all := [Vector2(0.0, TAU)]
+	_probe.radius = r
+	var q := PhysicsShapeQueryParameters3D.new()
+	q.shape = _probe
+	q.transform = Transform3D(Basis(), from)
+	q.collision_mask = 1
+	var res := space.intersect_shape(q, 64)
+	if res.size() >= 64:
+		return all
+	var margin := TAU / RAYS_CREEP     # запас в целый луч редкого веера
+	var spans: Array = []
+	for h in res:
+		var co = h["collider"]
+		if not (co is CollisionObject3D):
+			return all
+		var cs = co.shape_owner_get_owner(co.shape_find_owner(h["shape"]))
+		if not (cs is CollisionShape3D) or not (cs.shape is BoxShape3D):
+			return all
+		var half: Vector3 = cs.shape.size * 0.5
+		var xf: Transform3D = cs.global_transform
+		var c0 := xf.origin - from
+		var a0 := atan2(c0.z, c0.x)
+		var lo := INF
+		var hi := -INF
+		var y0 := INF
+		var y1 := -INF
+		for k in 8:
+			var p: Vector3 = xf * Vector3(half.x * (1 if k & 1 else -1), half.y * (1 if k & 2 else -1), half.z * (1 if k & 4 else -1))
+			y0 = minf(y0, p.y)
+			y1 = maxf(y1, p.y)
+			var d := wrapf(atan2(p.z - from.z, p.x - from.x) - a0, -PI, PI)
+			lo = minf(lo, d)
+			hi = maxf(hi, d)
+		if y1 < from.y - 0.01 or y0 > from.y + 0.01:
+			continue        # пол под ногами и то, что выше глаз, лучи не задевают
+		if hi - lo > PI * 0.9:
+			return all      # стоим вплотную или внутри
+		spans.append(Vector2(a0 + lo - margin, hi - lo + margin * 2.0))
+	return spans
 
 
 func _to_px(x: float, z: float) -> Vector2:
@@ -248,18 +349,31 @@ func _to_px(x: float, z: float) -> Vector2:
 func _make_fan(node: Node, pos: Vector3, r: float, dists: PackedFloat32Array) -> Dictionary:
 	var skirt := 3.0
 	var nr := dists.size()
+	var base := _fan_base(nr)
+	var dirs: PackedVector2Array = base["dirs"]
 	var pts := PackedVector2Array()
-	var cols := PackedColorArray()
 	pts.resize(1 + nr * 2)
+	for i in nr:
+		pts[1 + i] = dirs[i] * dists[i]
+		pts[1 + nr + i] = dirs[i] * (dists[i] + skirt)
+	var moving: bool = node.is_in_group("mechs") or node.is_in_group("creeps")
+	return {"node": node, "pos": pos, "r": r, "pts": pts, "cols": base["cols"], "idx": base["idx"], "moving": moving,
+		"epoch": _fan_epoch, "t": Time.get_ticks_msec()}
+
+
+# направления лучей, цвета и треугольники веера зависят только от числа лучей: считаются один раз
+func _fan_base(nr: int) -> Dictionary:
+	if _fan_cache.has(nr):
+		return _fan_cache[nr]
+	var dirs := PackedVector2Array()
+	var cols := PackedColorArray()
+	dirs.resize(nr)
 	cols.resize(1 + nr * 2)
-	pts[0] = Vector2.ZERO
 	cols[0] = Color.WHITE
 	for i in nr:
 		var a := TAU * i / nr
-		var dv := Vector2(cos(a), sin(a)) * _px
-		pts[1 + i] = dv * dists[i]
+		dirs[i] = Vector2(cos(a), sin(a)) * _px
 		cols[1 + i] = Color.WHITE
-		pts[1 + nr + i] = dv * (dists[i] + skirt)
 		cols[1 + nr + i] = Color(1, 1, 1, 0)
 	var idx := PackedInt32Array()
 	idx.resize(nr * 9)
@@ -275,8 +389,8 @@ func _make_fan(node: Node, pos: Vector3, r: float, dists: PackedFloat32Array) ->
 		idx[k + 6] = 1 + i
 		idx[k + 7] = 1 + nr + jn
 		idx[k + 8] = 1 + jn
-	var moving: bool = node.is_in_group("mechs") or node.is_in_group("creeps")
-	return {"node": node, "pos": pos, "r": r, "pts": pts, "cols": cols, "idx": idx, "moving": moving}
+	_fan_cache[nr] = {"dirs": dirs, "cols": cols, "idx": idx}
+	return _fan_cache[nr]
 
 
 func _draw_fans() -> void:

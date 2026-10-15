@@ -7,6 +7,7 @@ var vision: Node
 var _map: TextureRect
 var _overlay: Control
 var _mat: ShaderMaterial
+var _fog_dark_set := -1.0       # какая темнота тумана уже стоит в материале
 var _rect := Rect2(-120, -70, 240, 140)
 var _pings: Array = []          # метки игроков: [{pos, born}], рисуются расходящимися кругами 3 с
 
@@ -113,7 +114,8 @@ func add_ping(pos: Vector3) -> void:
 
 
 func _process(_delta: float) -> void:
-	if _mat != null:
+	if _mat != null and Cfg.fog_darkness != _fog_dark_set:
+		_fog_dark_set = Cfg.fog_darkness
 		_mat.set_shader_parameter("fog_dark", Cfg.fog_darkness)
 	if _overlay != null:
 		_overlay.queue_redraw()

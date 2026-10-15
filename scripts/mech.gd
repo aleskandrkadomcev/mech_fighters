@@ -1013,6 +1013,14 @@ func _push_wrecks(want: Vector3, delta: float) -> void:
 	var spd := want.length()
 	if spd < 0.3:
 		return
+	# обломков рядом нет — вторая проверка движения за тик не нужна (она дорогая)
+	var near := false
+	for w in get_tree().get_nodes_in_group("wrecks"):
+		if w.global_position.distance_to(global_position) < get_hit_radius() + 8.0 + spd * delta * 1.5:
+			near = true
+			break
+	if not near:
+		return
 	var motion := want * delta * 1.5
 	var col := KinematicCollision3D.new()
 	if not test_move(global_transform, motion, col):

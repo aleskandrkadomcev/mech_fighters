@@ -257,6 +257,27 @@ func is_visible_to(team: int, node: Node) -> bool:
 	return vision.is_visible_to(team, node)
 
 
+# все живые мехи (кроме падающих с неба) и крипы на этом тике одним списком:
+# [узел, позиция, команда, радиус, мех ли]. Турели и крипы ищут по нему цели и соседей,
+# а не перебирают группы заново каждый раз (так было дорого: десятки турелей и крипов на каждом тике)
+var _units: Array = []
+var _units_tick := -1
+
+
+func units() -> Array:
+	var t := Engine.get_physics_frames()
+	if t != _units_tick:
+		_units_tick = t
+		_units = []
+		for m in get_tree().get_nodes_in_group("mechs"):
+			if not m.dead and not m.is_landing():
+				_units.append([m, m.global_position, m.team, m.get_hit_radius(), true])
+		for c in get_tree().get_nodes_in_group("creeps"):
+			if not c.dead:
+				_units.append([c, c.global_position, c.team, c.get_hit_radius(), false])
+	return _units
+
+
 # бонусы команды с захваченных точек
 func team_mult(team: int, kind: String) -> float:
 	var k := 1.0

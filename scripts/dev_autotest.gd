@@ -42,11 +42,15 @@ var _gfxbench := false           # графика: драка у турели н
 var _boom := false               # взрыв рядом с игроком на 5-м кадре (проверка следа гари)
 var _moba_secs := 60
 var _perf := false               # с mobatest: каждые 20 с сколько узлов, объектов, ресурсов и время кадра
+var _fancheck := false           # --fancheck: веер обзора с пропуском лучей совпадает с полным (все лучи)
+var _cpubench := false           # --cpubench: что сколько стоит в обычном бою (окно, по очереди выключает тени, траву, крипов...)
+var _prof := false               # --prof: сколько времени процессора берёт каждый вид объектов (раз в 10 с в лог)
 var _moba_tp := Vector3.ZERO
 var _dump_path := ""
 var _hangartest := false
 var _mechexport := ""            # выгрузка средних мехов (все виды) в .glb для снимков в Блендере
 var _bots := 0
+var _allies := -1                # --allies=N: союзных ботов (иначе как в настройке; у Сани 4)
 var _frame := 0
 var _shots_left: Array = []
 
@@ -129,6 +133,8 @@ func setup(main_node: Node3D, args: PackedStringArray) -> void:
 			_moba_tp = Vector3(float(xy[0]), 0.05, float(xy[1]))
 		elif a.begins_with("--enemies="):
 			_bots = int(a.trim_prefix("--enemies="))
+		elif a.begins_with("--allies="):
+			_allies = int(a.trim_prefix("--allies="))
 		elif a.begins_with("--secs="):
 			_moba_secs = int(a.trim_prefix("--secs="))
 		elif a.begins_with("--map="):
@@ -136,6 +142,16 @@ func setup(main_node: Node3D, args: PackedStringArray) -> void:
 			Maps.selected = "res://maps/%s.json" % a.trim_prefix("--map=")
 		elif a == "--perf":
 			_perf = true
+		elif a == "--prof":
+			_prof = true
+		elif a == "--fancheck":
+			_fancheck = true
+		elif a == "--cpubench" or a == "--cpubench-gpu":
+			_cpubench = true
+			CB_RUNS = CB_RUNS_GPU if a == "--cpubench-gpu" else CB_RUNS_CPU
+			_bots = 5          # как у Сани: 5 вражеских и 4 союзных бота
+			_allies = 4
+			Cfg.graphics = CB_RUNS[_cb_run][1]     # setup идёт до постройки карты
 		elif a == "--cloaktest":
 			_cloaktest = true
 		elif a == "--abiltest":
@@ -166,8 +182,10 @@ func setup(main_node: Node3D, args: PackedStringArray) -> void:
 	# в проверках мехи появляются сразу, без высадки с неба (кроме --drop)
 	if not args.has("--drop"):
 		Cfg.drop_time = 0.0
-	if not _mobatest:
+	if not _mobatest and not _cpubench:
 		Cfg.bot_allies = 0
+	if _allies >= 0:
+		Cfg.bot_allies = _allies
 
 
 func _ready() -> void:
@@ -183,6 +201,12 @@ func _ready() -> void:
 
 func _process(_delta: float) -> void:
 	_frame += 1
+	if _prof:
+		_prof_frame(false)
+	if _cpubench:
+		_run_cpubench()
+	if _fancheck and _frame == 10:
+		_run_fancheck()
 	if _demo:
 		_run_demo()
 	if _inputtest:
@@ -250,7 +274,7 @@ func _process(_delta: float) -> void:
 		var img := get_viewport().get_texture().get_image()
 		img.save_png("%s/f%04d.png" % [_shot_dir, shot_f])
 		_shots_left.erase(shot_f)
-		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and not _linktest and _mechexport == "" and not _gfxbench:
+		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and not _linktest and _mechexport == "" and not _gfxbench and not _cpubench and not _fancheck:
 			get_tree().quit()
 
 
@@ -1660,6 +1684,8 @@ func _print_perf() -> void:
 	print("[CREEPS] ", ", ".join(cl))
 	print("[RENDER] draw_calls=%d objects=%d prims=%d video_mem=%.0fMB meshes_total=%d" % [Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME), Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME), Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME), Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED) / 1048576.0, get_tree().current_scene.find_children("*", "MeshInstance3D", true, false).size()])
 	var per := {}
+	var vis_per := {}
+	var sh_per := {}
 	for mi in get_tree().current_scene.find_children("*", "MeshInstance3D", true, false):
 		var n: Node = mi
 		var owner_k := "other"
@@ -1670,9 +1696,494 @@ func _print_perf() -> void:
 				break
 			n = n.get_parent()
 		per[owner_k] = per.get(owner_k, 0) + 1
+		if mi.is_visible_in_tree():
+			vis_per[owner_k] = vis_per.get(owner_k, 0) + 1
+			if mi.cast_shadow != GeometryInstance3D.SHADOW_CASTING_SETTING_OFF:
+				sh_per[owner_k] = sh_per.get(owner_k, 0) + 1
 	print("[MESHES] ", per)
+	print("[MESHES] видимые: ", vis_per)
+	print("[MESHES] видимые с тенью: ", sh_per)
+	# всё, что рисуется (любые видимые 3D-объекты), по хозяину и виду: ищем, что копится со временем
+	var geo := {}
+	for gi in get_tree().current_scene.find_children("*", "GeometryInstance3D", true, false):
+		if not gi.is_visible_in_tree():
+			continue
+		var n2: Node = gi
+		var ow := "main"
+		while n2 != null and n2 != get_tree().current_scene:
+			if n2.get_script() != null:
+				ow = n2.get_script().resource_path.get_file()
+				break
+			n2 = n2.get_parent()
+		var kind: String = gi.get_class()
+		if gi is MeshInstance3D and gi.mesh != null:
+			kind += ":" + gi.mesh.get_class()
+		var key := ow + " " + kind
+		geo[key] = geo.get(key, 0) + 1
+	var gk := geo.keys()
+	gk.sort_custom(func(a, b): return geo[a] > geo[b])
+	var gl := []
+	for k in gk.slice(0, 16):
+		gl.append("%s=%d" % [k, geo[k]])
+	print("[GEO] ", ", ".join(gl))
 	print("[PHYS] active=%d pairs=%d islands=%d" % [Performance.get_monitor(Performance.PHYSICS_3D_ACTIVE_OBJECTS), Performance.get_monitor(Performance.PHYSICS_3D_COLLISION_PAIRS), Performance.get_monitor(Performance.PHYSICS_3D_ISLAND_COUNT)])
 	print("[PERF] t=%ds nodes=%d objs=%d res=%d proc=%.2fms phys=%.2fms vis_mats=%d | %s" % [_frame / 60,
 		Performance.get_monitor(Performance.OBJECT_NODE_COUNT), Performance.get_monitor(Performance.OBJECT_COUNT),
 		Performance.get_monitor(Performance.OBJECT_RESOURCE_COUNT), Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0,
 		Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0, mats, ", ".join(parts)])
+
+
+# ------------------------------------------------------------------
+#  Замер процессора по видам объектов (--prof). У всех узлов со скриптом движок больше не зовёт
+#  _physics_process и _process — их зовёт этот замер сам, с секундомером, и копит время по файлу
+#  скрипта. Раз в 10 с печатает средние мс на тик (физика, 30 в секунду) и на кадр (вид).
+#  «прочее» — всё, что движок делает сам (столкновения, частицы, сглаживание), без наших скриптов.
+# ------------------------------------------------------------------
+
+var _prof_nodes: Array = []          # [узел, имя скрипта, есть _physics_process, есть _process]
+var _prof_pending: Array = []
+var _prof_methods := {}              # скрипт -> [есть физика, есть вид]
+var _prof_t := {}                    # "phys имя" / "proc имя" -> мкс
+var _prof_n := {}                    # сколько раз вызвали
+var _prof_ticks := 0
+var _prof_frames := 0
+var _prof_engine_phys := 0.0
+var _prof_engine_proc := 0.0
+var _prof_started := false
+var _prof_wall := 0                  # настоящее время между кадрами, мкс
+var _prof_last := 0
+var _prof_tick_in_frame := false     # в этом кадре был тик физики
+var _prof_ft_tick: Array = []        # время кадров с тиком, мс
+var _prof_ft_plain: Array = []       # время кадров без тика
+var _prof_tick_sum := 0              # скрипты в текущем тике, мкс
+var _prof_tick_list: Array = []      # скрипты по тикам, мс
+var _prof_tick_max := {}             # имя -> худший тик, мкс
+var _prof_cur := {}                  # имя -> мкс в текущем тике
+
+
+func _physics_process(_delta: float) -> void:
+	if _prof:
+		_prof_frame(true)
+	_cb_ticked = true
+
+
+func _prof_take(n: Node) -> void:
+	if n == self or not is_instance_valid(n) or n.get_script() == null:
+		return
+	var sc: Script = n.get_script()
+	if not _prof_methods.has(sc):
+		var names := {}
+		var s2: Script = sc
+		while s2 != null:
+			for m in s2.get_script_method_list():
+				names[m["name"]] = true
+			s2 = s2.get_base_script()
+		_prof_methods[sc] = [names.has("_physics_process"), names.has("_process")]
+	var hm: Array = _prof_methods[sc]
+	if not hm[0] and not hm[1]:
+		return
+	if hm[0]:
+		n.set_physics_process(false)
+	if hm[1]:
+		n.set_process(false)
+	var nm := sc.resource_path.get_file()
+	if nm == "":
+		nm = n.get_class()
+	_prof_nodes.append([n, nm, hm[0], hm[1]])
+
+
+func _prof_frame(phys: bool) -> void:
+	if not _prof_started:
+		if _frame < 10:
+			return
+		_prof_started = true
+		var stack: Array = [get_tree().root]
+		while not stack.is_empty():
+			var x: Node = stack.pop_back()
+			_prof_take(x)
+			stack.append_array(x.get_children())
+		get_tree().node_added.connect(func(n: Node) -> void: _prof_pending.append(n))
+	# новые узлы (снаряды, крипы, эффекты): забираем, когда они готовы (после _ready движок включает обработку сам)
+	var still: Array = []
+	for n in _prof_pending:
+		if not is_instance_valid(n):
+			continue
+		if n.is_node_ready():
+			_prof_take(n)
+		else:
+			still.append(n)
+	_prof_pending = still
+	var dt := get_physics_process_delta_time() if phys else get_process_delta_time()
+	var alive: Array = []
+	for e in _prof_nodes:
+		var n = e[0]
+		if not is_instance_valid(n):
+			continue
+		alive.append(e)
+		if not n.is_inside_tree() or not n.can_process():
+			continue
+		if phys and e[2]:
+			var t0 := Time.get_ticks_usec()
+			n._physics_process(dt)
+			var k: String = "phys " + e[1]
+			var us := Time.get_ticks_usec() - t0
+			_prof_t[k] = _prof_t.get(k, 0) + us
+			_prof_n[k] = _prof_n.get(k, 0) + 1
+			_prof_cur[k] = _prof_cur.get(k, 0) + us
+			_prof_tick_sum += us
+		elif not phys and e[3]:
+			var t1 := Time.get_ticks_usec()
+			n._process(dt)
+			var k2: String = "proc " + e[1]
+			_prof_t[k2] = _prof_t.get(k2, 0) + Time.get_ticks_usec() - t1
+			_prof_n[k2] = _prof_n.get(k2, 0) + 1
+	_prof_nodes = alive
+	if phys:
+		_prof_ticks += 1
+		_prof_engine_phys += Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0
+		_prof_tick_in_frame = true
+		_prof_tick_list.append(_prof_tick_sum / 1000.0)
+		_prof_tick_sum = 0
+		for k3 in _prof_cur:
+			_prof_tick_max[k3] = maxi(_prof_tick_max.get(k3, 0), _prof_cur[k3])
+		_prof_cur.clear()
+	else:
+		_prof_frames += 1
+		_prof_engine_proc += Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0
+		var now := Time.get_ticks_usec()
+		if _prof_last > 0:
+			_prof_wall += now - _prof_last
+			(_prof_ft_tick if _prof_tick_in_frame else _prof_ft_plain).append((now - _prof_last) / 1000.0)
+		_prof_last = now
+		_prof_tick_in_frame = false
+		if _prof_frames % 600 == 0:
+			_prof_print()
+
+
+func _prof_print() -> void:
+	var keys := _prof_t.keys()
+	keys.sort_custom(func(a, b): return _prof_t[a] > _prof_t[b])
+	var sum_phys := 0.0
+	var sum_proc := 0.0
+	for k in keys:
+		if k.begins_with("phys"):
+			sum_phys += _prof_t[k] / 1000.0
+		else:
+			sum_proc += _prof_t[k] / 1000.0
+	# счётчики движка (TIME_PROCESS, TIME_PHYSICS_PROCESS) — худший кадр за секунду, поэтому меряем и сами
+	print("[PROF] t=%ds  за последние 10 с игры: всё %.0f мс на %d кадров и %d тиков; скрипты тиков %.0f мс, скрипты кадров %.0f мс, остальное (движок) %.0f мс" % [_frame / 60,
+		_prof_wall / 1000.0, _prof_frames, _prof_ticks, sum_phys, sum_proc, _prof_wall / 1000.0 - sum_phys - sum_proc])
+	print("[PROF]   в среднем: кадр %.2f мс, тик скриптов %.2f мс, кадр скриптов %.2f мс (худший тик движка %.1f мс)" % [_prof_wall / 1000.0 / maxf(_prof_frames, 1),
+		sum_phys / maxf(_prof_ticks, 1), sum_proc / maxf(_prof_frames, 1), _prof_engine_phys / maxf(_prof_ticks, 1)])
+	var stat := func(a: Array) -> String:
+		if a.is_empty():
+			return "-"
+		var b := a.duplicate()
+		b.sort()
+		return "в среднем %.2f, 90%% %.2f, худший %.2f мс" % [b.reduce(func(x, y): return x + y, 0.0) / b.size(), b[int(b.size() * 0.9)], b[-1]]
+	print("[PROF]   кадры с тиком: %s | без тика: %s" % [stat.call(_prof_ft_tick), stat.call(_prof_ft_plain)])
+	print("[PROF]   скрипты в тике: %s" % stat.call(_prof_tick_list))
+	var mk := _prof_tick_max.keys()
+	mk.sort_custom(func(a, b): return _prof_tick_max[a] > _prof_tick_max[b])
+	var ml := []
+	for k4 in mk.slice(0, 8):
+		ml.append("%s %.2f" % [k4.trim_prefix("phys "), _prof_tick_max[k4] / 1000.0])
+	print("[PROF]   худший тик по скриптам, мс: ", ", ".join(ml))
+	_prof_ft_tick.clear()
+	_prof_ft_plain.clear()
+	_prof_tick_list.clear()
+	_prof_tick_max.clear()
+	_prof_wall = 0
+	for k in keys.slice(0, 14):
+		var per: float = _prof_t[k] / 1000.0 / maxf(_prof_ticks if k.begins_with("phys") else _prof_frames, 1)
+		print("[PROF]   %-26s %6.3f мс на %s, вызовов %d" % [k, per, "тик" if k.begins_with("phys") else "кадр", _prof_n[k]])
+	_prof_t.clear()
+	_prof_n.clear()
+	_prof_ticks = 0
+	_prof_frames = 0
+	_prof_engine_phys = 0.0
+	_prof_engine_proc = 0.0
+
+
+# ------------------------------------------------------------------
+#  Что сколько стоит (--cpubench, окно с --disable-vsync). Обычный бой как у Сани: 4 союзных и
+#  5 вражеских ботов, крипы, камера с высоты 90; мех игрока стоит у середины. Бой идёт несколько раз
+#  подряд (сам перезапускается), по разу на набор из CB_RUNS. После разгона (20 с) меряем по 4 с:
+#  «как есть», «с синхронизацией» (как видит игрок: монитор задаёт предел кадров) и по очереди без
+#  части картинки — разница с соседними «как есть» = цена этой части. --cpubench-gpu: разбор нагрузки
+#  на видеокарту (трава, тени, свечение, вспышки, частицы) на Высоких.
+#  В лог строки [CPU]: кадр, кадры с тиком и без, из чего состоит кадр (тик, кадр скриптов и движка,
+#  отрисовка, прочее), отрисовка на процессоре и видеокарте по замеру Godot, вызовы отрисовки.
+# ------------------------------------------------------------------
+
+const CB_RUNS_CPU := [
+	["Низкие", 0, ["base", "no_hud", "base", "no_fog", "base", "no_labels", "base", "no_mechs", "base",
+		"no_creeps", "base", "vsync"]],
+	["Средние", 1, ["base", "vsync"]],
+	["Высокие", 2, ["base", "vsync"]],
+]
+const CB_RUNS_GPU := [
+	["Высокие", 2, ["base", "vsync", "no_grass", "base", "no_sun_shadow", "base", "no_ssao_glow", "base",
+		"no_flash", "base", "no_particles", "base", "no_mechs", "base", "no_creeps", "base"]],
+]
+static var CB_RUNS: Array = CB_RUNS_CPU
+static var _cb_run := 0
+static var _cb_out: Array = []
+var _cb_t0 := 0
+var _cb_step := -1
+var _cb_last := 0
+var _cb_acc := {}
+var _cb_res: Array = []
+var _cb_saved := {}
+var _cb_ticked := false
+var _cb_scan := 0.0
+var _cb_ph := {}                 # отметки времени внутри кадра (мкс): начало тика, кадра, отрисовки
+
+
+func _cb_steps() -> Array:
+	return CB_RUNS[_cb_run][2]
+
+
+func _cb_env() -> Environment:
+	for c in main.get_children():
+		if c is WorldEnvironment:
+			return c.environment
+	return null
+
+
+func _cb_sun() -> DirectionalLight3D:
+	if _cb_saved.has("sun"):
+		return _cb_saved["sun"]
+	for c in main.get_children():
+		if c is DirectionalLight3D and c.shadow_enabled:
+			_cb_saved["sun"] = c
+			return c
+	return null
+
+
+func _cb_apply(step: String, on: bool) -> void:
+	# on = выключить часть картинки; каждый кадр, потому что игра сама возвращает видимость
+	match step:
+		"vsync":
+			DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_ENABLED if on else DisplayServer.VSYNC_DISABLED)
+		"no_sun_shadow":
+			var sun := _cb_sun()
+			if sun != null:
+				sun.shadow_enabled = not on
+		"no_grass":
+			for c in main.art.get_children():
+				if c is MultiMeshInstance3D and c.multimesh != null and c.multimesh.use_colors:
+					c.visible = not on
+		"no_ssao_glow":
+			var env := _cb_env()
+			if on and not _cb_saved.has("ssao"):
+				_cb_saved["ssao"] = env.ssao_enabled
+				_cb_saved["glow"] = env.glow_enabled
+			if _cb_saved.has("ssao"):
+				env.ssao_enabled = false if on else _cb_saved["ssao"]
+				env.glow_enabled = false if on else _cb_saved["glow"]
+		"no_flash":
+			Cfg.graphics = 0 if on else CB_RUNS[_cb_run][1]     # вспышки света считаются по графике
+		"no_particles":
+			_cb_scan -= get_process_delta_time()
+			if on and _cb_scan <= 0.0:
+				_cb_scan = 0.3
+				for p in main.find_children("*", "CPUParticles3D", true, false):
+					if not p.has_meta("cb_vis"):
+						p.set_meta("cb_vis", p.visible)
+					p.visible = false
+			elif not on:
+				for p in main.find_children("*", "CPUParticles3D", true, false):
+					if p.has_meta("cb_vis"):
+						p.visible = p.get_meta("cb_vis")
+						p.remove_meta("cb_vis")
+		"no_creeps":
+			if on:
+				for c in get_tree().get_nodes_in_group("creeps"):
+					c.visible = false
+		"no_hud":
+			main.hud.visible = not on
+		"no_fog":
+			for vp in main.vision.find_children("*", "SubViewport", true, false):
+				vp.render_target_update_mode = SubViewport.UPDATE_DISABLED if on else SubViewport.UPDATE_ALWAYS
+		"no_labels":
+			_cb_scan -= get_process_delta_time()
+			if on and _cb_scan <= 0.0:
+				_cb_scan = 0.3
+				for n in main.find_children("*", "Label3D", true, false):
+					n.visible = false
+				for n in main.find_children("*", "Node3D", true, false):
+					if n.get_script() != null and n.get_script().resource_path.ends_with("hp_bar.gd"):
+						n.visible = false
+		"no_mechs":
+			if on:
+				for m in get_tree().get_nodes_in_group("mechs"):
+					if m.visual != null:
+						m.visual.visible = false
+
+
+func _run_cpubench() -> void:
+	var m = main.mech
+	var vp_rid := get_viewport().get_viewport_rid()
+	if _frame == 5:
+		process_priority = 1000      # после игры: успеваем спрятать то, что игра только что показала
+		Cfg.cam_distance = 90.0
+		m.global_position = Vector3(-30, 0.05, 6)
+		m.snap_interpolation(m)
+		m.demo = {"move": Vector2.ZERO, "run": false, "fire": false, "dash": false, "aim": Vector3(0, 1.5, 6)}
+		RenderingServer.viewport_set_measure_render_time(vp_rid, true)
+		DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
+		_cb_t0 = Time.get_ticks_usec()
+		# части кадра: тик (от начала тика до начала кадра), кадр (скрипты и движок до отрисовки),
+		# отрисовка (вся, со сменой картинки на экране), прочее (до начала следующего кадра)
+		get_tree().physics_frame.connect(_cb_on_phys)
+		get_tree().process_frame.connect(_cb_on_proc)
+		RenderingServer.frame_pre_draw.connect(_cb_on_pre)
+		RenderingServer.frame_post_draw.connect(_cb_post_draw)
+		if _cb_run == 0:
+			print("[CPU] синхронизация в проекте: %s (1 = включена); монитор %.0f Гц; окно %s; ботов %d+%d" % [
+				str(ProjectSettings.get_setting("display/window/vsync/vsync_mode")), DisplayServer.screen_get_refresh_rate(),
+				str(DisplayServer.window_get_size()), Cfg.bot_allies, Cfg.bot_enemies])
+	if _frame < 5:
+		return
+	m.hp = m.max_hp()
+	var steps := _cb_steps()
+	var now := Time.get_ticks_usec()
+	var t := (now - _cb_t0) / 1e6
+	var warm := 20.0
+	var step_i := int((t - warm) / 4.0) if t >= warm else -1
+	if step_i != _cb_step:
+		if _cb_step >= 0 and _cb_step < steps.size():
+			_cb_apply(steps[_cb_step], false)
+			_cb_finish(steps[_cb_step])
+		_cb_step = step_i
+		_cb_acc = {"ft": [], "tick": [], "plain": []}
+		if _cb_step >= steps.size():
+			_cb_next()
+			return
+	if _cb_step >= 0:
+		_cb_apply(steps[_cb_step], true)
+		var into := t - warm - _cb_step * 4.0
+		if into > 0.5 and _cb_last > 0:
+			var ms := (now - _cb_last) / 1000.0
+			_cb_acc["ft"].append(ms)
+			_cb_acc["tick" if _cb_ticked else "plain"].append(ms)
+			_cb_acc["cpu"] = _cb_acc.get("cpu", 0.0) + RenderingServer.viewport_get_measured_render_time_cpu(vp_rid)
+			_cb_acc["gpu"] = _cb_acc.get("gpu", 0.0) + RenderingServer.viewport_get_measured_render_time_gpu(vp_rid)
+			_cb_acc["calls"] = _cb_acc.get("calls", 0.0) + Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)
+			_cb_acc["prims"] = _cb_acc.get("prims", 0.0) + Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME)
+	_cb_ticked = false
+	_cb_last = now
+
+
+func _cb_on_phys() -> void:
+	if not _cb_ph.has("phys"):
+		_cb_ph["phys"] = Time.get_ticks_usec()
+
+
+func _cb_on_proc() -> void:
+	_cb_ph["proc"] = Time.get_ticks_usec()
+
+
+func _cb_on_pre() -> void:
+	_cb_ph["pre"] = Time.get_ticks_usec()
+
+
+# кадр нарисован: раскладываем его время на части
+func _cb_post_draw() -> void:
+	var post := Time.get_ticks_usec()
+	if _cb_ph.has("proc") and _cb_ph.has("pre") and _cb_acc.has("ft"):
+		var start: int = _cb_ph.get("phys", _cb_ph["proc"])
+		if _cb_ph.has("last_post"):
+			_cb_acc["p_other"] = _cb_acc.get("p_other", 0.0) + (start - _cb_ph["last_post"]) / 1000.0
+		if _cb_ph.has("phys"):
+			_cb_acc["p_tick"] = _cb_acc.get("p_tick", 0.0) + (_cb_ph["proc"] - _cb_ph["phys"]) / 1000.0
+			_cb_acc["n_tick"] = _cb_acc.get("n_tick", 0) + 1
+		_cb_acc["p_proc"] = _cb_acc.get("p_proc", 0.0) + (_cb_ph["pre"] - _cb_ph["proc"]) / 1000.0
+		_cb_acc["p_draw"] = _cb_acc.get("p_draw", 0.0) + (post - _cb_ph["pre"]) / 1000.0
+		_cb_acc["p_n"] = _cb_acc.get("p_n", 0) + 1
+	_cb_ph = {"last_post": post}
+
+
+func _cb_avg(a: Array) -> float:
+	return a.reduce(func(x, y): return x + y, 0.0) / maxf(a.size(), 1)
+
+
+func _cb_finish(step: String) -> void:
+	var a: Dictionary = _cb_acc
+	var ft: Array = a["ft"]
+	var n := float(maxi(ft.size(), 1))
+	var srt := ft.duplicate()
+	srt.sort()
+	var slow := ft.filter(func(x): return x > 1000.0 / 144.0).size()
+	var line := "[CPU] %-8s %-13s %4d кадр/с, кадр %.2f мс (с тиком %.2f, без тика %.2f, 90%% %.2f), дольше 6,9 мс: %d%% кадров | отрисовка на проц. %.2f мс, видеокарта %.2f мс, вызовов %d, треуг. %d тыс., крипов %d" % [
+		CB_RUNS[_cb_run][0], step, int(1000.0 * n / maxf(_cb_avg(ft) * n, 1.0)), _cb_avg(ft), _cb_avg(a["tick"]), _cb_avg(a["plain"]),
+		srt[int(srt.size() * 0.9)] if not srt.is_empty() else 0.0, int(100.0 * slow / n),
+		a.get("cpu", 0.0) / n, a.get("gpu", 0.0) / n, int(a.get("calls", 0.0) / n), int(a.get("prims", 0.0) / n / 1000.0),
+		get_tree().get_nodes_in_group("creeps").size()]
+	var pn := float(maxi(a.get("p_n", 0), 1))
+	line += "\n[CPU]          из чего кадр: тик %.2f мс (на кадр с тиком, таких %d%%), скрипты и движок кадра %.2f, отрисовка %.2f, прочее %.2f" % [
+		a.get("p_tick", 0.0) / maxf(a.get("n_tick", 0), 1), int(100.0 * a.get("n_tick", 0) / pn), a.get("p_proc", 0.0) / pn,
+		a.get("p_draw", 0.0) / pn, a.get("p_other", 0.0) / pn]
+	print(line)
+	_cb_res.append([step, _cb_avg(ft), a.get("cpu", 0.0) / n, a.get("gpu", 0.0) / n])
+	_cb_out.append(line)
+
+
+func _cb_next() -> void:
+	print("[CPU] ---- %s: сколько стоит каждая часть (разница с соседними «как есть») ----" % CB_RUNS[_cb_run][0])
+	for i in _cb_res.size():
+		var r: Array = _cb_res[i]
+		if r[0] == "base" or r[0] == "vsync" or i == 0 or i + 1 >= _cb_res.size():
+			continue
+		var bw: float = (_cb_res[i - 1][1] + _cb_res[i + 1][1]) * 0.5
+		var bc: float = (_cb_res[i - 1][2] + _cb_res[i + 1][2]) * 0.5
+		var bg: float = (_cb_res[i - 1][3] + _cb_res[i + 1][3]) * 0.5
+		var l := "[CPU]   %-13s кадр %+.2f мс, отрисовка на проц. %+.2f мс, видеокарта %+.2f мс" % [r[0], r[1] - bw, r[2] - bc, r[3] - bg]
+		print(l)
+		_cb_out.append(l)
+	_cb_run += 1
+	if _cb_run < CB_RUNS.size():
+		get_tree().reload_current_scene()
+		return
+	print("[CPU] ======== итог ========")
+	for l in _cb_out:
+		print(l)
+	get_tree().quit()
+
+
+# веер обзора: лучи пускаются только в сторону укрытий (vision._fan_dists). Сравниваем с полным
+# веером (все лучи) в точках по всей карте, в том числе вплотную к стенам и краям
+func _run_fancheck() -> void:
+	var v = main.vision
+	var space: PhysicsDirectSpaceState3D = main.get_world_3d().direct_space_state
+	var r: Rect2 = main.map_rect()
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7
+	var worst := 0.0
+	var bad := 0
+	var total_rays := 0
+	var cast_rays := 0
+	for i in 400:
+		var from := Vector3(rng.randf_range(r.position.x + 1, r.end.x - 1), v.EYE, rng.randf_range(r.position.y + 1, r.end.y - 1))
+		var rad: float = [35.0, 22.0, 14.0][i % 3]
+		var n: int = v.RAYS if i % 2 == 0 else v.RAYS_CREEP
+		var fast: PackedFloat32Array = v._fan_dists(space, from, rad, n)
+		var spans: Array = v._obstacle_spans(space, from, rad)
+		for k in n:
+			var a := TAU * k / n
+			var q := PhysicsRayQueryParameters3D.create(from, from + Vector3(cos(a), 0, sin(a)) * rad, 1)
+			var hit := space.intersect_ray(q)
+			var full := rad if hit.is_empty() else minf(from.distance_to(hit["position"]) + 1.2, rad)
+			var diff := absf(full - fast[k])
+			worst = maxf(worst, diff)
+			if diff > 0.01:
+				bad += 1
+			total_rays += 1
+			for sp in spans:
+				if wrapf(a - sp.x, 0.0, TAU) <= sp.y:
+					cast_rays += 1
+					break
+	print("[FAN] точек 400, лучей %d, из них пущено %d (%.0f%%), расхождений %d, худшее %.3f м — %s" % [total_rays, cast_rays,
+		100.0 * cast_rays / maxf(total_rays, 1), bad, worst, "ВЕРНО" if bad == 0 else "ОШИБКА"])
+	get_tree().quit()
