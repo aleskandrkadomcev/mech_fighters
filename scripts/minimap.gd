@@ -8,6 +8,7 @@ var _map: TextureRect
 var _overlay: Control
 var _mat: ShaderMaterial
 var _fog_dark_set := -1.0       # какая темнота тумана уже стоит в материале
+var _ticked := true             # был тик игры после прошлой перерисовки
 var _rect := Rect2(-120, -70, 240, 140)
 var _pings: Array = []          # метки игроков: [{pos, born}], рисуются расходящимися кругами 3 с
 
@@ -117,8 +118,15 @@ func _process(_delta: float) -> void:
 	if _mat != null and Cfg.fog_darkness != _fog_dark_set:
 		_fog_dark_set = Cfg.fog_darkness
 		_mat.set_shader_parameter("fog_dark", Cfg.fog_darkness)
-	if _overlay != null:
+	# мехи и крипы сдвигаются только на тиках игры: перерисовываем после тика, а каждый кадр —
+	# только пока мигают метки или место падения ящика
+	if _overlay != null and (_ticked or not _pings.is_empty() or (main != null and main.has_method("crate_warning_pos") and main.crate_warning_pos() != null)):
+		_ticked = false
 		_overlay.queue_redraw()
+
+
+func _physics_process(_delta: float) -> void:
+	_ticked = true
 
 
 func _team_col(t: int) -> Color:

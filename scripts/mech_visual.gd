@@ -910,6 +910,9 @@ func set_beam(gun: int, on: bool, from := Vector3.ZERO, to := Vector3.ZERO) -> v
 		b.reset_physics_interpolation()
 
 
+var _glow_set := Color(-1, -1, -1)     # какая подсветка брони уже стоит в материалах
+
+
 func update_visual(delta: float, body_pos: Vector3, vel: Vector3, legs_yaw: float, torso_yaw: float, dashing: bool) -> void:
 	var vel_h := Vector3(vel.x, 0, vel.z)
 	var speed := vel_h.length()
@@ -923,10 +926,14 @@ func update_visual(delta: float, body_pos: Vector3, vel: Vector3, legs_yaw: floa
 		glow = Color(0.2, 0.2, 0.2)
 	elif stunned:
 		glow = Color(0.1, 0.3, 0.8) * (0.6 + 0.4 * sin(Time.get_ticks_msec() * 0.025))
-	m_armor.emission = glow
-	m_armor2.emission = glow
-	for m in _model_mats.values():
-		m.emission = glow
+	# в материалы только когда подсветка меняется: каждая установка заставляет отрисовку заново
+	# отправлять материал в видеокарту (на 10 мехах это сотни материалов за тик)
+	if glow != _glow_set:
+		_glow_set = glow
+		m_armor.emission = glow
+		m_armor2.emission = glow
+		for m in _model_mats.values():
+			m.emission = glow
 
 	if not _inited:
 		_inited = true

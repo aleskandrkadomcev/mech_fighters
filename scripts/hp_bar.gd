@@ -9,6 +9,7 @@ var _label: Label3D
 var _bar: MeshInstance3D
 var _mat: StandardMaterial3D
 var _back: MeshInstance3D
+var _ratio := -1.0
 
 
 func _ready() -> void:
@@ -48,7 +49,11 @@ func _ready() -> void:
 func _process(_delta: float) -> void:
 	# всегда лицом к камере, даже если родитель развёрнут (вражеские турели повёрнуты на 180°)
 	var sc := global_basis.get_scale()
-	_back.global_basis = Basis.from_euler(Vector3(deg_to_rad(Cfg.cam_pitch - 90.0), 0, 0)).scaled(sc)
+	var want := Basis.from_euler(Vector3(deg_to_rad(Cfg.cam_pitch - 90.0), 0, 0)).scaled(sc)
+	# поворачиваем, только если что-то поменялось: лишний поворот заставляет движок пересчитывать
+	# положение полоски и отправлять его в отрисовку (полосок десятки)
+	if not _back.global_basis.is_equal_approx(want):
+		_back.global_basis = want
 
 
 func _flat(c: Color) -> StandardMaterial3D:
@@ -68,5 +73,8 @@ func set_title(t: String) -> void:
 
 func set_ratio(k: float) -> void:
 	k = clampf(k, 0.0, 1.0)
+	if k == _ratio:
+		return
+	_ratio = k
 	_bar.scale.x = maxf(k, 0.001)
 	_bar.position.x = -W * 0.5 * (1.0 - k)

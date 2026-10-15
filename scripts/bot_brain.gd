@@ -228,15 +228,18 @@ func think(delta: float) -> void:
 func _find_target() -> CharacterBody3D:
 	var best: CharacterBody3D = null
 	var best_d := 45.0
-	for m in mech.get_tree().get_nodes_in_group("mechs"):
-		if m.team == mech.team or m.dead or m.is_landing():
+	if main == null:
+		return null
+	# живые мехи на этом тике (main.units: без падающих с неба), сначала расстояние, потом вижен
+	var here := mech.global_position
+	for u in main.units():
+		if not u[4] or u[2] == mech.team:
 			continue
-		if main != null and not main.is_visible_to(mech.team, m):
+		var d: float = (u[1] - here).length()
+		if d >= best_d or not main.is_visible_to(mech.team, u[0]):
 			continue
-		var d: float = m.global_position.distance_to(mech.global_position)
-		if d < best_d:
-			best_d = d
-			best = m
+		best_d = d
+		best = u[0]
 	return best
 
 
@@ -244,15 +247,16 @@ func _find_target() -> CharacterBody3D:
 func _find_creep(pos: Vector3) -> Node3D:
 	var best: Node3D = null
 	var best_d: float = mech.weapon_range() + 8.0
-	for c in mech.get_tree().get_nodes_in_group("creeps"):
-		if c.team == mech.team or c.dead:
+	if main == null:
+		return null
+	for u in main.units():
+		if u[4] or u[2] == mech.team:
 			continue
-		if main != null and not main.is_visible_to(mech.team, c):
+		var d: float = (u[1] - pos).length()
+		if d >= best_d or not main.is_visible_to(mech.team, u[0]):
 			continue
-		var d: float = c.global_position.distance_to(pos)
-		if d < best_d:
-			best_d = d
-			best = c
+		best_d = d
+		best = u[0]
 	return best
 
 

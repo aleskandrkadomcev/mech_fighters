@@ -45,7 +45,8 @@ func _ready() -> void:
 	_apply_size()
 
 
-func _process(_delta: float) -> void:
+# размер хитбокса — часть игры: проверяем на тике, а не в каждом кадре
+func _physics_process(_delta: float) -> void:
 	if _r != mech.get_hit_radius() or _h != mech.get_hit_height():
 		_apply_size()
 	_vis.visible = Cfg.show_hitboxes
