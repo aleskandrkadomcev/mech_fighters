@@ -306,8 +306,8 @@ func _build_core(col: Color) -> void:
 	_cyl(self, 0.9, 1.0, 0.22, Vector3(0, 5.45, 0), _glow(col), 14)
 
 
-# защитный барьер штаба: прозрачный купол цвета команды из размытых плит. Сетка плит медленно
-# плавает (искажение шумом, как под водой), попадания пускают по куполу волны
+# защитный барьер штаба: пузырь цвета команды, как щиты в Supreme Commander. Края светятся,
+# середина почти прозрачная (здание видно, окраска ~10%) с лёгким мерцанием; попадания пускают волны
 func _build_barrier(col: Color) -> void:
 	var sh := Shader.new()
 	sh.code = """shader_type spatial;
@@ -336,7 +336,6 @@ void fragment() {
 	// волны от попаданий: два кольца расходятся от места удара и гаснут
 	float waves = 0.0;
 	float flash = 0.0;
-	vec3 push = vec3(0.0);
 	for (int i = 0; i < 4; i++) {
 		float age = hits[i].w;
 		if (age < 1.0) {
@@ -347,44 +346,23 @@ void fragment() {
 			float w1 = exp(-pow((d - r) * 2.4, 2.0));
 			float w2 = exp(-pow((d - r * 0.55) * 2.8, 2.0)) * 0.6;
 			waves += (w1 + w2) * env;
-			push += dv / max(d, 0.001) * (w1 + w2) * env * 0.7;
 			flash += exp(-d * 1.3) * max(1.0 - age * 4.0, 0.0);
 		}
 	}
-	// сетка плавает: точка сдвигается медленным шумом (и волнами от попаданий)
-	vec3 q = cpos * 0.28 + vec3(0.0, TIME * 0.25, TIME * 0.12);
-	vec3 q2 = cpos * 0.7 - vec3(TIME * 0.35, 0.0, TIME * 0.2);
-	vec3 p = cpos + (vec3(vn(q), vn(q + 17.3), vn(q + 41.7)) - 0.5) * 1.6
-		+ (vec3(vn(q2), vn(q2 + 9.1), vn(q2 + 27.4)) - 0.5) * 0.35 + push;
-	// плиты: сфера разбита как развёрнутый куб, на каждой грани 6×4 плиты равного угла
-	vec3 n = normalize(p);
-	vec3 an = abs(n);
-	vec2 uv;
-	float face;
-	if (an.y >= an.x && an.y >= an.z) {
-		uv = n.xz / an.y;
-		face = 1.0;
-	} else if (an.x >= an.z) {
-		uv = n.zy / an.x;
-		face = n.x > 0.0 ? 2.0 : 3.0;
-	} else {
-		uv = n.xy / an.z;
-		face = n.z > 0.0 ? 4.0 : 5.0;
-	}
-	vec2 g = atan(uv) * (4.0 / PI) * vec2(3.0, 2.0);
-	vec2 cell = floor(g);
-	vec2 f = fract(g);
-	vec2 ed = min(f, 1.0 - f);
-	float e = min(ed.x, ed.y);
-	// размытые швы и мягкое свечение к краю плиты
-	float line = 1.0 - smoothstep(0.0, 0.2, e);
-	float halo = 1.0 - smoothstep(0.0, 0.35, e);
-	// каждая плита своей яркости и медленно дышит
-	float hc = h1(vec3(cell, face));
-	float fill = 0.02 + 0.07 * hc * (0.5 + 0.5 * sin(TIME * 1.1 + hc * 6.283));
-	float fr = pow(1.0 - abs(dot(NORMAL, VIEW)), 2.4);
-	float a = 0.02 + fr * 0.55 + line * 0.26 + halo * 0.07 + fill + waves * 1.5 + flash * 0.7;
-	vec3 c = mix(col, vec3(1.0, 0.88, 0.82), clamp(flash * 0.6 + waves * 0.35, 0.0, 1.0));
+	// мерцание: пятна и тонкие извилистые прожилки неровной формы, текут (искажение шумом),
+	// а маска сама зажигает и гасит их то в одном, то в другом месте щита
+	vec3 q = cpos * 0.3 + vec3(0.0, TIME * 0.3, TIME * 0.15);
+	vec3 wq = (vec3(vn(cpos * 0.18 + TIME * 0.12), vn(cpos * 0.18 + 7.7 - TIME * 0.1), vn(cpos * 0.18 + 19.3)) - 0.5) * 2.0;
+	float cl = vn(q + wq) * 0.55 + vn(q * 2.1 + wq + 5.1) * 0.3 + vn(q * 4.3 + 11.7) * 0.15;
+	float where = smoothstep(0.35, 0.65, vn(cpos * 0.22 + vec3(TIME * 0.4, TIME * 0.9, -TIME * 0.3)));
+	float vein = exp(-pow((cl - 0.46) * 14.0, 2.0));
+	float spot = smoothstep(0.5, 0.65, cl);
+	float shimmer = max(vein, spot) * where;
+	// края светятся (свет вдоль поверхности, как у мыльного пузыря), середина почти прозрачная
+	float fr = 1.0 - abs(dot(NORMAL, VIEW));
+	float rim = pow(fr, 2.6) * 0.9 + pow(fr, 7.0) * 0.9;
+	float a = 0.035 + shimmer * 0.18 + rim + waves * 1.5 + flash * 0.7;
+	vec3 c = mix(col, vec3(1.0, 0.9, 0.86), clamp(pow(fr, 6.0) * 0.45 + flash * 0.6 + waves * 0.35, 0.0, 1.0));
 	ALBEDO = c * 1.6;
 	ALPHA = clamp(a * fade, 0.0, 1.0);
 }
