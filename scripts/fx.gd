@@ -705,9 +705,9 @@ var _zap_haze: Material
 func _zap_mats() -> void:
 	if _zap_core == null:
 		# ленты уже повёрнуты к камере, мягкие края по UV.x
-		_zap_core = beam_material(Color(0.85, 0.93, 1.0), 4.0, 0.8, 0.5, false)
-		_zap_glow = beam_material(Color(0.3, 0.55, 1.0), 2.2, 1.8, 0.0, false)
-		_zap_haze = beam_material(Color(0.25, 0.45, 1.0), 0.6, 2.5, 0.0, false)
+		_zap_core = beam_material(Color(0.62, 0.84, 1.0), 1.3, 1.3, 0.3, false, 0.0, 0.3)
+		_zap_glow = beam_material(Color(0.3, 0.58, 1.0), 0.85, 2.0, 0.0, false)
+		_zap_haze = beam_material(Color(0.25, 0.48, 1.0), 0.3, 2.6, 0.0, false)
 
 
 func zap(center: Vector3, radius: float, height: float) -> void:
@@ -723,46 +723,80 @@ func zap(center: Vector3, radius: float, height: float) -> void:
 	var r1 := radius * randf_range(0.85, 1.15)
 	var p0 := center + Vector3(cos(a0) * r0, randf_range(0.3, height), sin(a0) * r0)
 	var p1 := center + Vector3(cos(a1) * r1, randf_range(0.3, height), sin(a1) * r1)
-	# ломаная: середина зигзагом, плюс иногда отросток
-	var pts: Array[Vector3] = [p0]
-	var n := 6
-	var span := p0.distance_to(p1)
-	for i in range(1, n):
-		var k := float(i) / n
-		var j := Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1)) * span * 0.18
-		pts.append(p0.lerp(p1, k) + j)
-	pts.append(p1)
+	var view := cam.global_position
+	var pts := _jag(p0, p1, 3, 0.22, view)
 	var branch: Array[Vector3] = []
 	if randf() < 0.5:
-		var from := pts[randi_range(2, n - 2)]
-		branch = [from, from + Vector3(randf_range(-1, 1), randf_range(-0.6, 0.4), randf_range(-1, 1)) * span * 0.4]
+		var from := pts[randi_range(2, pts.size() - 3)]
+		var span := p0.distance_to(p1)
+		branch = _jag(from, from + Vector3(randf_range(-1, 1), randf_range(-0.6, 0.4), randf_range(-1, 1)) * span * 0.4, 2, 0.25, view)
 	var im := ImmediateMesh.new()
-	var view := cam.global_position
 	for pass_i in 2:
-		var w := 0.1 if pass_i == 0 else 0.45
+		var w := 0.12 if pass_i == 0 else 0.55
 		im.surface_begin(Mesh.PRIMITIVE_TRIANGLES, _zap_core if pass_i == 0 else _zap_glow)
-		_ribbon(im, pts, w, view)
+		_ribbon(im, pts, w, view, 0.3, 0.3)
 		if not branch.is_empty():
-			_ribbon(im, branch, w * 0.7, view)
+			_ribbon(im, branch, w * 0.7, view, 1.0, 0.0)
 		im.surface_end()
 	var mi := _mesh_node(im, null, Vector3.ZERO)
 	var tw := mi.create_tween()
 	tw.tween_interval(randf_range(0.05, 0.1))
 	tw.tween_callback(mi.queue_free)
 	if randf() < 0.25:
-		_flare(pts[randi_range(1, n - 1)], "spark_01", 0.9, Color(0.6, 0.85, 1.0, 1.0), 0.08)
+		_flare(pts[randi_range(1, pts.size() - 2)], "spark_01", 0.9, Color(0.5, 0.78, 1.0, 0.7), 0.08)
 
 
-# полоска из квадов вдоль ломаной, повёрнутая к камере
-func _ribbon(im: ImmediateMesh, pts: Array[Vector3], w: float, view: Vector3) -> void:
-	for i in pts.size() - 1:
+# сплошная лента вдоль ломаной, повёрнутая к камере. На изломах соседние куски делят вершины
+# (без щелей и наложений). taper_end / taper_start — какая доля длины у конца сужается в ноль
+func _ribbon(im: ImmediateMesh, pts: Array[Vector3], w: float, view: Vector3, taper_end := 0.0, taper_start := 0.0) -> void:
+	var n := pts.size()
+	if n < 2:
+		return
+	var sides: Array[Vector3] = []
+	for i in n:
+		var t: Vector3
+		if i == 0:
+			t = pts[1] - pts[0]
+		elif i == n - 1:
+			t = pts[i] - pts[i - 1]
+		else:
+			t = (pts[i + 1] - pts[i]).normalized() + (pts[i] - pts[i - 1]).normalized()
+		var k := 1.0
+		var u := float(i) / (n - 1)
+		if taper_end > 0.0:
+			k *= sqrt(clampf((1.0 - u) / taper_end, 0.0, 1.0))
+		if taper_start > 0.0:
+			k *= sqrt(clampf(u / taper_start, 0.0, 1.0))
+		sides.append(t.cross(view - pts[i]).normalized() * w * 0.5 * k)
+	# UV.x поперёк ленты: шейдер делает мягкие края и яркое ядро
+	for i in n - 1:
 		var a := pts[i]
 		var b := pts[i + 1]
-		var side := (b - a).cross(view - a).normalized() * w * 0.5
-		# UV.x поперёк ленты: шейдер делает мягкие края и яркое ядро
-		for v in [[a - side, 0.0], [a + side, 1.0], [b + side, 1.0], [a - side, 0.0], [b + side, 1.0], [b - side, 0.0]]:
+		var sa := sides[i]
+		var sb := sides[i + 1]
+		for v in [[a - sa, 0.0], [a + sa, 1.0], [b + sb, 1.0], [a - sa, 0.0], [b + sb, 1.0], [b - sb, 0.0]]:
 			im.surface_set_uv(Vector2(v[1], 0.5))
 			im.surface_add_vertex(v[0])
+
+
+# ломаная молнии: отрезок много раз делится пополам, середина каждый раз сдвигается вбок
+# (сдвиг всё меньше) — так выходят и крупные изгибы, и мелкая дрожь
+func _jag(a: Vector3, b: Vector3, levels: int, rough: float, view: Vector3) -> Array[Vector3]:
+	var pts: Array[Vector3] = [a, b]
+	var amp := a.distance_to(b) * rough
+	for l in levels:
+		var out: Array[Vector3] = [pts[0]]
+		for i in pts.size() - 1:
+			var p := pts[i]
+			var q := pts[i + 1]
+			var mid := (p + q) * 0.5
+			var side := (q - p).cross(view - mid).normalized()
+			var off := side * randf_range(-1.0, 1.0) + Vector3(0, randf_range(-0.4, 0.4), 0)
+			out.append(mid + off * amp)
+			out.append(q)
+		pts = out
+		amp *= 0.5
+	return pts
 
 
 # ------------------------------------------------------------------
@@ -772,9 +806,9 @@ func _ribbon(im: ImmediateMesh, pts: Array[Vector3], w: float, view: Vector3) ->
 func tesla_bolt(from: Vector3, to: Vector3) -> void:
 	for i in 3:
 		get_tree().create_timer(i * 0.07, false).timeout.connect(_bolt.bind(from, to, 1.0 - i * 0.2))
-	_flare(to, "star_07", 4.5, Color(0.6, 0.85, 1.0, 1.0), 0.18)
-	_flare(to, "circle_05", 5.0, Color(0.35, 0.6, 1.0, 1.0), 0.25)
-	_flare(from, "circle_05", 4.0, Color(0.5, 0.8, 1.0, 1.0), 0.22)
+	_flare(to, "star_07", 4.5, Color(0.5, 0.78, 1.0, 0.55), 0.18)
+	_flare(to, "circle_05", 5.0, Color(0.3, 0.55, 1.0, 0.6), 0.25)
+	_flare(from, "circle_05", 4.0, Color(0.4, 0.7, 1.0, 0.55), 0.22)
 	_streaks(to, Vector3.UP, 12, Color(0.65, 0.85, 1.0), 5.0, 13.0, 0.35, 90.0, 0.8)
 	_flash_light(to, Color(0.5, 0.75, 1.0), 12.0, 0.18)
 	shake_at.emit(to, 0.15)
@@ -787,30 +821,22 @@ func _bolt(from: Vector3, to: Vector3, k: float) -> void:
 		return
 	_zap_mats()
 	var span := from.distance_to(to)
-	var n := clampi(int(span / 1.2), 8, 30)
-	var pts: Array[Vector3] = [from]
-	for i in range(1, n):
-		var t := float(i) / n
-		var amp := span * 0.07 * sin(t * PI)
-		pts.append(from.lerp(to, t) + Vector3(randf_range(-1, 1), randf_range(-0.6, 0.6), randf_range(-1, 1)) * amp)
-	pts.append(to)
-	# отростки: короткие ломаные от случайных точек основной молнии
-	var branches: Array = []
-	for b in 3:
-		var j := randi_range(2, n - 2)
-		var br: Array[Vector3] = [pts[j]]
-		var dir := Vector3(randf_range(-1, 1), randf_range(-0.8, 0.2), randf_range(-1, 1)).normalized()
-		for q in 3:
-			br.append(br[-1] + (dir + Vector3(randf_range(-0.5, 0.5), randf_range(-0.4, 0.4), randf_range(-0.5, 0.5))) * span * 0.05)
-		branches.append(br)
-	var im := ImmediateMesh.new()
 	var view := cam.global_position
+	var pts := _jag(from, to, 5, 0.1, view)
+	# отростки: короткие ломаные от случайных точек основной молнии, сходят на нет
+	var branches: Array = []
+	var dir0 := (to - from).normalized()
+	for b in 3:
+		var j := randi_range(5, pts.size() - 6)
+		var dir := (dir0 + Vector3(randf_range(-1, 1), randf_range(-0.6, 0.2), randf_range(-1, 1)) * 0.9).normalized()
+		branches.append(_jag(pts[j], pts[j] + dir * span * randf_range(0.12, 0.22), 3, 0.2, view))
+	var im := ImmediateMesh.new()
 	for pass_i in 3:
-		var w: float = [0.32, 1.5, 3.6][pass_i] * k
+		var w: float = [0.34, 1.6, 3.4][pass_i] * k
 		im.surface_begin(Mesh.PRIMITIVE_TRIANGLES, [_zap_core, _zap_glow, _zap_haze][pass_i])
-		_ribbon(im, pts, w, view)
+		_ribbon(im, pts, w, view, 0.06, 0.04)
 		for br in branches:
-			_ribbon(im, br, w * 0.55, view)
+			_ribbon(im, br, w * 0.55, view, 1.0, 0.0)
 		im.surface_end()
 	var mi := _mesh_node(im, null, Vector3.ZERO)
 	var tw := mi.create_tween()
@@ -831,6 +857,7 @@ uniform float core = 0.3;
 uniform float fade = 1.0;
 uniform bool billboard = true;
 uniform float tip = 0.0;
+uniform float white = 0.7;
 void vertex() {
 	// плоскость вдоль своей оси Y, развёрнута к камере (длина — ось Y узла, ширина — ось X)
 	if (billboard) {
@@ -852,7 +879,7 @@ void fragment() {
 	}
 	float glow = pow(e, soft) * ends;
 	float hot = smoothstep(1.0 - core, 1.0, e) * ends;
-	ALBEDO = col * energy + vec3(hot * energy * 0.7);
+	ALBEDO = col * energy + vec3(hot * energy * white);
 	ALPHA = clamp(glow * fade, 0.0, 1.0);
 }
 """
@@ -869,7 +896,7 @@ var _chunk_mat: StandardMaterial3D
 
 # светящийся луч: яркое ядро, к краям мягко гаснет. billboard — плоскость сама повёрнута к камере
 # (лазер, рельса, трассер, искра); без него края задаёт UV.x (ленты молнии)
-func beam_material(col: Color, energy := 3.0, soft := 1.6, core := 0.3, billboard := true, tip := 0.0) -> ShaderMaterial:
+func beam_material(col: Color, energy := 3.0, soft := 1.6, core := 0.3, billboard := true, tip := 0.0, white := 0.7) -> ShaderMaterial:
 	if _beam_shader == null:
 		_beam_shader = Shader.new()
 		_beam_shader.code = BEAM_SHADER
@@ -881,6 +908,7 @@ func beam_material(col: Color, energy := 3.0, soft := 1.6, core := 0.3, billboar
 	m.set_shader_parameter("core", core)
 	m.set_shader_parameter("billboard", billboard)
 	m.set_shader_parameter("tip", tip)
+	m.set_shader_parameter("white", white)
 	return m
 
 

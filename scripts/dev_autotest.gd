@@ -150,9 +150,15 @@ func setup(main_node: Node3D, args: PackedStringArray) -> void:
 			_fancheck = true
 		elif a == "--aimtest":
 			_aimtest = true
-		elif a == "--fxreel":
+		elif a == "--fxreel" or a.begins_with("--fxreel="):
 			_fxreel = true
 			_nohud = true
+			# --fxreel=base: начать сразу со штурма базы (только при первом запуске, бой потом перезапускается)
+			if not _reel_from_set:
+				_reel_from_set = true
+				for k in FX_REEL.size():
+					if a == "--fxreel=" + FX_REEL[k][0]:
+						_reel_i = k
 			_target = FX_REEL[_reel_i][0]
 			for f in FX_REEL[_reel_i][1]:
 				_shots_left.append(f)
@@ -275,6 +281,8 @@ func _process(_delta: float) -> void:
 		_run_gfxbench()
 	if _fxreel and _target == "fight" and (_frame == 30 or _frame == 95):
 		Fx.explosion(Vector3(58, 1.8, 0) if _frame == 30 else Vector3(61, 1.8, 8), 4.5)
+	if _fxreel and _target == "base" and (_frame == 200 or _frame == 212):
+		_reel_dome_hit(0.0 if _frame == 200 else 0.5)
 	if _boom and _frame == 5:
 		Fx.explosion(main.mech.global_position + Vector3(7, 1.8, 3), 4.5)
 		Fx.explosion(main.mech.global_position + Vector3(-6, 1.8, -4), 3.0)
@@ -1442,8 +1450,21 @@ func _run_targetshot() -> void:
 
 
 # --fxreel: постановки по очереди (бой перезапускается), снимки с именем постановки
-const FX_REEL := [["fight", [33, 38, 45, 60, 100, 103, 110, 140, 175]], ["base", [150, 300, 450]], ["calm", [60, 130]]]
+const FX_REEL := [["fight", [33, 38, 45, 60, 100, 103, 110, 140, 175]], ["base", [150, 204, 214, 226, 240, 300, 450]], ["calm", [60, 130]]]
+
+
+# попадание в купол вражеского штаба со стороны камеры (волны на куполе). side — сдвиг вбок
+func _reel_dome_hit(side: float) -> void:
+	var cam := get_viewport().get_camera_3d()
+	for st in get_tree().get_nodes_in_group("structures"):
+		if st.id == "hq" and st.team != main.mech.team and cam != null:
+			var to_cam: Vector3 = cam.global_position - st.global_position
+			to_cam.y = 0.0
+			to_cam = to_cam.normalized()
+			var dir := (to_cam * 0.7 + to_cam.cross(Vector3.UP) * side + Vector3.UP * 0.7).normalized()
+			st.take_damage(1.0, st.global_position + dir * 12.0, -dir, "", main.mech)
 static var _reel_i := 0
+static var _reel_from_set := false
 var _reel_done := false
 
 

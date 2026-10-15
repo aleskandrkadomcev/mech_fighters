@@ -46,10 +46,13 @@ var _zap_target: Node3D
 var _barrier: MeshInstance3D
 var _barrier_mat: ShaderMaterial
 var _barrier_on := false
-var _barrier_hit := 0.0
+var _waves: Array[Vector4] = []     # волны на куполе от попаданий: xyz — место удара, w — возраст, с
+const WAVE_LIFE := 1.0
+const WAVES_MAX := 4
 
 
 func _ready() -> void:
+	set_process(false)          # кадр нужен только штабу, пока по куполу бегут волны
 	add_to_group("structures")
 	add_to_group("damageable")
 	hp = max_hp()
@@ -303,65 +306,93 @@ func _build_core(col: Color) -> void:
 	_cyl(self, 0.9, 1.0, 0.22, Vector3(0, 5.45, 0), _glow(col), 14)
 
 
-# защитный барьер штаба: прозрачный купол цвета команды, вспыхивает от попаданий
+# защитный барьер штаба: прозрачный купол цвета команды из размытых плит. Сетка плит медленно
+# плавает (искажение шумом, как под водой), попадания пускают по куполу волны
 func _build_barrier(col: Color) -> void:
 	var sh := Shader.new()
 	sh.code = """shader_type spatial;
 render_mode unshaded, blend_add, cull_disabled, depth_draw_never, shadows_disabled;
 uniform vec3 col = vec3(0.4, 0.8, 1.0);
-uniform float hit = 0.0;
-uniform vec3 hit_pos = vec3(0.0, -1000.0, 0.0);
+uniform vec4 hits[4];
 uniform float fade = 1.0;
-varying vec3 lpos;
 varying vec3 wpos;
+varying vec3 cpos;
 void vertex() {
-	lpos = VERTEX;
 	wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	cpos = wpos - MODEL_MATRIX[3].xyz;
 }
-vec3 h3(vec3 p) {
-	p = vec3(dot(p, vec3(127.1, 311.7, 74.7)), dot(p, vec3(269.5, 183.3, 246.1)), dot(p, vec3(113.5, 271.9, 124.6)));
-	return fract(sin(p) * 43758.5453);
+float h1(vec3 p) {
+	return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453);
 }
-// соты: насколько точка близка к границе ячеек (ячейки в объёме, не растягиваются у макушки)
-float cells(vec3 x) {
-	vec3 p = floor(x);
+float vn(vec3 x) {
+	vec3 i = floor(x);
 	vec3 f = fract(x);
-	float d1 = 8.0;
-	float d2 = 8.0;
-	for (int k = -1; k <= 1; k++) {
-		for (int j = -1; j <= 1; j++) {
-			for (int i = -1; i <= 1; i++) {
-				vec3 b = vec3(float(i), float(j), float(k));
-				vec3 r = b + h3(p + b) * 0.8 - f;
-				float d = dot(r, r);
-				if (d < d1) {
-					d2 = d1;
-					d1 = d;
-				} else if (d < d2) {
-					d2 = d;
-				}
-			}
-		}
-	}
-	return sqrt(d2) - sqrt(d1);
+	f = f * f * (3.0 - 2.0 * f);
+	float a = mix(mix(h1(i), h1(i + vec3(1.0, 0.0, 0.0)), f.x), mix(h1(i + vec3(0.0, 1.0, 0.0)), h1(i + vec3(1.0, 1.0, 0.0)), f.x), f.y);
+	float b = mix(mix(h1(i + vec3(0.0, 0.0, 1.0)), h1(i + vec3(1.0, 0.0, 1.0)), f.x), mix(h1(i + vec3(0.0, 1.0, 1.0)), h1(i + vec3(1.0, 1.0, 1.0)), f.x), f.y);
+	return mix(a, b, f.z);
 }
 void fragment() {
+	// волны от попаданий: два кольца расходятся от места удара и гаснут
+	float waves = 0.0;
+	float flash = 0.0;
+	vec3 push = vec3(0.0);
+	for (int i = 0; i < 4; i++) {
+		float age = hits[i].w;
+		if (age < 1.0) {
+			vec3 dv = wpos - hits[i].xyz;
+			float d = length(dv);
+			float r = age * 4.5;
+			float env = (1.0 - age) * (1.0 - smoothstep(3.0, 5.0, d));
+			float w1 = exp(-pow((d - r) * 2.4, 2.0));
+			float w2 = exp(-pow((d - r * 0.55) * 2.8, 2.0)) * 0.6;
+			waves += (w1 + w2) * env;
+			push += dv / max(d, 0.001) * (w1 + w2) * env * 0.7;
+			flash += exp(-d * 1.3) * max(1.0 - age * 4.0, 0.0);
+		}
+	}
+	// сетка плавает: точка сдвигается медленным шумом (и волнами от попаданий)
+	vec3 q = cpos * 0.28 + vec3(0.0, TIME * 0.25, TIME * 0.12);
+	vec3 q2 = cpos * 0.7 - vec3(TIME * 0.35, 0.0, TIME * 0.2);
+	vec3 p = cpos + (vec3(vn(q), vn(q + 17.3), vn(q + 41.7)) - 0.5) * 1.6
+		+ (vec3(vn(q2), vn(q2 + 9.1), vn(q2 + 27.4)) - 0.5) * 0.35 + push;
+	// плиты: сфера разбита как развёрнутый куб, на каждой грани 6×4 плиты равного угла
+	vec3 n = normalize(p);
+	vec3 an = abs(n);
+	vec2 uv;
+	float face;
+	if (an.y >= an.x && an.y >= an.z) {
+		uv = n.xz / an.y;
+		face = 1.0;
+	} else if (an.x >= an.z) {
+		uv = n.zy / an.x;
+		face = n.x > 0.0 ? 2.0 : 3.0;
+	} else {
+		uv = n.xy / an.z;
+		face = n.z > 0.0 ? 4.0 : 5.0;
+	}
+	vec2 g = atan(uv) * (4.0 / PI) * vec2(3.0, 2.0);
+	vec2 cell = floor(g);
+	vec2 f = fract(g);
+	vec2 ed = min(f, 1.0 - f);
+	float e = min(ed.x, ed.y);
+	// размытые швы и мягкое свечение к краю плиты
+	float line = 1.0 - smoothstep(0.0, 0.2, e);
+	float halo = 1.0 - smoothstep(0.0, 0.35, e);
+	// каждая плита своей яркости и медленно дышит
+	float hc = h1(vec3(cell, face));
+	float fill = 0.02 + 0.07 * hc * (0.5 + 0.5 * sin(TIME * 1.1 + hc * 6.283));
 	float fr = pow(1.0 - abs(dot(NORMAL, VIEW)), 2.4);
-	float line = 1.0 - smoothstep(0.0, 0.09, cells(lpos * 0.55));
-	// полоса бежит снизу вверх
-	float scan = smoothstep(0.85, 1.0, sin(lpos.y * 0.6 - TIME * 1.5) * 0.5 + 0.5) * 0.25;
-	// попадание: яркое пятно и волна, расходящаяся от места удара
-	float dh = distance(wpos, hit_pos);
-	float ring = (1.0 - smoothstep(0.0, 0.9, abs(dh - (1.0 - hit) * 7.0))) * hit;
-	float near = exp(-dh * 0.45) * hit;
-	float a = fr * 0.85 + line * (0.3 + scan + hit * 0.35 + near * 1.5) + 0.02 + ring * 0.9 + near * 0.6;
-	ALBEDO = mix(col, vec3(1.0, 0.95, 0.9), line * 0.25 + near * 0.4) * 1.7;
+	float a = 0.02 + fr * 0.55 + line * 0.26 + halo * 0.07 + fill + waves * 1.5 + flash * 0.7;
+	vec3 c = mix(col, vec3(1.0, 0.88, 0.82), clamp(flash * 0.6 + waves * 0.35, 0.0, 1.0));
+	ALBEDO = c * 1.6;
 	ALPHA = clamp(a * fade, 0.0, 1.0);
 }
 """
 	_barrier_mat = ShaderMaterial.new()
 	_barrier_mat.shader = sh
 	_barrier_mat.set_shader_parameter("col", Vector3(col.r, col.g, col.b).lerp(Vector3(0.5, 0.85, 1.0), 0.15))
+	_send_waves()
 	_barrier = MeshInstance3D.new()
 	var sm := SphereMesh.new()
 	sm.radius = 8.6
@@ -408,15 +439,20 @@ func take_damage(amount: float, pos: Vector3, _dir: Vector3, _kind := "", src: N
 		return
 	if protected():
 		if _barrier_on:
-			_barrier_hit = 1.0
 			# место удара на куполе: искры и волна оттуда
 			var dv := pos - global_position
 			if dv.length() < 0.1:
 				dv = Vector3.UP
 			dv = dv.normalized()
 			var hp := global_position + Vector3(dv.x * 8.6, dv.y * 8.6 * 0.95, dv.z * 8.6)
-			_barrier_mat.set_shader_parameter("hit_pos", hp)
 			if _barrier.visible:
+				# лазер и скорострелки бьют в одно место каждый тик: новая волна оттуда не чаще 4 раз в секунду
+				var last: Vector4 = _waves[-1] if not _waves.is_empty() else Vector4(0, -1000, 0, 99)
+				if last.w > 0.25 or Vector3(last.x, last.y, last.z).distance_to(hp) > 2.5:
+					_waves.append(Vector4(hp.x, hp.y, hp.z, 0.0))
+					if _waves.size() > WAVES_MAX:
+						_waves.pop_front()
+					set_process(true)
 				Fx.spark(hp, dv, true, false)
 		return
 	if src != null and is_instance_valid(src):
@@ -612,7 +648,7 @@ func _try_mortar() -> void:
 #  Барьер штаба и ядра-Теслы
 # ------------------------------------------------------------------
 
-func _update_barrier(delta: float) -> void:
+func _update_barrier(_delta: float) -> void:
 	var want := shielded()
 	if want != _barrier_on:
 		_barrier_on = want
@@ -622,10 +658,29 @@ func _update_barrier(delta: float) -> void:
 			Fx.burst(global_position + Vector3.UP * 5.0, Color(0.5, 0.85, 1.0), 9.0)
 			Sfx.play_at("wallbreak", global_position, 2.0, 0.05)
 			Sfx.play_at("emp", global_position, 0.0, 0.05)
-	_barrier.visible = _barrier_on
-	if _barrier_on:
-		_barrier_hit = maxf(_barrier_hit - delta * 3.0, 0.0)
-		_barrier_mat.set_shader_parameter("hit", _barrier_hit)
+		_barrier.visible = _barrier_on
+
+
+func _process(delta: float) -> void:
+	for i in range(_waves.size() - 1, -1, -1):
+		var w := _waves[i]
+		w.w += delta
+		if w.w >= WAVE_LIFE:
+			_waves.remove_at(i)
+		else:
+			_waves[i] = w
+	_send_waves()
+	if _waves.is_empty():
+		set_process(false)
+
+
+func _send_waves() -> void:
+	var arr := PackedVector4Array()
+	for w in _waves:
+		arr.append(w)
+	while arr.size() < WAVES_MAX:
+		arr.append(Vector4(0.0, -1000.0, 0.0, 99.0))
+	_barrier_mat.set_shader_parameter("hits", arr)
 
 
 # раз в «Перезарядку» ядро выбирает врага в радиусе, заряжается и бьёт молнией.
