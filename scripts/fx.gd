@@ -1248,6 +1248,12 @@ func _emit(pos: Vector3, mesh: Mesh, mat: Material, amount: int, life: float, cf
 		p.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
 		p.emission_sphere_radius = cfg["sphere"]
 	p.particle_flag_align_y = cfg.get("align", false)
+	if cfg.get("anim", false):          # лист кадров: проигрывается один раз за жизнь частицы
+		p.anim_speed_min = 1.0
+		p.anim_speed_max = 1.0
+	if cfg.has("angle"):
+		p.angle_min = -cfg["angle"]
+		p.angle_max = cfg["angle"]
 	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	p.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	p.position = pos
