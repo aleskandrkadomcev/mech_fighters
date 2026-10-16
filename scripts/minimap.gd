@@ -10,7 +10,7 @@ var _mat: ShaderMaterial
 var _fog_dark_set := -1.0       # какая темнота тумана уже стоит в материале
 var _ticked := true             # был тик игры после прошлой перерисовки
 var _rect := Rect2(-120, -70, 240, 140)
-var _pings: Array = []          # метки игроков: [{pos, born}], рисуются расходящимися кругами 3 с
+var _pings: Array = []          # метки игроков: [{pos, born, col}], рисуются расходящимися кругами 3 с
 
 
 func setup(main_node: Node3D, vision_node: Node, map_rect: Rect2, covers: Array, size_px: Vector2) -> void:
@@ -110,8 +110,8 @@ func world_at(screen_pos: Vector2):
 	return Vector3(_rect.position.x + local.x / size.x * _rect.size.x, 0, _rect.position.y + local.y / size.y * _rect.size.y)
 
 
-func add_ping(pos: Vector3) -> void:
-	_pings.append({"pos": pos, "born": Time.get_ticks_msec()})
+func add_ping(pos: Vector3, col := Color(0.4, 1.0, 0.6)) -> void:
+	_pings.append({"pos": pos, "born": Time.get_ticks_msec(), "col": col})
 
 
 func _process(_delta: float) -> void:
@@ -194,6 +194,7 @@ func _draw_icons() -> void:
 			continue
 		var pp := _to_px(_pings[i]["pos"])
 		var k := fmod(age, 1.0)
-		var col := Color(0.4, 1.0, 0.6, (1.0 - k) * (1.0 - age / 3.0) + 0.2)
+		var pc: Color = _pings[i]["col"]
+		var col := Color(pc.r, pc.g, pc.b, (1.0 - k) * (1.0 - age / 3.0) + 0.2)
 		_overlay.draw_arc(pp, 4.0 + k * 14.0, 0, TAU, 20, col, 2.0)
-		_overlay.draw_circle(pp, 3.0, Color(0.4, 1.0, 0.6))
+		_overlay.draw_circle(pp, 3.0, pc)

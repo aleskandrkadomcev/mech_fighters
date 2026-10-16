@@ -712,7 +712,7 @@ func _read_player() -> void:
 		m.y += 1.0
 	_move = m.normalized() if m.length() > 1.0 else m
 	_run = Input.is_physical_key_pressed(KEY_SHIFT)
-	_fire = Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and not Cfg.ui_hover and not Input.is_key_pressed(KEY_ALT)
+	_fire = Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and not Cfg.ui_hover and not Input.is_key_pressed(KEY_ALT) and not Cfg.ping_hold
 	_fire2 = Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) and not Cfg.ui_hover
 
 	if camera != null and not Cfg.ui_hover:

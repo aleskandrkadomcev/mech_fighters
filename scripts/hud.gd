@@ -42,6 +42,19 @@ var _timer: Label
 var _dash_slot: Dictionary
 var _tp_slot: Dictionary
 var _hitmark: Control
+# метки (пинги): Alt+клик — обычная метка; Alt + зажатая ЛКМ — круговое меню ~200 px вокруг места нажатия:
+# повёл мышь в сторону и отпустил — метка этого вида; отпустил в середине — отмена
+const PING_WHEEL_R := 100.0       # радиус круга (ширина 200 px)
+const PING_WHEEL_IN := 26.0       # середина круга: отпустил здесь — отмена
+const PING_HOLD := 0.18           # столько держать ЛКМ (или сдвинуть мышь), чтобы открылось меню
+const PING_SECTORS := [["attack", -PI / 2.0], ["going", 0.0], ["help", PI / 2.0], ["attention", PI]]   # вверх, вправо, вниз, влево
+var _wheel: Control
+var _ping_hold := false
+var _ping_t := 0.0
+var _ping_press := Vector2.ZERO   # где нажали (экран): там середина меню
+var _ping_pos := Vector3.ZERO     # куда встанет метка (мир): место прицела или точка миникарты в миг нажатия
+var _ping_sel := ""               # что выбрано в меню («» — середина, отмена)
+var _ping_mouse := Vector2.ZERO   # где мышь, пока держат Alt+ЛКМ (по событиям движения)
 var _hitmark_shown := false
 var _vignette_last := -1.0
 var _hitmark_t := 0.0
@@ -118,6 +131,13 @@ void fragment() {
 	_hitmark.size = Vector2(40, 40)
 	_hitmark.draw.connect(_draw_hitmark)
 	root.add_child(_hitmark)
+
+	_wheel = Control.new()
+	_wheel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_wheel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_wheel.visible = false
+	_wheel.draw.connect(_draw_wheel)
+	root.add_child(_wheel)
 	Battle.player_hit.connect(_on_player_hit)
 
 	_dbg = _label("", 22)
@@ -266,7 +286,7 @@ func _rebuild_slots() -> void:
 
 func _set_hint() -> void:
 	if _hint_full:
-		_hint.text = "WASD ходьба   Shift бег   Пробел рывок" + ("" if Battle.pvp else "   T на базу") + "\nЛКМ / ПКМ пушки   Q E R F C V G X абилки   B ангар\nF2 настройки   F3 хитбоксы   F1 цифры   Колесо зум\nAlt+клик метка   H скрыть подсказку   Esc меню"
+		_hint.text = "WASD ходьба   Shift бег   Пробел рывок" + ("" if Battle.pvp else "   T на базу") + "\nЛКМ / ПКМ пушки   Q E R F C V G X абилки   B ангар\nF2 настройки   F3 хитбоксы   F1 цифры   Колесо зум\nAlt+клик метка (держать — меню меток)   H скрыть подсказку   Esc меню"
 	else:
 		_hint.text = "H  подсказка"
 
@@ -323,6 +343,82 @@ func _on_poi_captured(title: String, team: int) -> void:
 	_announce_tw.tween_interval(2.2)
 	_announce_tw.tween_property(_announce, "modulate:a", 0.0, 0.6)
 	_announce_tw.tween_callback(func() -> void: _announce.visible = false)
+
+
+func _send_ping(kind: String) -> void:
+	Fx.ping(_ping_pos, mech.team, kind)
+	if _minimap != null:
+		_minimap.add_ping(_ping_pos, Fx.PINGS.get(kind, Fx.PINGS[""])["col"])
+
+
+func _ping_end() -> void:
+	_ping_hold = false
+	Cfg.ping_hold = false
+	if _wheel.visible:
+		_wheel.visible = false
+
+
+# пока держат Alt+ЛКМ: открыть меню (подержал или повёл мышь) и подсвечивать выбранное
+func _update_ping_wheel(delta: float) -> void:
+	if not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		_ping_end()           # отпускание ушло мимо (окно потеряло фокус) — просто закрыть
+		return
+	_ping_t += delta
+	var mouse := _ping_mouse
+	if not _wheel.visible and (_ping_t >= PING_HOLD or mouse.distance_to(_ping_press) > 12.0):
+		# середина меню — там, где нажали, но круг целиком на экране
+		var vs := get_viewport().get_visible_rect().size
+		var m := PING_WHEEL_R + 8.0
+		_ping_press = Vector2(clampf(_ping_press.x, m, vs.x - m), clampf(_ping_press.y, m, vs.y - m))
+		_wheel.visible = true
+		_wheel.queue_redraw()
+	if _wheel.visible:
+		var sel := _wheel_pick(mouse)
+		if sel != _ping_sel:
+			_ping_sel = sel
+			_wheel.queue_redraw()
+
+
+# какой сектор меню под точкой экрана («» — середина)
+func _wheel_pick(p: Vector2) -> String:
+	var d := p - _ping_press
+	if d.length() < PING_WHEEL_IN:
+		return ""
+	var a := d.angle()
+	for s in PING_SECTORS:
+		if absf(angle_difference(a, s[1])) <= PI / 4.0:
+			return s[0]
+	return ""
+
+
+func _draw_wheel() -> void:
+	var c := _ping_press
+	_wheel.draw_circle(c, PING_WHEEL_R, Color(0, 0, 0, 0.5))
+	var font: Font = ThemeDB.fallback_font
+	for s in PING_SECTORS:
+		var info: Dictionary = Fx.PINGS[s[0]]
+		var col: Color = info["col"]
+		var on: bool = s[0] == _ping_sel
+		# сектор: кольцо от середины до края на четверть круга
+		var pts := PackedVector2Array()
+		var a0: float = s[1] - PI / 4.0 + 0.04
+		var a1: float = s[1] + PI / 4.0 - 0.04
+		for i in 11:
+			pts.append(c + Vector2.from_angle(lerpf(a0, a1, i / 10.0)) * (PING_WHEEL_R - 4.0))
+		for i in 11:
+			pts.append(c + Vector2.from_angle(lerpf(a1, a0, i / 10.0)) * (PING_WHEEL_IN + 4.0))
+		_wheel.draw_colored_polygon(pts, Color(col.r, col.g, col.b, 0.55 if on else 0.16))
+		var outline := pts.duplicate()
+		outline.append(pts[0])
+		_wheel.draw_polyline(outline, Color(col.r, col.g, col.b, 1.0 if on else 0.5), 2.0 if on else 1.0, true)
+		var fs := 18 if on else 16
+		var tc := c + Vector2.from_angle(s[1]) * 64.0
+		var tw := font.get_string_size(info["name"], HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		var base := tc + Vector2(-tw * 0.5, fs * 0.35)
+		_wheel.draw_string_outline(font, base, info["name"], HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 5, Color(0, 0, 0, 0.85))
+		_wheel.draw_string(font, base, info["name"], HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color.WHITE if on else col)
+	# середина: отпустил здесь — отмена
+	_wheel.draw_arc(c, PING_WHEEL_IN - 2.0, 0, TAU, 24, Color(1, 1, 1, 0.35 if _ping_sel != "" else 0.8), 2.0, true)
 
 
 func _draw_hitmark() -> void:
@@ -436,17 +532,38 @@ func _update_cd_tip(delta: float) -> void:
 	_cd_tip.modulate.a = _cd_tip_t
 
 
+func _input(event: InputEvent) -> void:
+	if _ping_hold and event is InputEventMouseMotion:
+		_ping_mouse = event.position
+
+
 func _unhandled_input(event: InputEvent) -> void:
-	# Alt+клик: метка для своей команды (по миникарте или по месту прицела)
-	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT and event.alt_pressed and mech != null:
-		var pos = _minimap.world_at(event.position) if _minimap != null else null
-		if pos == null:
-			pos = Vector3(mech.aim_point.x, 0, mech.aim_point.z)
-		Fx.ping(pos, mech.team)
-		if _minimap != null:
-			_minimap.add_ping(pos)
-		get_viewport().set_input_as_handled()
-		return
+	# Alt+ЛКМ: метка для своей команды (по миникарте или по месту прицела). Ставится, когда ЛКМ отпустили:
+	# быстрый клик — обычная метка, зажал — круговое меню
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and mech != null:
+		if event.pressed and event.alt_pressed:
+			var pos = _minimap.world_at(event.position) if _minimap != null else null
+			if pos == null:
+				pos = Vector3(mech.aim_point.x, 0, mech.aim_point.z)
+			_ping_pos = pos
+			_ping_press = event.position
+			_ping_mouse = event.position
+			_ping_hold = true
+			_ping_t = 0.0
+			_ping_sel = ""
+			Cfg.ping_hold = true
+			get_viewport().set_input_as_handled()
+			return
+		if not event.pressed and _ping_hold:
+			if _wheel.visible:
+				_ping_sel = _wheel_pick(event.position)
+				if _ping_sel != "":
+					_send_ping(_ping_sel)
+			else:
+				_send_ping("")
+			_ping_end()
+			get_viewport().set_input_as_handled()
+			return
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.physical_keycode == KEY_F1:
 			_dbg.visible = not _dbg.visible
@@ -459,6 +576,8 @@ func _process(delta: float) -> void:
 	if mech == null:
 		return
 	_deny_t = maxf(_deny_t - delta, 0.0)
+	if _ping_hold:
+		_update_ping_wheel(delta)
 	_ammo_deny = maxf(_ammo_deny - delta, 0.0)
 	if _cd_tip_t > 0.0:
 		_update_cd_tip(delta)

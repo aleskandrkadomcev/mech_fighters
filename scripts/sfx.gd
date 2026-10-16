@@ -58,14 +58,14 @@ func set_laser(on: bool) -> void:
 		_loop.stop()
 
 
-func play(sound: String, volume_db := 0.0, pitch_random := 0.0) -> void:
+func play(sound: String, volume_db := 0.0, pitch_random := 0.0, pitch := 1.0) -> void:
 	if not _streams.has(sound) or Cfg.sound_volume <= 0.001:
 		return
 	var p := _players[_next]
 	_next = (_next + 1) % POOL
 	p.stream = _streams[sound]
 	p.volume_db = volume_db + linear_to_db(clampf(Cfg.sound_volume, 0.001, 1.0))
-	p.pitch_scale = 1.0 + randf_range(-pitch_random, pitch_random)
+	p.pitch_scale = pitch * (1.0 + randf_range(-pitch_random, pitch_random))
 	p.play()
 
 

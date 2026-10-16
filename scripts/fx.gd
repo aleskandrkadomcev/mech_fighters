@@ -875,21 +875,55 @@ func casing(pos: Vector3, side: Vector3, big := false, sound := true) -> void:
 
 
 # ------------------------------------------------------------------
-#  Метка игрока (Alt+клик): кольцо на земле и звук
+#  Метки игрока (пинги): Alt+клик — обычная метка, Alt + зажатая ЛКМ — круговое меню (hud.gd) с метками
+#  «Атака», «Внимание», «Иду сюда», «Помогите». Кольцо на земле, над ним слово (у меню), звук. Видит только своя команда
 # ------------------------------------------------------------------
 
-signal pinged(pos: Vector3, team: int)
+# вид метки: название (над кольцом и в меню), цвет, высота звука
+const PINGS := {
+	"": {"name": "", "col": Color(0.4, 1.0, 0.6), "pitch": 1.0},
+	"attack": {"name": "Атака", "col": Color(1.0, 0.36, 0.3), "pitch": 0.8},
+	"attention": {"name": "Внимание", "col": Color(0.4, 1.0, 0.6), "pitch": 1.0},
+	"going": {"name": "Иду сюда", "col": Color(0.45, 0.75, 1.0), "pitch": 1.2},
+	"help": {"name": "Помогите", "col": Color(1.0, 0.75, 0.25), "pitch": 1.05},
+}
+
+signal pinged(pos: Vector3, team: int, kind: String)
 
 
-func ping(pos: Vector3, team: int) -> void:
-	var col := Color(0.4, 1.0, 0.6)
-	var r := ground_marker(pos, 1.6, col, team, 3.0, false)
+func ping(pos: Vector3, team: int, kind := "") -> void:
+	var info: Dictionary = PINGS.get(kind, PINGS[""])
+	var col: Color = info["col"]
+	var r := ground_marker(pos, 1.6, col, team, 3.0, false, true)
 	var tw := r.create_tween()
 	r.scale = Vector3(4.0, 1, 4.0)
 	tw.tween_property(r, "scale", Vector3(1.6, 1, 1.6), 0.25).set_ease(Tween.EASE_OUT)
-	_flare(pos + Vector3.UP * 0.5, "circle_05", 3.0, Color(0.4, 1.0, 0.6, 0.8), 0.5)
-	Sfx.play("ping", -4.0)
-	pinged.emit(pos, team)
+	if team == player_team:
+		_flare(pos + Vector3.UP * 0.5, "circle_05", 3.0, Color(col.r, col.g, col.b, 0.8), 0.5)
+		Sfx.play("ping", -4.0, 0.0, info["pitch"])
+		if kind == "help":       # просьба о помощи — двойной сигнал
+			get_tree().create_timer(0.16).timeout.connect(func(): Sfx.play("ping", -5.0, 0.0, info["pitch"] * 1.12))
+		if info["name"] != "":
+			# слово над кольцом: всплывает и через 2,5 с тает
+			var l := Label3D.new()
+			l.text = info["name"]
+			l.modulate = col
+			l.outline_modulate = Color(0, 0, 0, 0.85)
+			l.font_size = 64
+			l.outline_size = 14
+			l.pixel_size = 0.016
+			l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+			l.no_depth_test = true
+			l.render_priority = 6
+			l.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
+			get_tree().current_scene.add_child(l)
+			l.global_position = Vector3(pos.x, 2.2, pos.z)
+			var lt := l.create_tween()
+			lt.tween_property(l, "global_position:y", 3.4, 0.3).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+			lt.tween_interval(2.2)
+			lt.tween_property(l, "modulate:a", 0.0, 0.5)
+			lt.tween_callback(l.queue_free)
+	pinged.emit(pos, team, kind)
 
 
 # ------------------------------------------------------------------

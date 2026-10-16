@@ -49,6 +49,7 @@ var _slidetest := false          # --slidetest: убит в рывке и на �
 var _lobtest := false            # --lobtest: ЭМИ и осадное орудие турелей летят быстро и низко и попадают в меха
 var _spawntest := false         # --spawntest --drop --enemies=0 --allies=1: мех садится прямо на другого — никто не подпрыгивает
 var _proptest := false           # --proptest: кучка ящиков не мешает пройти, ломается от меха и от взрыва
+var _pingtest := false           # --pingtest: Alt+клик — обычная метка, Alt + зажатая ЛКМ — круговое меню, выбор по направлению мыши
 var _dashtest := false           # --dashtest: рывок разгоняется за «Разгон рывка», а не мгновенно; дальность как без разгона
 var _statustest := false         # --statustest: шкала контроля над полоской (оглушение → ЭМИ → замедление) и статусы своего меха
 var _cdtest := false             # --cdtest: нажал рывок на перезарядке — у курсора таймер «2,35», тает за 1 с
@@ -182,6 +183,8 @@ func setup(main_node: Node3D, args: PackedStringArray) -> void:
 			_statustest = true
 		elif a == "--dashtest":
 			_dashtest = true
+		elif a == "--pingtest":
+			_pingtest = true
 		elif a == "--ruintest":
 			_ruintest = true
 		elif a == "--radartest":
@@ -280,6 +283,8 @@ func _process(_delta: float) -> void:
 		_run_statustest()
 	if _dashtest:
 		_run_dashtest()
+	if _pingtest:
+		_run_pingtest()
 	if _ruintest:
 		_run_ruintest()
 	if _radartest:
@@ -359,7 +364,7 @@ func _process(_delta: float) -> void:
 		var img := get_viewport().get_texture().get_image()
 		img.save_png(("%s/%s_f%04d.png" % [_shot_dir, _target, shot_f]) if _fxreel else ("%s/f%04d.png" % [_shot_dir, shot_f]))
 		_shots_left.erase(shot_f)
-		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and not _linktest and _mechexport == "" and not _gfxbench and not _cpubench and not _fancheck and not _aimtest and not _creeptest and not _radartest and not _ruintest and not _coredmg and not _slidetest and not _lobtest and not _spawntest and not _proptest and not _cdtest and not _statustest and not _dashtest:
+		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and not _linktest and _mechexport == "" and not _gfxbench and not _cpubench and not _fancheck and not _aimtest and not _creeptest and not _radartest and not _ruintest and not _coredmg and not _slidetest and not _lobtest and not _spawntest and not _proptest and not _cdtest and not _statustest and not _dashtest and not _pingtest:
 			get_tree().quit()
 
 
@@ -1424,14 +1429,15 @@ func _run_fxshot() -> void:
 		main.add_child(c)
 	if _frame == 60:
 		main.hud._unhandled_input(_alt_click())
+		main.hud._unhandled_input(_alt_click(false))     # метка ставится, когда ЛКМ отпустили
 	if _frame >= 100 and _shots_left.is_empty():
 		get_tree().quit()
 
 
-func _alt_click() -> InputEventMouseButton:
+func _alt_click(pressed := true) -> InputEventMouseButton:
 	var e := InputEventMouseButton.new()
 	e.button_index = MOUSE_BUTTON_LEFT
-	e.pressed = true
+	e.pressed = pressed
 	e.alt_pressed = true
 	e.position = Vector2(-100, -100)
 	return e
@@ -3578,4 +3584,81 @@ func _run_dashtest() -> void:
 		var d0: float = get_meta("dist_110")
 		var ok: bool = absf(d1 - d0) < d0 * 0.12 and float(get_meta("ramp0")) > 0.0
 		print("[DASH] дальность с разгоном %.1f м, без разгона %.1f м — %s" % [d1, d0, "ВЕРНО" if ok else "ОШИБКА"])
+		get_tree().quit()
+
+
+# ------------------------------------------------------------------
+#  Метки (--pingtest --enemies=0 --allies=0): мышь и кнопки подаются как настоящие (Input.parse_input_event).
+#  Быстрый Alt+клик — обычная метка; Alt + зажатая ЛКМ — меню, мышь вверх/вправо/вниз/влево — Атака, Иду сюда,
+#  Помогите, Внимание; вернулся в середину — отмена. Пока меню открыто, мех не стреляет.
+#  Снимки (--shot-dir, --shots=150,175): меню с выбранным «Помогите», метки на земле
+# ------------------------------------------------------------------
+
+func _ping_mouse(pos: Vector2, button := 0, pressed := false) -> void:
+	pos = get_viewport().get_final_transform() * pos     # события идут в точках окна (без окна оно крошечное, картинка растянута)
+	if button == 0:
+		var mm := InputEventMouseMotion.new()
+		mm.position = pos
+		mm.global_position = pos
+		Input.parse_input_event(mm)
+		return
+	var e := InputEventMouseButton.new()
+	e.button_index = MOUSE_BUTTON_LEFT
+	e.pressed = pressed
+	e.alt_pressed = pressed
+	e.position = pos
+	e.global_position = pos
+	Input.parse_input_event(e)
+
+
+func _run_pingtest() -> void:
+	var m = main.mech
+	var hud = main.hud
+	var vs := get_viewport().get_visible_rect().size
+	if _frame == 5:
+		Cfg.creeps_enabled = 0
+		Cfg.cam_distance = 40.0
+		m.shield_left = 0.0
+		m.global_position = Vector3(-46, 0.05, -30)
+		m.snap_interpolation(m)
+		main.cam._started = false
+		m.demo = null           # мех слушает настоящую мышь: проверим, что он не стреляет, пока открыто меню
+		set_meta("got", [])
+		Fx.pinged.connect(func(_p, _t, kind): get_meta("got").append(kind if kind != "" else "обычная"))
+	# [кадр нажатия, где нажали (доля экрана), куда повели мышь (px от места нажатия, ZERO — быстрый клик), что ждём]
+	var plan := [[20, Vector2(0.5, 0.45), Vector2.ZERO, "обычная"], [40, Vector2(0.38, 0.4), Vector2(0, -70), "attack"],
+		[80, Vector2(0.62, 0.42), Vector2(70, 0), "going"], [120, Vector2(0.45, 0.62), Vector2(0, 70), "help"],
+		[200, Vector2(0.58, 0.6), Vector2(-70, 0), "attention"], [240, Vector2(0.5, 0.5), Vector2(4, 3), ""]]
+	var fails: int = get_meta("fails", 0) if has_meta("fails") else 0
+	for st in plan:
+		var f0: int = st[0]
+		var at: Vector2 = vs * Vector2(st[1])
+		var mv: Vector2 = st[2]
+		var hold := mv != Vector2.ZERO
+		if _frame == f0:
+			_ping_mouse(at)
+			set_meta("n0", get_meta("got").size())
+		if _frame == f0 + 1:
+			_ping_mouse(at, 1, true)
+		if hold and _frame > f0 + 1 and _frame <= f0 + 16:
+			_ping_mouse(at + mv * minf((_frame - f0 - 1) / 10.0, 1.0))
+		if hold and _frame == f0 + 18:
+			var ok: bool = hud._wheel.visible and hud._ping_sel == st[3] and not m._fire
+			if not ok:
+				fails += 1
+			print("[PING] f=%d меню открыто %s, выбрано «%s», мех стреляет %s — %s" % [_frame, hud._wheel.visible, hud._ping_sel, m._fire, "ВЕРНО" if ok else "ОШИБКА"])
+		var up: int = f0 + (40 if st[3] == "help" else 20) if hold else f0 + 3
+		if _frame == up:
+			_ping_mouse(at + mv, 1, false)
+		if _frame == up + 2:
+			var got: Array = get_meta("got")
+			var new: Array = got.slice(get_meta("n0"))
+			var ok: bool = (new == [st[3]]) if st[3] != "" else new.is_empty()
+			ok = ok and not hud._wheel.visible and not Cfg.ping_hold
+			if not ok:
+				fails += 1
+			print("[PING] %s: поставлено %s — %s" % ["отмена в середине" if st[3] == "" else ("клик" if not hold else "меню → " + st[3]), str(new), "ВЕРНО" if ok else "ОШИБКА"])
+	set_meta("fails", fails)
+	if _frame >= 280 and _shots_left.is_empty():
+		print("[PING] итог: %s" % ("ВСЁ ВЕРНО" if fails == 0 else "ошибок %d" % fails))
 		get_tree().quit()
