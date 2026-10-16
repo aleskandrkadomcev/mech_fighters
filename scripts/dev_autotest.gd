@@ -45,7 +45,7 @@ var _perf := false               # с mobatest: каждые 20 с скольк�
 var _fxreel := false             # --fxreel: эффекты одним запуском — драка со взрывами, штурм базы, своя база
 var _radartest := false          # --radartest (с --map=arena --enemies=1 --allies=0): круг обзора радара и F2 на паузе
 var _ruintest := false           # --ruintest: развалина сломанной турели — бьют обе команды, разбили — припасы и путь свободен
-var _slidetest := false          # --slidetest: мех убит в рывке — обломок проезжает немного и встаёт
+var _slidetest := false          # --slidetest: убит в рывке и на бегу — тушка тормозит о землю по физике, отлетают части
 var _lobtest := false            # --lobtest: ЭМИ и осадное орудие турелей летят быстро и низко и попадают в меха
 var _spawntest := false         # --spawntest --drop --enemies=0 --allies=1: мех садится прямо на другого — никто не подпрыгивает
 var _proptest := false           # --proptest: кучка ящиков не мешает пройти, ломается от меха и от взрыва
@@ -1517,6 +1517,10 @@ func _run_targetshot() -> void:
 		_stage_ground(m)
 	elif _target == "list":
 		_stage_list(m)
+	elif _target == "props":
+		_stage_props(m)
+	elif _target == "death":
+		_stage_death(m)
 	# все стреляют в свои цели и не умирают, пока идёт съёмка
 	for a in _actors:
 		var b = a[0]
@@ -1532,7 +1536,7 @@ func _run_targetshot() -> void:
 					if not _shots_left.has(f):         # два меха под молнией в один кадр — не снимать дважды
 						_shots_left.append(f)
 		a[0].set_meta("was_stun", a[0].stun_left > 0.0)
-	var end_f: int = {"fight": 200, "base": 500, "calm": 220, "ground": 250, "list": 530}.get(_target, 300)
+	var end_f: int = {"fight": 200, "base": 500, "calm": 220, "ground": 250, "list": 530, "props": 330, "death": 420}.get(_target, 300)
 	if _frame >= end_f and _shots_left.is_empty():
 		if _capbench:
 			_run_capbench()
@@ -1780,6 +1784,69 @@ func _stage_list(m) -> void:
 		m.ability_cd[1] = 0.0
 		m.press_ability(1)          # авиаудар
 		print("[LIST] авиаудар: задержка %.2f с" % m.abilities[1]["params"]["delay"])
+
+
+# мелочь и провода (--targetshot=props): провода от своего штаба (камера 60, кадр 40), ящики крупно
+# (камера 26, кадр 85), мех задевает фонарь — снимки через 4, 14 и 45 кадров, провода на линии сверху (кадр 320)
+func _stage_props(m) -> void:
+	if _frame == 3:
+		Cfg.bot_allies = 0
+		Cfg.bot_enemies = 0
+		_props_at(m, Vector3(-80, 0.05, -10), 60.0)
+		if _shot_dir != "":
+			_shots_left.append_array([40, 85, 320])
+	if _frame == 50:
+		_props_at(m, Vector3(-66, 0.05, -20), 26.0)
+	if _frame == 100:
+		var best: Node3D = null
+		for p in get_tree().get_nodes_in_group("props"):
+			if p.kind == "post" and (best == null or p.global_position.distance_to(m.global_position) < best.global_position.distance_to(m.global_position)):
+				best = p
+		set_meta("post", best)
+		_props_at(m, best.global_position + Vector3(-5, 0.05, 1.0), 30.0)
+		m.demo = {"move": Vector2(1, 0), "fire": false, "aim": best.global_position + Vector3(10, 1.5, 0)}
+	if has_meta("post") and not has_meta("post_f") and get_meta("post").broken:
+		set_meta("post_f", _frame)
+		if _shot_dir != "":
+			_shots_left.append_array([_frame + 4, _frame + 14, _frame + 45])
+	if _frame == 250:
+		_props_at(m, Vector3(-40, 0.05, -8), 90.0)
+		Cfg.cam_pitch = 80.0
+
+
+# смерть меха (--targetshot=death): вражеский мех убит в рывке у камеры — падает, скользит, отлетают части,
+# снимки через 4, 16, 34, 50, 75 и 150 кадров; потом ящики крупно (кадр 380)
+func _stage_death(m) -> void:
+	var at := Vector3(0, 0.05, -20)        # открытое место (по нему же проверяет slidetest)
+	if _frame == 3:
+		Cfg.bot_allies = 0
+		Cfg.bot_enemies = 1
+		Cfg.creeps_enabled = 0
+		_props_at(m, at + Vector3(5, 0, 8), 28.0)
+		m.demo = {"move": Vector2.ZERO, "fire": false, "aim": at + Vector3(5, 1.5, -2)}
+	if _frame == 60:
+		for b in main.bots:
+			b.brain = null
+			b.set_build({"mech": "mech_assault", "core": "core_combat", "weapons": ["autocannon", "heavy_cannon"], "modules": []})
+			b.global_position = at + Vector3(-8, 0.0, 0)
+			b.snap_interpolation(b)
+			b.shield_left = 0.0
+			b.velocity = Vector3(50, 0, 0)
+			b.take_damage(1e6, b.global_position + Vector3.UP * 2.0, Vector3.RIGHT, "", m)
+			if _shot_dir != "":
+				_shots_left.append_array([63, 70, 80, 94, 110, 135, 210])
+	if _frame == 340:
+		_props_at(m, Vector3(-66, 0.05, -20), 26.0)
+		if _shot_dir != "":
+			_shots_left.append(380)
+
+
+func _props_at(m, at: Vector3, cam: float) -> void:
+	m.global_position = at
+	m.snap_interpolation(m)
+	m.demo = {"move": Vector2.ZERO, "fire": false, "aim": at + Vector3(8, 1.5, 0)}
+	Cfg.cam_distance = cam
+	main.cam._started = false
 
 
 # ------------------------------------------------------------------
@@ -2842,7 +2909,20 @@ func _run_coredmg() -> void:
 # ------------------------------------------------------------------
 
 var _sl_bot: Node3D
-var _sl_from := Vector3.ZERO
+var _sl_track: Array = []      # [кадр, обломок, откуда, путь по кадрам]
+var _sl_fails := 0
+
+
+func _sl_kill(mm: Node3D, at: Vector3, vel: Vector3) -> void:
+	mm.global_position = at
+	mm.snap_interpolation(mm)
+	mm.shield_left = 0.0
+	mm.velocity = vel
+	var before := get_tree().get_nodes_in_group("wrecks")
+	mm.take_damage(1e6, at, vel.normalized(), "", null)
+	for w in get_tree().get_nodes_in_group("wrecks"):
+		if not before.has(w):
+			_sl_track.append({"w": w, "from": at, "d": [], "what": "рывок 50 ед/с" if vel.length() > 20.0 else "бег 8 ед/с"})
 
 
 func _run_slidetest() -> void:
@@ -2851,21 +2931,32 @@ func _run_slidetest() -> void:
 		for mm in get_tree().get_nodes_in_group("mechs"):
 			if mm.team != main.mech.team and _sl_bot == null:
 				_sl_bot = mm
-		_sl_bot.global_position = Vector3(0, 0.05, -20)
-		_sl_bot.snap_interpolation(_sl_bot)
-		_sl_bot.velocity = Vector3(50.0, 0, 0)        # скорость рывка
-		_sl_bot.shield_left = 0.0
 	if _frame == 6:
-		_sl_bot.velocity = Vector3(50.0, 0, 0)
-		_sl_from = _sl_bot.global_position
-		_sl_bot.take_damage(1e6, _sl_bot.global_position, Vector3.RIGHT, "", main.mech)
-	if _frame == 200:
-		var far := 0.0
-		for w in get_tree().get_nodes_in_group("wrecks"):
-			var d: float = Vector2(w.global_position.x - _sl_from.x, w.global_position.z - _sl_from.z).length()
-			far = maxf(far, d)
-		var m := far * Cfg.METERS_PER_UNIT
-		print("[SLIDE] убит в рывке (50 ед/с): обломок проехал %.1f м — %s" % [m, "ВЕРНО" if m < 6.0 else "ОШИБКА"])
+		_sl_kill(_sl_bot, Vector3(0, 0.05, -20), Vector3(50.0, 0, 0))       # убит в рывке
+		_sl_kill(main.mech, Vector3(0, 0.05, 20), Vector3(8.0, 0, 0))       # убит на бегу
+	for t in _sl_track:
+		if is_instance_valid(t["w"]):
+			t["d"].append(Vector2(t["w"].global_position.x - t["from"].x, t["w"].global_position.z - t["from"].z).length())
+	if _frame == 400:
+		for t in _sl_track:
+			var d: Array = t["d"]
+			var total: float = d[d.size() - 1] * Cfg.METERS_PER_UNIT
+			var stop_f := d.size() - 1
+			while stop_f > 0 and absf(d[stop_f] - d[stop_f - 1]) < 0.002:
+				stop_f -= 1
+			var last := 0      # сколько кадров заняли последние 20% пути — плавно ли встал
+			for k in range(stop_f, -1, -1):
+				if d[k] < d[stop_f] * 0.8:
+					break
+				last += 1
+			var parts: int = t["w"]._parts.size() if is_instance_valid(t["w"]) else -1
+			var fast: bool = t["what"].begins_with("рывок")
+			var ok: bool = (total > 15.0 and total < 40.0 if fast else total > 2.0 and total < 14.0) and last >= 12 and parts >= 1
+			print("[SLIDE] %s: проехал %.1f м за %.2f с, последние 20%% пути — %.2f с, отлетело частей %d — %s" % [t["what"], total,
+				stop_f / 60.0, last / 60.0, parts, "ВЕРНО" if ok else "ОШИБКА"])
+			if not ok:
+				_sl_fails += 1
+		print("[SLIDE] итог: %s" % ("ВСЁ ВЕРНО" if _sl_fails == 0 else "ошибок %d" % _sl_fails))
 		get_tree().quit()
 
 
@@ -3087,7 +3178,9 @@ func _run_proptest() -> void:
 	var b := Vector3(-62, 0, 16)
 	if _frame == 5:
 		Cfg.creeps_enabled = 0
-		print("[PROP] кучек ящиков на карте: %d" % get_tree().get_nodes_in_group("props").size())
+		print("[PROP] мелочи на карте: %d (кучек ящиков %d, столбиков %d)" % [get_tree().get_nodes_in_group("props").size(),
+			get_tree().get_nodes_in_group("props").filter(func(x) -> bool: return x.kind == "crates").size(),
+			get_tree().get_nodes_in_group("props").filter(func(x) -> bool: return x.kind == "post").size()])
 		_pt_check(main.nav.is_free(a), "на месте кучки ящиков боты проходят (карта проходимости)")
 		m.global_position = a + Vector3(-8, 0.05, 0)
 		m.snap_interpolation(m)
@@ -3101,6 +3194,19 @@ func _run_proptest() -> void:
 		Fx.blast(b + Vector3(2.5, 0.5, 0), 3.0, 10.0, 0.5, 1, null)
 	if _frame == 152:
 		_pt_check(_pt_prop(b).broken, "взрыв рядом ломает кучку")
+		# столбик-фонарь: мех идёт на него — столб падает
+		var posts := get_tree().get_nodes_in_group("props").filter(func(x) -> bool: return x.kind == "post")
+		if not posts.is_empty():
+			var pst: Node3D = posts[0]
+			set_meta("post", pst)
+			m.global_position = pst.global_position + Vector3(0, 0.05, 6)
+			m.snap_interpolation(m)
+			m.demo = {"move": Vector2(0, -1), "fire": false, "aim": pst.global_position + Vector3(0, 1.5, -10)}
+	if _frame == 300 and has_meta("post"):
+		var pst2: Node3D = get_meta("post")
+		var tilt := rad_to_deg(acos(clampf(pst2._pivot.global_basis.y.normalized().dot(Vector3.UP), -1.0, 1.0)))
+		_pt_check(pst2.broken and tilt > 70.0, "мех задел фонарь — столб упал (наклон %.0f°)" % tilt)
+		m.demo = {"move": Vector2.ZERO, "fire": false, "aim": m.global_position + Vector3(10, 1.5, 0)}
 	if _frame == 600:
 		var left := 0
 		for n in get_tree().current_scene.get_children():

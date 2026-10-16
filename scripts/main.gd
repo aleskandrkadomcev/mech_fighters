@@ -99,6 +99,7 @@ func _ready() -> void:
 	_build_motes()
 	_build_walls()
 	_build_structures()
+	_build_cables()
 
 	for p in map["pois"]:
 		var poi := Poi.new()
@@ -651,6 +652,143 @@ func _build_structures() -> void:
 		if s[0] == "hq":
 			_hq[team] = st
 			_build_cores(st)
+
+
+# ------------------------------------------------------------------
+#  ПРОВОДА ПО ЗЕМЛЕ (Саня, 16.10.2026): от штаба к каждой турели своей команды. Идут вдоль линии сбоку
+#  от дороги, чуть виляют, местами уходят под землю (как присыпало). Тёмный кабель с тонкой жилой
+#  цвета команды, по ней от базы к турели медленно бегут огоньки. Одна модель на команду; темнеет в тумане
+# ------------------------------------------------------------------
+
+const CABLE_SHADER := """shader_type spatial;
+render_mode cull_disabled;
+uniform vec4 glow : source_color = vec4(1.0, 0.55, 0.15, 1.0);
+uniform sampler2D fog_tex : filter_linear, repeat_disable;
+uniform vec4 fog_rect = vec4(-120.0, -70.0, 240.0, 140.0);
+uniform float fog_dark = 0.0;
+varying vec3 wpos;
+void vertex() { wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; }
+void fragment() {
+	float across = abs(UV.y - 0.5) * 2.0;                    // 0 — гребень кабеля, 1 — край
+	float core = 1.0 - smoothstep(0.08, 0.3, across);
+	float run = pow(0.5 + 0.5 * sin(UV.x * 0.35 - TIME * 2.2), 8.0);   // огоньки бегут от базы к турели
+	float vis = texture(fog_tex, (wpos.xz - fog_rect.xy) / fog_rect.zw).r;
+	float dark = 1.0 - fog_dark * (1.0 - vis);
+	ALBEDO = vec3(0.045, 0.042, 0.04) * dark;
+	ROUGHNESS = 0.55;
+	EMISSION = glow.rgb * core * (0.35 + 1.2 * run) * dark;
+}
+"""
+
+
+func _build_cables() -> void:
+	if pvp:
+		return
+	var sh := Shader.new()
+	sh.code = CABLE_SHADER
+	for team in 2:
+		var hq = _hq[team]
+		if hq == null:
+			continue
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		var n := 0
+		for s in get_tree().get_nodes_in_group("structures"):
+			if s.team != team or s.id == "hq" or s.id == "core":
+				continue
+			_cable_strip(st, _cable_route(hq.position, s.position, String(s.get_meta("lane", "")), team, n), n)
+			n += 1
+		if n == 0:
+			continue
+		var mi := MeshInstance3D.new()
+		mi.mesh = st.commit()
+		var m := ShaderMaterial.new()
+		m.shader = sh
+		var c: Color = Cfg.player_color if team == 0 else Cfg.enemy_color
+		m.set_shader_parameter("glow", c)
+		vision.register_material(m)
+		mi.material_override = m
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(mi)
+
+
+# путь провода: от края штаба вдоль своей линии (сбоку от дороги) до турели; к турелям у базы — напрямую
+func _cable_route(from: Vector3, to: Vector3, lane: String, team: int, k: int) -> PackedVector3Array:
+	var pts := PackedVector3Array()
+	var path := lane_path(team, lane) if lanes.has(lane) else PackedVector3Array()
+	pts.append(from)
+	if path.size() >= 2:
+		# точки линии, пока не дошли до турели
+		var best := 0
+		for i in path.size():
+			if path[i].distance_to(to) < path[best].distance_to(to):
+				best = i
+		var side := 4.2 + 0.4 * k
+		for i in range(1, best):
+			var a := path[maxi(i - 1, 0)]
+			var b := path[mini(i + 1, path.size() - 1)]
+			var dir := (b - a).normalized()
+			pts.append(path[i] + Vector3(-dir.z, 0, dir.x) * side)
+	pts.append(to)
+	# с края штаба и до основания турели, а не из середины
+	var out := PackedVector3Array()
+	var start := from + (pts[1] - from).normalized() * 7.5
+	var end := to + (pts[pts.size() - 2] - to).normalized() * 2.6
+	pts[0] = start
+	pts[pts.size() - 1] = end
+	# ровный шаг 0,5 м и лёгкое виляние
+	var d := 0.0
+	for i in pts.size() - 1:
+		var a := pts[i]
+		var b := pts[i + 1]
+		var seg := Vector3(b.x - a.x, 0, b.z - a.z)
+		var seg_len := seg.length()
+		if seg_len < 0.01:
+			continue
+		var dir := seg / seg_len
+		var perp := Vector3(-dir.z, 0, dir.x)
+		var m := int(seg_len / 0.5) + 1
+		for j in m:
+			var t := float(j) / m
+			var wig := sin((d + seg_len * t) * 0.17 + k * 1.3) * 0.5
+			out.append(a.lerp(b, t) + perp * wig)
+		d += seg_len
+	out.append(end)
+	return out
+
+
+# кабель лентой с гребнем (три вершины поперёк); UV.x — метры от штаба (для бегущих огоньков).
+# Местами (по плавному шуму) опускается под землю и снова выходит
+func _cable_strip(st: SurfaceTool, pts: PackedVector3Array, k: int) -> void:
+	var w := 0.12
+	var d := 0.0
+	var rows: Array = []
+	for i in pts.size():
+		var a := pts[maxi(i - 1, 0)]
+		var b := pts[mini(i + 1, pts.size() - 1)]
+		var dir := Vector3(b.x - a.x, 0, b.z - a.z).normalized()
+		var perp := Vector3(-dir.z, 0, dir.x)
+		if i > 0:
+			d += pts[i].distance_to(pts[i - 1])
+		var h := sin(d * 0.09 + k * 2.1) * 0.6 + sin(d * 0.23 + k * 0.7) * 0.4
+		var y := lerpf(0.04, -0.25, smoothstep(0.45, 0.7, h))      # под землёй, где шум высокий
+		if i < 4 or i > pts.size() - 5:
+			y = 0.04                                           # у штаба и у турели кабель всегда виден
+		var c := Vector3(pts[i].x, y, pts[i].z)
+		rows.append([c - perp * w, c + Vector3(0, 0.09, 0), c + perp * w, d])
+	for i in rows.size() - 1:
+		var r0: Array = rows[i]
+		var r1: Array = rows[i + 1]
+		for side in 2:
+			var quad := [[r0[side], 0.5 * side], [r0[side + 1], 0.5 * side + 0.5], [r1[side + 1], 0.5 * side + 0.5], [r1[side], 0.5 * side]]
+			var dists := [r0[3], r0[3], r1[3], r1[3]]
+			var nrm: Vector3 = (quad[1][0] - quad[0][0]).cross(quad[3][0] - quad[0][0]).normalized()
+			if nrm.y < 0.0:
+				nrm = -nrm
+			for idx in [0, 1, 2, 0, 2, 3]:
+				st.set_normal(nrm)
+				st.set_uv(Vector2(dists[idx], quad[idx][1]))
+				st.add_vertex(quad[idx][0])
 
 
 # ядра штаба: по бокам от главного здания (поперёк направления на врага), чуть вперёд.

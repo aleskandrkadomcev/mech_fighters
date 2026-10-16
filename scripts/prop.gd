@@ -1,5 +1,6 @@
 extends Node3D
-## Разрушаемая мелочь на карте (пока кучки ящиков; потом бочки, столбы, техника — ROADMAP, графика п. 8).
+## Разрушаемая мелочь на карте: кучки ящиков (разлетаются на куски) и столбики-фонари (падают целиком).
+## Без урона и без влияния на бой — только декор (решение Сани 16.10.2026).
 ## Не мешает ходить, стрелять и видеть: мехи и крипы идут сквозь неё, боты и крипы её не обходят
 ## (её нет в карте проходимости). Ломается с первого касания меха или крипа и от взрыва:
 ## куски разлетаются, лежат несколько секунд и уходят в землю (только картинка; будущему серверу
@@ -17,6 +18,9 @@ var _mat: Material
 var _hidden_break := false     # сломана в тумане: показать, когда игрок туда посмотрит
 var _check_t := 0.0
 var _rng := RandomNumberGenerator.new()
+var kind := "crates"             # "crates" — разлетается на куски, "post" — столбик падает целиком
+var _pivot: Node3D               # столбик: поворачивается у основания
+var _lamp: MeshInstance3D        # плафон столбика: гаснет, когда столб упал
 
 
 # кучка ящиков из коробок [размер, положение, поворот] одним материалом (одна отрисовка, пока целая)
@@ -34,6 +38,33 @@ func setup(boxes: Array, mat: Material, r: float) -> void:
 	_intact.mesh = st.commit()
 	_intact.material_override = mat
 	add_child(_intact)
+
+
+# столбик: детали [размер, положение, материал] над основанием (основание остаётся на месте, оно в общей
+# модели карты). Детали одного материала склеиваются; плафон (материал lamp_mat) — отдельно, чтобы погаснуть
+func setup_post(parts: Array, lamp_mat: Material, r: float) -> void:
+	kind = "post"
+	radius = r
+	_pivot = Node3D.new()
+	_pivot.position = Vector3(0, 0.3, 0)
+	add_child(_pivot)
+	var by_mat := {}
+	for pt in parts:
+		if not by_mat.has(pt[2]):
+			var st0 := SurfaceTool.new()
+			st0.begin(Mesh.PRIMITIVE_TRIANGLES)
+			by_mat[pt[2]] = st0
+		var bm := BoxMesh.new()
+		bm.size = pt[0]
+		by_mat[pt[2]].append_from(bm, 0, Transform3D(Basis(), pt[1] - _pivot.position))
+	for m in by_mat:
+		var mi := MeshInstance3D.new()
+		mi.mesh = by_mat[m].commit()
+		mi.material_override = m
+		_pivot.add_child(mi)
+		if m == lamp_mat:
+			_lamp = mi
+			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
 
 func _ready() -> void:
@@ -93,10 +124,42 @@ func _process(delta: float) -> void:
 	var g = get_tree().current_scene
 	if g != null and "vision" in g and g.vision != null and g.vision.point_visible(Fx.player_team, global_position, radius):
 		_hidden_break = false
-		_intact.visible = false     # сломали без нас: обломки уже ушли в землю
+		if kind == "post":
+			_fall(Vector3(_pivot.global_basis.x), true)     # сломали без нас: уже лежит
+		else:
+			_intact.visible = false     # сломали без нас: обломки уже ушли в землю
+
+
+# столбик падает в сторону удара: сначала медленно, потом быстрее, у земли подпрыгивает; плафон гаснет с искрами.
+# Так и лежит до конца боя
+func _fall(dir: Vector3, instant := false) -> void:
+	var flat := Vector3(dir.x, 0, dir.z)
+	flat = flat.normalized() if flat.length() > 0.01 else Vector3.RIGHT.rotated(Vector3.UP, _rng.randf() * TAU)
+	var axis := Vector3.UP.cross(flat).normalized()          # ось падения в мире
+	var start := _pivot.global_basis
+	var lie := Basis(axis, PI * 0.5 - 0.05) * start
+	if instant:
+		_pivot.global_basis = lie
+		if _lamp != null:
+			_lamp.visible = false
+		return
+	var tw := _pivot.create_tween()
+	tw.tween_method(func(k: float) -> void: _pivot.global_basis = Basis(axis, (PI * 0.5 - 0.05) * k * k) * start, 0.0, 1.0, 0.7)
+	tw.tween_method(func(k: float) -> void: _pivot.global_basis = Basis(axis, PI * 0.5 - 0.05 - sin(k * PI) * 0.06) * start, 0.0, 1.0, 0.25)
+	tw.tween_callback(func() -> void:
+		var head := global_position + flat * 4.4 + Vector3.UP * 0.3
+		Fx.spark(head, Vector3.UP, true, false)
+		Fx.spark(head, (Vector3.UP + flat).normalized(), true, false)
+		Fx.dust_ring(head, 1.2)
+		Sfx.play_at("wall", head, -10.0, 0.2)
+		if _lamp != null:
+			_lamp.visible = false)
 
 
 func _burst(dir: Vector3) -> void:
+	if kind == "post":
+		_fall(dir)
+		return
 	_intact.visible = false
 	var scene := get_tree().current_scene
 	if scene == null:

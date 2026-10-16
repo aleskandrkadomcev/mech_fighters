@@ -144,14 +144,8 @@ func build(covers: Array, edges: Array, map_rect: Rect2, no_grass: Array, map: D
 		_edge_wall(e[0], e[1])
 	for d in map.get("decor", []):
 		_decor(d[0], Vector3(float(d[1]), 0, float(d[2])), deg_to_rad(float(d[3]) if d.size() > 3 else 0.0))
-	for chain in map.get("pylons", []):
-		var tops: Array = []
-		for p in chain:
-			tops.append(_pylon(Vector3(float(p[0]), 0, float(p[1]))))
-		for i in tops.size() - 1:
-			for off in [-0.9, 0.9]:
-				var o := Vector3(off, 0, 0)
-				_cable(tops[i] + o, tops[i + 1] + o, 1.6)
+	# большие мачты с проводами убраны (Саня, 16.10.2026: слишком большие и не нужны); провода теперь
+	# лежат по земле от базы к турелям (main._build_cables)
 	for l in map.get("lamps", []):
 		_lamp(Vector3(float(l[0]), 0, float(l[1])))
 	_scatter(map_rect, covers, no_grass)
@@ -260,13 +254,24 @@ func _decor(kind: String, pos: Vector3, rot: float) -> void:
 			_box(root, Vector3(0.9, 0.45, 0.04), Vector3(0, 1.42, -0.32), light_strip(Color(0.3, 0.85, 1.0)), Vector3(-0.4, 0, 0), false)
 		"crates":
 			# разрушаемая мелочь: не мешает ходить, ломается от касания и взрыва (prop.gd)
-			var cm := _mat("crate", Color(0.36, 0.33, 0.22), 2, 0.8, 0.1)
+			# деревянные ящики: доски (ambientCG Planks021) по самому ящику, по две поперечные планки
+			var cm := _mat("crate", Color(0.36, 0.33, 0.22), 2, 0.8, 0.1, Color.BLACK, 0.0, "wood", 0.6)
+			cm.set_shader_parameter("obj_space", 1.0)
+			cm.set_shader_parameter("tex_tint", Color(0.5, 0.42, 0.32))     # старое потёртое дерево, не жёлтая сосна
+			cm.set_shader_parameter("tex_sat", 0.65)
 			var pr := Prop.new()
 			pr.position = pos
 			pr.rotation.y = rot
-			pr.setup([[Vector3(1.4, 1.2, 1.2), Vector3(-0.7, 0.6, 0), Vector3(0, 0.2, 0)],
-				[Vector3(1.2, 1.0, 1.2), Vector3(0.8, 0.5, 0.3), Vector3(0, -0.3, 0)],
-				[Vector3(1.0, 0.8, 1.0), Vector3(-0.5, 1.6, 0.1), Vector3(0, 0.6, 0)]], cm, 1.6)
+			var boxes: Array = []
+			for b in [[Vector3(1.4, 1.2, 1.2), Vector3(-0.7, 0.6, 0), Vector3(0, 0.2, 0)],
+					[Vector3(1.2, 1.0, 1.2), Vector3(0.8, 0.5, 0.3), Vector3(0, -0.3, 0)],
+					[Vector3(1.0, 0.8, 1.0), Vector3(-0.5, 1.6, 0.1), Vector3(0, 0.6, 0)]]:
+				boxes.append(b)
+				var s: Vector3 = b[0]
+				for k in [-0.3, 0.3]:      # планки вокруг ящика, чуть толще его
+					var off: Vector3 = Basis.from_euler(b[2]) * Vector3(s.x * k, 0, 0)
+					boxes.append([Vector3(0.12, s.y + 0.04, s.z + 0.04), b[1] + off, b[2]])
+			pr.setup(boxes, cm, 1.6)
 			add_child(pr)
 			var wide := absf(sin(rot)) < 0.5
 			_blob(pos, Vector2(5.0, 4.4) if wide else Vector2(4.4, 5.0))
@@ -299,51 +304,22 @@ func _decor(kind: String, pos: Vector3, rot: float) -> void:
 
 
 # ------------------------------------------------------------------
-#  Мачты с проводами и фонари
+#  Фонари (маленькие столбики, падают — prop.gd)
 # ------------------------------------------------------------------
 
-func _pylon(pos: Vector3) -> Vector3:
-	var root := Transform3D(Basis(), pos)
-	var body := StaticBody3D.new()
-	body.position = pos
-	body.collision_layer = 32
-	body.collision_mask = 0
-	add_child(body)
-	var cs := CollisionShape3D.new()
-	var bs := BoxShape3D.new()
-	bs.size = Vector3(1.0, 3.0, 1.0)
-	cs.shape = bs
-	cs.position = Vector3(0, 1.5, 0)
-	body.add_child(cs)
-	decor_boxes.append([pos.x, pos.z, 1.0, 3.0, 1.0])
-	_box(root, Vector3(1.0, 0.4, 1.0), Vector3(0, 0.2, 0), concrete())
-	_box(root, Vector3(0.35, 7.5, 0.35), Vector3(0, 3.95, 0), dark_metal())
-	_box(root, Vector3(2.2, 0.15, 0.15), Vector3(0, 7.4, 0), dark_metal())
-	_box(root, Vector3(0.14, 0.14, 0.14), Vector3(0, 7.9, 0), light_strip(Color(1.0, 0.25, 0.15)), Vector3.ZERO, false)
-	return pos + Vector3(0, 7.35, 0)
-
-
-func _cable(a: Vector3, b: Vector3, sag: float) -> void:
-	var mat := dark_metal()
-	var seg := 10
-	var prev := a
-	for i in range(1, seg + 1):
-		var t := float(i) / seg
-		var p := a.lerp(b, t)
-		p.y -= sin(t * PI) * sag
-		var mid := (prev + p) * 0.5
-		var bm := BoxMesh.new()
-		bm.size = Vector3(0.06, 0.06, prev.distance_to(p))
-		_add(bm, Transform3D(Basis.looking_at(p - prev, Vector3.UP), mid), mat, true)
-		prev = p
-
-
+# фонарь — маленький столбик: бетонное основание в общей модели карты, сам столб с плафоном — разрушаемая
+# мелочь (prop.gd): падает от касания меха или крипа и от взрыва, плафон гаснет
 func _lamp(pos: Vector3) -> void:
 	var root := Transform3D(Basis(), pos)
 	_box(root, Vector3(0.6, 0.3, 0.6), Vector3(0, 0.15, 0), concrete())
-	_box(root, Vector3(0.18, 4.5, 0.18), Vector3(0, 2.4, 0), dark_metal())
-	_box(root, Vector3(1.0, 0.14, 0.3), Vector3(0.35, 4.6, 0), dark_metal())
-	_box(root, Vector3(0.6, 0.06, 0.24), Vector3(0.5, 4.52, 0), light_strip(Color(1.0, 0.85, 0.55)), Vector3.ZERO, false)
+	var lamp_mat := light_strip(Color(1.0, 0.85, 0.55))
+	var pr := Prop.new()
+	pr.position = pos
+	pr.rotation.y = 0.0     # как раньше: плечо фонаря смотрит по +X (общий _rng не трогаем — от него раскладка травы)
+	pr.setup_post([[Vector3(0.18, 4.5, 0.18), Vector3(0, 2.4, 0), dark_metal()],
+		[Vector3(1.0, 0.14, 0.3), Vector3(0.35, 4.6, 0), dark_metal()],
+		[Vector3(0.6, 0.06, 0.24), Vector3(0.5, 4.52, 0), lamp_mat]], lamp_mat, 0.6)
+	add_child(pr)
 
 
 # ------------------------------------------------------------------

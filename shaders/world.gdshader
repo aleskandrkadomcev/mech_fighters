@@ -8,6 +8,7 @@ shader_type spatial;
 // В тумане войны темнеет (кроме свечения: огни видно издалека, но тоже тусклее).
 // Если заданы текстуры (use_tex = 1), фактура берётся из картинок assets/textures (цвет, рельеф, шероховатость).
 // crack: трещины на разрушаемой стене (0 = целая, 1 = вся в трещинах).
+// obj_space = 1: текстура по координатам самого предмета (доски идут вдоль ящика, а не по сетке мира).
 
 uniform vec4 albedo : source_color = vec4(0.36, 0.38, 0.42, 1.0);
 uniform float roughness = 0.85;
@@ -27,13 +28,18 @@ uniform float tex_scale = 0.25;
 uniform vec3 tex_tint : source_color = vec3(1.0);
 uniform float tex_sat = 1.0;           // насыщенность цвета текстуры (меньше 1 — бледнее, например зелёный мох на скалах)
 uniform float crack = 0.0;
+uniform float obj_space = 0.0;
 
 varying vec3 wpos;
 varying vec3 wnorm;
+varying vec3 lpos;
+varying vec3 lnorm;
 
 void vertex() {
 	wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	wnorm = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
+	lpos = VERTEX;
+	lnorm = NORMAL;
 }
 
 float hash3(vec3 p) {
@@ -96,6 +102,10 @@ void fragment() {
 	float n = fbm3(wpos * 0.7);
 	vec3 an = abs(wnorm);
 	vec2 tuv = an.y > max(an.x, an.z) ? wpos.xz : (an.x > an.z ? wpos.zy : wpos.xy);
+	if (obj_space > 0.5) {
+		vec3 ln = abs(lnorm);
+		tuv = ln.y > max(ln.x, ln.z) ? lpos.xz : (ln.x > ln.z ? lpos.zy : lpos.xy);
+	}
 	float rough_k = roughness;
 	if (use_tex > 0.5 && mode != 3) {
 		vec2 uv = tuv * tex_scale;

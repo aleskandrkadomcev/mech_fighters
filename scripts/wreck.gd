@@ -1,9 +1,14 @@
 extends CharacterBody3D
 ## Обломок убитого меха или ящик с припасами.
-## Обломок: чёрный дымящийся мех, по инерции проезжает несколько метров и замирает.
+## Обломок: чёрный дымящийся мех. Падает по инерции и тормозит о землю по физике: трение плюс сопротивление,
+## растущее со скоростью (тушка пашет землю и кувыркается) — с бега проезжает несколько метров, из рывка ~25 м.
+## Валится вперёд по ходу движения, бьётся о землю с пылью, пока едет быстро — тянет шлейф пыли и искрит;
+## при падении отлетают 1–2 части (нога, пушка или кусок брони), тушка остаётся.
 ## Его можно толкать (чем тяжелее мех, тем легче), он закрывает от выстрелов, но не от вижена.
 ## Любой урон (свой, чужой, абилки) его ломает, тогда выпадают припасы.
 ## Ящик работает так же, только падает с неба и припасов в нём больше.
+
+const Art := preload("res://scripts/art.gd")
 
 var team := -1                  # ничей: ломают все
 var hp := 60.0
@@ -19,6 +24,15 @@ var _flash := 0.0
 var _mats: Array = []
 var _broken := false
 var _cs: CollisionShape3D
+var _tumble: Node3D             # держатель модели: валится вокруг передней кромки
+var _fall_t := -1.0             # сколько секунд падает (-1 — не падает)
+var _fall_axis := Vector3.RIGHT
+var _fall_angle := 0.3
+var _fall_drop := 1.0
+var _landed := false
+var _skid: CPUParticles3D       # шлейф пыли при скольжении
+var _spark_t := 0.0
+var _parts: Array = []          # отлетевшие части: {node, v, spin, rest, landed}
 
 
 func _ready() -> void:
@@ -43,7 +57,7 @@ func setup_wreck(visual: Node3D, vel: Vector3, mech_weight: float, r: float, h :
 	hp = Cfg.wreck_hp
 	weight = maxf(mech_weight, 5.0)
 	radius = r * 0.85
-	_vel = Vector3(vel.x, 0, vel.z).limit_length(Cfg.wreck_slide_max)
+	_vel = Vector3(vel.x, 0, vel.z)
 	_visual = visual
 
 
@@ -63,15 +77,20 @@ func start() -> void:
 		return
 	if _visual == null:
 		return
-	_visual.reparent(self, true)
+	_tumble = Node3D.new()
+	add_child(_tumble)
+	_visual.reparent(_tumble, true)
 	if _visual.has_method("set_charred"):
 		_visual.set_charred()
-	# ноги подкашиваются: модель оседает и чуть заваливается набок
-	var drop: float = 2.05 * float(_visual.get("ls") if _visual.get("ls") != null else 1.0) * 0.55
-	var tilt := Vector3(randf_range(-0.25, 0.25), 0, randf_range(-0.3, 0.3))
-	var tw := create_tween().set_parallel(true)
-	tw.tween_property(_visual, "position:y", _visual.position.y - drop, 0.55).set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
-	tw.tween_property(_visual, "rotation", _visual.rotation + tilt, 0.55).set_ease(Tween.EASE_IN)
+	# ноги подкашиваются, тушка валится вперёд по ходу движения: чем быстрее ехала, тем ниже ложится
+	var sp := _vel.length()
+	var fwd := _vel / sp if sp > 0.5 else Vector3.FORWARD.rotated(Vector3.UP, randf() * TAU)
+	_fall_axis = Vector3.UP.cross(fwd).normalized().rotated(Vector3.UP, randf_range(-0.35, 0.35))
+	_fall_angle = clampf(0.28 + sp * 0.022, 0.28, 1.15) * randf_range(0.85, 1.1)
+	_fall_drop = 2.05 * float(_visual.get("ls") if _visual.get("ls") != null else 1.0) * 0.55
+	_fall_t = 0.0
+	_make_skid()
+	_detach_parts(fwd, sp)
 	_make_smoke(2.2)
 
 
@@ -148,15 +167,177 @@ func _make_smoke(h: float) -> void:
 
 
 func _physics_process(delta: float) -> void:
-	# скольжение по инерции после смерти
-	if _vel.length() > 0.05:
+	# скольжение по инерции после смерти: трение о землю плюс сопротивление на скорости (пашет землю).
+	# Пока тушка ещё падает (первые 0,3 с), о землю трётся слабее
+	var sp := _vel.length()
+	if sp > 0.05:
 		var c := move_and_collide(_vel * delta)
 		if c != null:
 			_vel = _vel.slide(c.get_normal()) * 0.5
-		_vel = _vel.move_toward(Vector3.ZERO, Cfg.wreck_friction * delta)
+			if sp > 4.0:
+				Fx.spark(c.get_position() + Vector3.UP * 1.0, c.get_normal(), true, false)
+		var dec := Cfg.wreck_friction + Cfg.wreck_drag * sp * sp
+		if _fall_t >= 0.0 and _fall_t < 0.3:
+			dec *= 0.6
+		_vel = _vel.move_toward(Vector3.ZERO, dec * delta)
 	global_position.y = 0.0
 	if _flash > 0.0:
 		_flash -= delta
+	_update_fall(delta)
+	_update_parts(delta)
+	if _skid != null:
+		var on := _vel.length() > 3.0 and _landed
+		if _skid.emitting != on:
+			_skid.emitting = on
+		_spark_t -= delta
+		if on and _spark_t <= 0.0:
+			_spark_t = randf_range(0.06, 0.16)
+			var back := -_vel.normalized()
+			Fx.spark(global_position + back * radius * 0.6 + Vector3.UP * 0.3, (Vector3.UP + back).normalized(), true, false)
+
+
+# падение: угол растёт как у валящегося столба (медленно, потом быстрее), у земли удар — пыль и звук,
+# лёгкий отскок, дальше лежит. Валится через переднюю кромку и оседает
+func _update_fall(delta: float) -> void:
+	if _fall_t < 0.0 or _tumble == null:
+		return
+	_fall_t += delta
+	var T := 0.55
+	var k := clampf(_fall_t / T, 0.0, 1.0)
+	var a := _fall_angle * k * k
+	if _fall_t > T:
+		a = _fall_angle - sin(clampf((_fall_t - T) / 0.25, 0.0, 1.0) * PI) * 0.07
+	var dir := Vector3.UP.cross(_fall_axis)          # куда падает (вперёд)
+	var pivot := dir * radius * 0.5
+	var b := Basis(_fall_axis, -a)
+	_tumble.transform = Transform3D(b, pivot - b * pivot + Vector3.DOWN * _fall_drop * k * k)
+	if not _landed and _fall_t >= T:
+		_landed = true
+		Fx.dust_ring(global_position + dir * radius, radius * 2.6)
+		Fx.dust_ring(global_position, radius * 1.8)
+		Sfx.play_at("land", global_position, 0.0, 0.08)
+		Sfx.play_at("wall", global_position, -4.0, 0.1)
+	if _fall_t > T + 0.3:
+		_fall_t = -1.0
+
+
+# шлейф пыли за скользящей тушкой (в мире, тает)
+func _make_skid() -> void:
+	_skid = CPUParticles3D.new()
+	var qm := QuadMesh.new()
+	qm.size = Vector2(2.2, 2.2)
+	_skid.mesh = qm
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.vertex_color_use_as_albedo = true
+	mat.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	var tex := Art.fx_tex("smoke_07")
+	if tex != null:
+		mat.albedo_texture = tex
+	_skid.material_override = mat
+	var ramp := Gradient.new()
+	ramp.set_color(0, Color(0.5, 0.44, 0.34, 0.55))
+	ramp.set_color(1, Color(0.48, 0.45, 0.4, 0.0))
+	_skid.color_ramp = ramp
+	var grow := Curve.new()
+	grow.add_point(Vector2(0, 0.6))
+	grow.add_point(Vector2(1, 1.8))
+	_skid.scale_amount_curve = grow
+	_skid.local_coords = false
+	_skid.amount = int(40 * Cfg.gfx(0.4, 0.7, 1.0))
+	_skid.lifetime = 1.4
+	_skid.emitting = false
+	_skid.direction = Vector3.UP
+	_skid.spread = 60.0
+	_skid.initial_velocity_min = 1.0
+	_skid.initial_velocity_max = 2.5
+	_skid.damping_min = 2.0
+	_skid.damping_max = 3.0
+	_skid.gravity = Vector3(0, 0.3, 0)
+	_skid.angle_max = 360.0
+	_skid.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+	_skid.emission_sphere_radius = radius * 0.6
+	_skid.position = Vector3(0, 0.4, 0)
+	_skid.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(_skid)
+
+
+# отлетают 1–2 части: нога, пушка или кусок брони. Летят по инерции тушки плюс в сторону и вверх,
+# кувыркаются, бьются о землю с пылью и остаются лежать рядом (уходят вместе с тушкой)
+func _detach_parts(fwd: Vector3, sp: float) -> void:
+	var v = _visual
+	var kinds: Array = ["plate"]
+	if "gun_pods" in v:
+		for i in v.gun_pods.size():
+			if is_instance_valid(v.gun_pods[i]):
+				kinds.append("gun%d" % i)
+	if "feet" in v:
+		for i in v.feet.size():
+			if v.feet[i].thigh != null:
+				kinds.append("leg%d" % i)
+	kinds.shuffle()
+	var n := 2 if randf() < 0.35 + clampf(sp / 60.0, 0.0, 0.4) else 1
+	for kind in kinds.slice(0, n):
+		var holder := Node3D.new()
+		holder.top_level = true
+		add_child(holder)
+		var nodes: Array = []
+		if kind.begins_with("gun"):
+			nodes = [v.gun_pods[int(kind.right(1))]]
+		elif kind.begins_with("leg"):
+			var f = v.feet[int(kind.right(1))]
+			nodes = [f.thigh, f.shin, f.node]
+		if nodes.is_empty():
+			# кусок брони: плита с корпуса
+			var mi := MeshInstance3D.new()
+			var hs: float = float(v.get("hs")) if v.get("hs") != null else 1.0
+			var s := Vector3(randf_range(0.8, 1.4), randf_range(0.12, 0.22), randf_range(0.6, 1.1)) * hs
+			mi.mesh = Art.bevel_box(s, 0.05)
+			mi.material_override = v.get("m_armor")
+			holder.global_position = global_position + Vector3(randf_range(-0.6, 0.6), 2.6, randf_range(-0.6, 0.6))
+			holder.add_child(mi)
+		else:
+			holder.global_position = (nodes[0] as Node3D).global_position
+			for nd in nodes:
+				if nd != null and is_instance_valid(nd):
+					nd.reparent(holder, true)
+		var out := Vector3(holder.global_position.x - global_position.x, 0, holder.global_position.z - global_position.z)
+		out = out.normalized() if out.length() > 0.1 else fwd.cross(Vector3.UP)
+		var vel := _vel * randf_range(0.7, 1.0) + out * randf_range(3.0, 7.0) + Vector3.UP * randf_range(4.0, 8.0)
+		var spin := Vector3(randf_range(-6, 6), randf_range(-4, 4), randf_range(-6, 6))
+		_parts.append({"node": holder, "v": vel, "spin": spin, "rest": 0.35, "landed": false})
+
+
+func _update_parts(delta: float) -> void:
+	for p in _parts:
+		var h: Node3D = p["node"]
+		if not is_instance_valid(h) or p.get("done", false):
+			continue
+		var vel: Vector3 = p["v"]
+		vel.y -= Cfg.gravity() * 2.2 * delta          # тяжёлая железка: падает быстро
+		var pos := h.global_position + vel * delta
+		if pos.y < p["rest"]:
+			pos.y = p["rest"]
+			if not p["landed"] or absf(vel.y) > 2.0:
+				Fx.dust_ring(pos, 1.3)
+				Fx.spark(pos, Vector3.UP, true, false)
+			p["landed"] = true
+			vel.y = -vel.y * 0.25
+			vel.x *= 0.5
+			vel.z *= 0.5
+			p["spin"] = p["spin"] * 0.4
+		var horiz := Vector3(vel.x, 0, vel.z)
+		if p["landed"]:
+			horiz = horiz.move_toward(Vector3.ZERO, (Cfg.wreck_friction + Cfg.wreck_drag * horiz.length_squared()) * delta)
+			vel.x = horiz.x
+			vel.z = horiz.z
+		p["v"] = vel
+		h.global_position = pos
+		h.rotate(Vector3.RIGHT, p["spin"].x * delta)
+		h.rotate(Vector3.FORWARD, p["spin"].z * delta)
+		if p["landed"] and vel.length() < 0.2 and pos.y <= p["rest"] + 0.01:
+			p["done"] = true
 
 
 # толкнули: двигаемся, упираясь в стены и другие обломки (их тоже чуть подталкиваем)
