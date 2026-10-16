@@ -1,3 +1,3 @@
-Текстуры: ambientCG.com (CC0 1.0): MetalPlates001/008/013, PaintedMetal001/003/004, Concrete002/008/012, Rock026/030, Planks021 (доски ящиков, 16.10.2026).
+Текстуры: ambientCG.com (CC0 1.0): MetalPlates001/008/013, PaintedMetal001/003/004, Concrete002/008/012, Rock026/030, Planks021 (доски ящиков), Fabric045 (мешки с песком), Fence007A (сетка забора) — 16.10.2026.
 Эффекты: Kenney Particle Pack (CC0), kenney.nl.
 Земля: Poly Haven (CC0 1.0), polyhaven.com: aerial_grass_rock, aerial_ground_rock, aerial_mud_1, dirt_aerial_02, aerial_rocks_02 (assets/textures/ground_*; уменьшены до 1K, затенение впечено в цвет).

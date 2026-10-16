@@ -11,7 +11,7 @@ const GrassShader := preload("res://shaders/grass.gdshader")
 const Prop := preload("res://scripts/prop.gd")
 
 const DECOR_KINDS := {"container": "Контейнер", "generator": "Генератор", "tank": "Цистерна", "terminal": "Терминал",
-	"crates": "Ящики", "antenna": "Антенна"}
+	"crates": "Ящики", "antenna": "Антенна", "sandbags": "Мешки с песком", "jersey": "Бетонные блоки", "fence": "Забор"}
 
 var vision: Node
 var ground_mask: Image           # где дороги и площадки (из main.gd): трава там не растёт
@@ -277,6 +277,9 @@ func _decor(kind: String, pos: Vector3, rot: float) -> void:
 			_blob(pos, Vector2(5.0, 4.4) if wide else Vector2(4.4, 5.0))
 			prop_boxes.append([pos.x, pos.z, 3.2 if wide else 2.6, 2.0, 2.6 if wide else 3.2])
 			return
+		"sandbags", "jersey", "fence":
+			_small_stuff(kind, pos, rot)
+			return
 		"antenna":
 			foot = Vector2(2.2, 2.2)
 			height = 2.0
@@ -306,6 +309,82 @@ func _decor(kind: String, pos: Vector3, rot: float) -> void:
 # ------------------------------------------------------------------
 #  Фонари (маленькие столбики, падают — prop.gd)
 # ------------------------------------------------------------------
+
+# разрушаемая мелочь рядами (prop.gd): мешки с песком полукругом (выпуклостью по +X, как стоят перед
+# турелью к врагу), бетонные блоки «джерси» в ряд, забор-решётка из трёх пролётов. Без урона — только декор
+func _small_stuff(kind: String, pos: Vector3, rot: float) -> void:
+	var pr := Prop.new()
+	pr.position = pos
+	pr.rotation.y = rot
+	var parts: Array = []
+	var hx := 1.0
+	var hz := 1.0
+	match kind:
+		"sandbags":
+			var bag := _mat("sandbag", Color(0.6, 0.53, 0.38), 0, 0.95, 0.0, Color.BLACK, 0.0, "canvas", 1.2)
+			bag.set_shader_parameter("obj_space", 1.0)
+			bag.set_shader_parameter("tex_tint", Color(0.62, 0.54, 0.4))
+			var R := 4.4
+			for row in 2:
+				var n := 6 - row
+				for i in n:
+					var a := deg_to_rad(-55.0 + 110.0 * (float(i) + 0.5 * row) / float(6 - 1)) if n > 1 else 0.0
+					var p := Vector3(cos(a) * R, 0.17 + row * 0.3, sin(a) * R)
+					var b := Basis(Vector3.UP, -a + PI * 0.5 + _rng.randf_range(-0.12, 0.12)) * Basis(Vector3.RIGHT, _rng.randf_range(-0.06, 0.06))
+					parts.append({"mesh": Art.bevel_box(Vector3(0.95, 0.32, 0.5), 0.13), "xf": Transform3D(b, p), "mat": bag, "group": i})
+			hx = R + 0.4
+			hz = R * 0.85
+		"jersey":
+			var conc := _mat("jersey", Color(0.55, 0.55, 0.53), 0, 0.85, 0.0, Color.BLACK, 0.0, "concrete", 0.35)
+			conc.set_shader_parameter("obj_space", 1.0)
+			conc.set_shader_parameter("tex_tint", Color(0.72, 0.7, 0.66))     # не белые: старый грязный бетон
+			var strip := hazard()
+			for i in 3:
+				var x := (float(i) - 1.0) * 2.15
+				var b := Basis(Vector3.UP, _rng.randf_range(-0.05, 0.05))
+				parts.append({"mesh": Art.bevel_box(Vector3(2.0, 0.32, 0.78), 0.05), "xf": Transform3D(b, Vector3(x, 0.16, 0)), "mat": conc, "group": i})
+				parts.append({"mesh": Art.bevel_box(Vector3(2.0, 0.6, 0.36), 0.06), "xf": Transform3D(b, Vector3(x, 0.6, 0)), "mat": conc, "group": i})
+				parts.append({"mesh": Art.bevel_box(Vector3(0.5, 0.12, 0.37), 0.02), "xf": Transform3D(b, Vector3(x - 0.55, 0.72, 0)), "mat": strip, "group": i})
+			hx = 3.3
+			hz = 0.5
+		"fence":
+			var post := dark_metal()
+			var grid := _fence_mat()
+			for i in 4:
+				var x := (float(i) - 1.5) * 3.0
+				parts.append({"mesh": Art.bevel_box(Vector3(0.12, 2.3, 0.12), 0.02), "xf": Transform3D(Basis(), Vector3(x, 1.15, 0)), "mat": post, "group": 0})
+			for i in 3:
+				var qm := QuadMesh.new()
+				qm.size = Vector2(3.0, 2.0)
+				qm.center_offset = Vector3(0, 0, 0)
+				parts.append({"mesh": qm, "xf": Transform3D(Basis(), Vector3((float(i) - 1.0) * 3.0, 1.15, 0)), "mat": grid, "group": 0})
+				parts.append({"mesh": Art.bevel_box(Vector3(3.0, 0.06, 0.06), 0.01), "xf": Transform3D(Basis(), Vector3((float(i) - 1.0) * 3.0, 2.17, 0)), "mat": post, "group": 0})
+			hx = 4.7
+			hz = 0.35
+	pr.setup_parts(parts, kind, hx, hz)
+	add_child(pr)
+	var wide := absf(sin(rot)) < 0.5
+	prop_boxes.append([pos.x, pos.z, hx * 2.0 if wide else hz * 2.0, 1.0, hz * 2.0 if wide else hx * 2.0])
+
+
+# сетка забора: картинка с прозрачностью (ambientCG Fence007A), отсекается по альфе, видна с обеих сторон
+func _fence_mat() -> Material:
+	if _mats.has("fence"):
+		return _mats["fence"]
+	var m := StandardMaterial3D.new()
+	var t = load("res://assets/textures/fence_albedo.png") if ResourceLoader.exists("res://assets/textures/fence_albedo.png") else null
+	if t != null:
+		m.albedo_texture = t
+	m.albedo_color = Color(0.62, 0.62, 0.6)
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+	m.alpha_scissor_threshold = 0.5
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	m.metallic = 0.6
+	m.roughness = 0.5
+	m.uv1_scale = Vector3(3.0, 2.0, 1.0)
+	_mats["fence"] = m
+	return m
+
 
 # фонарь — маленький столбик: бетонное основание в общей модели карты, сам столб с плафоном — разрушаемая
 # мелочь (prop.gd): падает от касания меха или крипа и от взрыва, плафон гаснет

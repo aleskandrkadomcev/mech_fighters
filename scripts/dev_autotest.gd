@@ -1523,6 +1523,8 @@ func _run_targetshot() -> void:
 		_stage_death(m)
 	elif _target == "after":
 		_stage_after(m)
+	elif _target == "small":
+		_stage_small(m)
 	# все стреляют в свои цели и не умирают, пока идёт съёмка
 	for a in _actors:
 		var b = a[0]
@@ -1538,7 +1540,7 @@ func _run_targetshot() -> void:
 					if not _shots_left.has(f):         # два меха под молнией в один кадр — не снимать дважды
 						_shots_left.append(f)
 		a[0].set_meta("was_stun", a[0].stun_left > 0.0)
-	var end_f: int = {"fight": 200, "base": 500, "calm": 220, "ground": 250, "list": 530, "props": 330, "death": 420, "after": 1400}.get(_target, 300)
+	var end_f: int = {"fight": 200, "base": 500, "calm": 220, "ground": 250, "list": 530, "props": 330, "death": 420, "after": 1400, "small": 620}.get(_target, 300)
 	if _frame >= end_f and _shots_left.is_empty():
 		if _capbench:
 			_run_capbench()
@@ -1882,6 +1884,38 @@ func _stage_after(m) -> void:
 		if t1 != null:
 			_props_at(m, t1.global_position + Vector3(-9, 0.05, 7), 30.0)
 			t1.take_damage(1e9, t1.global_position, Vector3.ZERO, "", m)
+
+
+# новая мелочь (--targetshot=small): мешки перед своей турелью (кадр 40) и взрыв у них (60, 75), бетонные блоки
+# у дороги — мех упирается (снимки до 150, через 6 и 30 кадров после), забор у точки интереса — мех проходит (то же)
+func _stage_small(m) -> void:
+	if _frame == 3:
+		Cfg.bot_allies = 0
+		Cfg.bot_enemies = 0
+		Cfg.creeps_enabled = 0
+		_props_at(m, Vector3(-48, 0.05, -8), 26.0)
+		m.demo = {"move": Vector2.ZERO, "fire": false, "aim": Vector3(-40, 1.5, 0)}
+		if _shot_dir != "":
+			_shots_left.append_array([40, 60, 75, 150, 330])
+	if _frame == 55:
+		var bags := _pt_kind("sandbags", Vector3(-45, 0, 0))
+		Fx.explosion(bags.global_position + Vector3(4.6, 0.5, 1.0), 2.5)
+		Fx.blast(bags.global_position + Vector3(4.6, 0.5, 1.0), 2.5, 10.0, 0.5, 1, null)
+	if _frame == 120:
+		var jer := _pt_kind("jersey", Vector3(-50, 0, 9))
+		set_meta("sm_j", jer)
+		_props_at(m, jer.global_position + Vector3(0, 0.05, 7), 24.0)
+		m.demo = {"move": Vector2(0, -1), "fire": false, "aim": jer.global_position + Vector3(0, 1.5, -10)}
+	if _frame == 300:
+		var fen := _pt_kind("fence", Vector3(-13, 0, -55))
+		set_meta("sm_f", fen)
+		_props_at(m, fen.global_position + Vector3(-7, 0.05, 1.5), 24.0)
+		m.demo = {"move": Vector2(1, 0), "fire": false, "aim": fen.global_position + Vector3(10, 1.5, 0)}
+	for key in ["sm_j", "sm_f"]:
+		if has_meta(key) and not has_meta(key + "_t") and get_meta(key).broken:
+			set_meta(key + "_t", _frame)
+			if _shot_dir != "":
+				_shots_left.append_array([_frame + 6, _frame + 30])
 
 
 func _props_at(m, at: Vector3, cam: float) -> void:
@@ -3209,6 +3243,14 @@ func _pt_prop(at: Vector3) -> Node3D:
 	return best
 
 
+func _pt_kind(k: String, at: Vector3) -> Node3D:
+	var best: Node3D = null
+	for p in get_tree().get_nodes_in_group("props"):
+		if p.kind == k and (best == null or p.global_position.distance_to(at) < best.global_position.distance_to(at)):
+			best = p
+	return best
+
+
 func _pt_check(ok: bool, what: String) -> void:
 	print("[PROP] %s — %s" % [what, "ВЕРНО" if ok else "ОШИБКА"])
 	if not ok:
@@ -3221,9 +3263,10 @@ func _run_proptest() -> void:
 	var b := Vector3(-62, 0, 16)
 	if _frame == 5:
 		Cfg.creeps_enabled = 0
-		print("[PROP] мелочи на карте: %d (кучек ящиков %d, столбиков %d)" % [get_tree().get_nodes_in_group("props").size(),
-			get_tree().get_nodes_in_group("props").filter(func(x) -> bool: return x.kind == "crates").size(),
-			get_tree().get_nodes_in_group("props").filter(func(x) -> bool: return x.kind == "post").size()])
+		var kinds := {}
+		for x in get_tree().get_nodes_in_group("props"):
+			kinds[x.kind] = kinds.get(x.kind, 0) + 1
+		print("[PROP] мелочи на карте: %s" % str(kinds))
 		_pt_check(main.nav.is_free(a), "на месте кучки ящиков боты проходят (карта проходимости)")
 		m.global_position = a + Vector3(-8, 0.05, 0)
 		m.snap_interpolation(m)
@@ -3245,12 +3288,35 @@ func _run_proptest() -> void:
 			m.global_position = pst.global_position + Vector3(0, 0.05, 6)
 			m.snap_interpolation(m)
 			m.demo = {"move": Vector2(0, -1), "fire": false, "aim": pst.global_position + Vector3(0, 1.5, -10)}
+	# бетонные блоки и забор: мех идёт на них; мешки перед турелью — взрыв рядом
+	if _frame == 310:
+		var jer := _pt_kind("jersey", Vector3(-50, 0, 9))
+		set_meta("jer", jer)
+		m.global_position = jer.global_position + Vector3(0, 0.05, 6)
+		m.snap_interpolation(m)
+		m.demo = {"move": Vector2(0, -1), "fire": false, "aim": jer.global_position + Vector3(0, 1.5, -10)}
+		var bags := _pt_kind("sandbags", Vector3(-45, 0, 0))
+		set_meta("bags", bags)
+		Fx.blast(bags.global_position + Vector3(4.4, 0.5, 0), 2.0, 10.0, 0.5, 1, null)
+	if _frame == 420:
+		var fen := _pt_kind("fence", Vector3(-13, 0, -55))
+		set_meta("fen", fen)
+		m.global_position = fen.global_position + Vector3(-6, 0.05, 1)
+		m.snap_interpolation(m)
+		m.demo = {"move": Vector2(1, 0), "fire": false, "aim": fen.global_position + Vector3(10, 1.5, 0)}
+	if _frame == 560:
+		_pt_check(get_meta("jer").broken, "мех упёрся в бетонные блоки — сдвинул и завалил")
+		_pt_check(get_meta("bags").broken, "взрыв у мешков с песком перед турелью — разлетелись")
+		var fen2: Node3D = get_meta("fen")
+		var tilt := rad_to_deg(acos(clampf(fen2._pivot.global_basis.y.normalized().dot(Vector3.UP), -1.0, 1.0)))
+		_pt_check(fen2.broken and tilt > 70.0, "мех прошёл через забор — упал плашмя (наклон %.0f°)" % tilt)
+		m.demo = {"move": Vector2.ZERO, "fire": false, "aim": m.global_position + Vector3(10, 1.5, 0)}
 	if _frame == 300 and has_meta("post"):
 		var pst2: Node3D = get_meta("post")
 		var tilt := rad_to_deg(acos(clampf(pst2._pivot.global_basis.y.normalized().dot(Vector3.UP), -1.0, 1.0)))
 		_pt_check(pst2.broken and tilt > 70.0, "мех задел фонарь — столб упал (наклон %.0f°)" % tilt)
 		m.demo = {"move": Vector2.ZERO, "fire": false, "aim": m.global_position + Vector3(10, 1.5, 0)}
-	if _frame == 600:
+	if _frame == 640:
 		var left := 0
 		for n in get_tree().current_scene.get_children():
 			if n is MeshInstance3D and n.physics_interpolation_mode == Node.PHYSICS_INTERPOLATION_MODE_OFF and n.material_override == _pt_prop(a)._mat:

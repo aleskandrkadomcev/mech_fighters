@@ -1,5 +1,6 @@
 extends Node3D
-## Разрушаемая мелочь на карте: кучки ящиков (разлетаются на куски) и столбики-фонари (падают целиком).
+## Разрушаемая мелочь на карте: кучки ящиков (разлетаются на куски), столбики-фонари (падают целиком),
+## мешки с песком (разлетаются), бетонные блоки (сдвигаются и заваливаются), заборы-решётки (падают плашмя).
 ## Без урона и без влияния на бой — только декор (решение Сани 16.10.2026).
 ## Не мешает ходить, стрелять и видеть: мехи и крипы идут сквозь неё, боты и крипы её не обходят
 ## (её нет в карте проходимости). Ломается с первого касания меха или крипа и от взрыва:
@@ -21,6 +22,9 @@ var _rng := RandomNumberGenerator.new()
 var kind := "crates"             # "crates" — разлетается на куски, "post" — столбик падает целиком
 var _pivot: Node3D               # столбик: поворачивается у основания
 var _lamp: MeshInstance3D        # плафон столбика: гаснет, когда столб упал
+var half := Vector2.ZERO         # вытянутая мелочь (ряд мешков, блоки, забор): полуразмеры по своим X и Z
+var _parts: Array = []           # детали мешков/блоков/забора: {mesh, xf, mat, group}
+var _meshes: Array = []          # целый вид (по одной модели на материал)
 
 
 # кучка ящиков из коробок [размер, положение, поворот] одним материалом (одна отрисовка, пока целая)
@@ -67,6 +71,39 @@ func setup_post(parts: Array, lamp_mat: Material, r: float) -> void:
 			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
 
+# мешки, блоки, забор: детали {mesh, xf (в осях предмета), mat, group}; одинаковый материал склеивается.
+# hx, hz — полуразмеры, по ним считается касание и взрыв
+func setup_parts(parts: Array, k: String, hx: float, hz: float) -> void:
+	kind = k
+	_parts = parts
+	half = Vector2(hx, hz)
+	radius = maxf(hx, hz)
+	_pivot = Node3D.new()
+	add_child(_pivot)
+	var by_mat := {}
+	for pt in parts:
+		if not by_mat.has(pt["mat"]):
+			var st0 := SurfaceTool.new()
+			st0.begin(Mesh.PRIMITIVE_TRIANGLES)
+			by_mat[pt["mat"]] = st0
+		for si in pt["mesh"].get_surface_count():
+			by_mat[pt["mat"]].append_from(pt["mesh"], si, pt["xf"])
+	for m in by_mat:
+		var mi := MeshInstance3D.new()
+		mi.mesh = by_mat[m].commit()
+		mi.material_override = m
+		_pivot.add_child(mi)
+		_meshes.append(mi)
+
+
+# насколько точка близко (по земле, от края предмета) — для взрывов (Fx.blast)
+func blast_distance(pos: Vector3) -> float:
+	if half == Vector2.ZERO:
+		return maxf(Vector2(pos.x - global_position.x, pos.z - global_position.z).length() - radius, 0.0)
+	var lp := global_transform.affine_inverse() * pos
+	return Vector2(maxf(absf(lp.x) - half.x, 0.0), maxf(absf(lp.z) - half.y, 0.0)).length()
+
+
 func _ready() -> void:
 	add_to_group("props")
 	add_to_group("damageable")
@@ -87,14 +124,22 @@ func _physics_process(_delta: float) -> void:
 	var g = get_tree().current_scene
 	if g == null or not g.has_method("units"):
 		return
+	var inv := global_transform.affine_inverse() if half != Vector2.ZERO else Transform3D()
 	for u in g.units():
 		var d := Vector3(global_position.x - u[1].x, 0, global_position.z - u[1].z)
-		if d.length() < radius + float(u[3]) * 0.7:
+		var touch := false
+		if half != Vector2.ZERO:
+			var lp: Vector3 = inv * u[1]
+			touch = absf(lp.x) < half.x + float(u[3]) * 0.7 and absf(lp.z) < half.y + float(u[3]) * 0.7
+		else:
+			touch = d.length() < radius + float(u[3]) * 0.7
+		if touch:
 			var n: Node3D = u[0]
 			var push: Vector3 = Vector3(n.velocity.x, 0, n.velocity.z) if "velocity" in n else d
 			smash(push if push.length() > 0.5 else d, n)
 			if u[4]:
-				n.velocity = Vector3(n.velocity.x * 0.75, n.velocity.y, n.velocity.z * 0.75)     # лёгкая заминка
+				var k := 0.6 if kind == "jersey" else 0.75        # заминка; бетонные блоки держат сильнее
+				n.velocity = Vector3(n.velocity.x * k, n.velocity.y, n.velocity.z * k)
 			return
 
 
@@ -126,8 +171,15 @@ func _process(delta: float) -> void:
 		_hidden_break = false
 		if kind == "post":
 			_fall(Vector3(_pivot.global_basis.x), true)     # сломали без нас: уже лежит
-		else:
+		elif kind == "fence":
+			_fence_fall(global_basis.z, true)
+		elif kind == "jersey":
+			_knock(global_basis.z, true)
+		elif _intact != null:
 			_intact.visible = false     # сломали без нас: обломки уже ушли в землю
+		else:
+			for mi in _meshes:
+				mi.visible = false
 
 
 # столбик падает в сторону удара: сначала медленно, потом быстрее, у земли подпрыгивает; плафон гаснет с искрами.
@@ -156,9 +208,101 @@ func _fall(dir: Vector3, instant := false) -> void:
 			_lamp.visible = false)
 
 
+# забор падает плашмя в ту сторону, куда толкнули (поперёк своей линии), у земли пыль; так и лежит
+func _fence_fall(dir: Vector3, instant := false) -> void:
+	var nz := global_basis.z.normalized()
+	var side := 1.0 if Vector3(dir.x, 0, dir.z).dot(nz) >= 0.0 else -1.0
+	var axis := global_basis.x.normalized() * side                # ось падения — вдоль забора
+	var start := _pivot.global_basis
+	if instant:
+		_pivot.global_basis = Basis(axis, PI * 0.5 - 0.04) * start
+		return
+	var tw := _pivot.create_tween()
+	tw.tween_method(func(k: float) -> void: _pivot.global_basis = Basis(axis, (PI * 0.5 - 0.04) * k * k) * start, 0.0, 1.0, 0.55)
+	tw.tween_method(func(k: float) -> void: _pivot.global_basis = Basis(axis, PI * 0.5 - 0.04 - sin(k * PI) * 0.05) * start, 0.0, 1.0, 0.2)
+	tw.tween_callback(func() -> void:
+		var mid := global_position + nz * side * 1.2
+		Fx.dust_ring(mid, half.x * 0.9)
+		Sfx.play_at("wall", mid, -8.0, 0.2))
+
+
+# бетонные блоки: каждый сдвигается в сторону удара и заваливается, пылит. Так и лежат
+func _knock(dir: Vector3, instant := false) -> void:
+	var flat := Vector3(dir.x, 0, dir.z)
+	flat = flat.normalized() if flat.length() > 0.01 else global_basis.z
+	for mi in _meshes:
+		mi.visible = false
+	var groups := {}
+	for pt in _parts:
+		if not groups.has(pt["group"]):
+			groups[pt["group"]] = []
+		groups[pt["group"]].append(pt)
+	for gi in groups:
+		var holder := Node3D.new()
+		add_child(holder)
+		var center := Vector3.ZERO
+		for pt in groups[gi]:
+			center += pt["xf"].origin
+		center /= float(groups[gi].size())
+		center.y = 0.0
+		holder.position = center
+		for pt in groups[gi]:
+			var mi := MeshInstance3D.new()
+			mi.mesh = pt["mesh"]
+			mi.material_override = pt["mat"]
+			mi.transform = Transform3D(pt["xf"].basis, pt["xf"].origin - center)
+			holder.add_child(mi)
+		var shift := flat * _rng.randf_range(0.6, 1.8)
+		var axis := Vector3.UP.cross(flat).normalized()
+		var tilt := _rng.randf_range(0.25, 1.1)
+		var gstart := holder.global_transform
+		var gend := Transform3D(Basis(axis, tilt).rotated(Vector3.UP, _rng.randf_range(-0.4, 0.4)) * gstart.basis, gstart.origin + shift + Vector3.UP * 0.12 * tilt)
+		if instant:
+			holder.global_transform = gend
+			continue
+		var tw := holder.create_tween()
+		tw.tween_method(func(k: float) -> void: holder.global_transform = gstart.interpolate_with(gend, 1.0 - (1.0 - k) * (1.0 - k)), 0.0, 1.0, 0.35)
+		Fx.dust_ring(holder.global_position, 1.4)
+	if not instant:
+		Sfx.play_at("wall", global_position, -4.0, 0.15)
+
+
+# мешки с песком: каждый мешок летит в сторону удара, кувыркается, лежит и уходит в землю
+func _bags(dir: Vector3) -> void:
+	var scene := get_tree().current_scene
+	for mi in _meshes:
+		mi.visible = false
+	if scene == null:
+		return
+	var flat := Vector3(dir.x, 0, dir.z)
+	flat = flat.normalized() if flat.length() > 0.01 else global_basis.z
+	for pt in _parts:
+		var mi := MeshInstance3D.new()
+		mi.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
+		mi.mesh = pt["mesh"]
+		mi.material_override = pt["mat"]
+		scene.add_child(mi)
+		mi.global_transform = global_transform * pt["xf"]
+		var out := Vector3(mi.global_position.x - global_position.x, 0, mi.global_position.z - global_position.z).normalized()
+		var vel := flat * _rng.randf_range(1.5, 4.5) + out * _rng.randf_range(0.5, 2.0) + Vector3.UP * _rng.randf_range(1.5, 3.5)
+		var spin := Vector3(_rng.randf_range(-6, 6), _rng.randf_range(-4, 4), _rng.randf_range(-6, 6))
+		_fly(mi, vel, spin, 0.16)
+	Fx.dust_ring(global_position, half.x)
+	Sfx.play_at("step", global_position, -4.0, 0.2)
+
+
 func _burst(dir: Vector3) -> void:
 	if kind == "post":
 		_fall(dir)
+		return
+	if kind == "fence":
+		_fence_fall(dir)
+		return
+	if kind == "jersey":
+		_knock(dir)
+		return
+	if kind == "sandbags":
+		_bags(dir)
 		return
 	_intact.visible = false
 	var scene := get_tree().current_scene
