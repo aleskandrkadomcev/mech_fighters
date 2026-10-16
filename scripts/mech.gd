@@ -105,6 +105,19 @@ var _barrier_hit := 0.0
 var _barrier: MeshInstance3D
 var _barrier_mat: ShaderMaterial
 var blink_left := 0.0           # блинк: сколько ещё стоять до прыжка
+var root_left := 0.0            # обездвижен (связка): ноги не ходят, корпус крутится, стреляет
+var _root_total := 1.0
+var disarm_left := 0.0          # обезоружен (глушащий дротик): не стреляет, абилки и ходьба есть
+var _disarm_total := 1.0
+var stance_on := false          # оборонительная позиция: стоит, стреляет, урон меньше
+var _stance_i := -1
+var _pull := Vector3.ZERO       # притяжение гравитационного якоря за этот тик (не копится в скорости)
+var _jump_up := 0.0             # прыжок: сколько ещё взлетать (потом падает на точку, как при высадке)
+var _jump_i := -1
+var _jump_dest := Vector3.ZERO
+var _jump_land := false         # текущее приземление — после прыжка: удар вместо защиты
+const JUMP_UP := 0.35           # секунд взлёта на двигателях до ухода из кадра
+const PROBE_ARC := 6.0          # на сколько единиц зонд в полёте выше точки броска (перелетает стены)
 var _blink_dest := Vector3.ZERO
 var _blink_marker: Node3D
 var _repair_fx: CPUParticles3D
@@ -243,6 +256,9 @@ func _apply_build() -> void:
 		_barrier.position = Vector3(0, 2.1 * stats["legs_scale"], 0)
 	if _barrier_i >= abilities.size() or (_barrier_i >= 0 and abilities[_barrier_i]["type"] != "shield"):
 		_set_barrier(false)
+	if _stance_i >= abilities.size() or (_stance_i >= 0 and abilities[_stance_i]["type"] != "stance"):
+		stance_on = false
+		_stance_i = -1
 	hp = minf(hp, max_hp())
 	build_changed.emit()
 
@@ -432,6 +448,10 @@ func is_cloaked() -> bool:
 func control_info() -> Array:
 	if stun_left > 0.0:
 		return ["Оглушён", stun_left / maxf(_stun_total, 0.01)]
+	if disarm_left > 0.0:
+		return ["Обезоружен", disarm_left / maxf(_disarm_total, 0.01)]
+	if root_left > 0.0:
+		return ["Обездвижен", root_left / maxf(_root_total, 0.01)]
 	if no_regen_left > 0.0:
 		return ["ЭМИ", no_regen_left / maxf(_no_regen_total, 0.01)]
 	if slow_left > 0.0:
@@ -447,6 +467,10 @@ func status_list() -> Array:
 		return out
 	if stun_left > 0.0:
 		out.append(["Оглушён", stun_left, false])
+	if disarm_left > 0.0:
+		out.append(["Обезоружен: не стреляет", disarm_left, false])
+	if root_left > 0.0:
+		out.append(["Обездвижен: не ходит", root_left, false])
 	if no_regen_left > 0.0:
 		out.append(["ЭМИ: энергия не растёт", no_regen_left, false])
 	if slow_left > 0.0:
@@ -465,6 +489,8 @@ func status_list() -> Array:
 		out.append(["Невидим", cloak_left, true])
 	if braced:
 		out.append(["Упор", -1.0, true])
+	if stance_on:
+		out.append(["Оборона −%d%% урона" % roundi(ability_param(_stance_i, "reduce") * 100.0), -1.0, true])
 	if _game_mult("damage") > 1.0:
 		out.append(["Арсенал: +урон", -1.0, true])
 	if _game_mult("regen") > 1.0:
@@ -483,6 +509,8 @@ func ability_active(index: int) -> float:
 			return 1.0 if barrier_on and _barrier_i == index else 0.0
 		"blink":
 			return blink_left
+		"stance":
+			return 1.0 if stance_on and _stance_i == index else 0.0
 	return 0.0
 
 
@@ -512,7 +540,7 @@ func w_range(i: int) -> float:
 
 
 func is_landing() -> bool:
-	return landing_left > 0.0
+	return landing_left > 0.0 or _jump_up > 0.0
 
 
 # сколько секунд осталось до готовности (таймер у курсора, когда жмёшь на перезарядке):
@@ -573,8 +601,10 @@ func can_cast(index: int) -> bool:
 	if index < 0 or index >= abilities.size():
 		return false
 	var type: String = abilities[index]["type"]
-	if type == "shield" and barrier_on:
-		return not dead and not is_stunned()     # выключить щит можно всегда
+	if (type == "shield" and barrier_on) or (type == "stance" and stance_on):
+		return not dead and not is_stunned()     # выключить щит и оборону можно всегда
+	if type in ["blink", "jump"] and (root_left > 0.0 or stance_on):
+		return false
 	if dead or is_stunned() or ability_cd[index] > 0.0 or energy < ability_cost(index):
 		return false
 	if ability_charges_max(index) > 0.0 and ability_charges[index] < 1.0:
@@ -613,6 +643,9 @@ func _physics_process(delta: float) -> void:
 	if _parts_version != Parts.version:
 		_apply_build()
 
+	if _jump_up > 0.0:
+		_update_jump_up(delta)
+		return
 	if is_landing():
 		_update_landing(delta)
 		return
@@ -621,6 +654,8 @@ func _physics_process(delta: float) -> void:
 	stun_left = maxf(stun_left - delta, 0.0)
 	shield_left = maxf(shield_left - delta, 0.0)
 	slow_left = maxf(slow_left - delta, 0.0)
+	root_left = maxf(root_left - delta, 0.0)
+	disarm_left = maxf(disarm_left - delta, 0.0)
 	dock_left = maxf(dock_left - delta, 0.0)
 	tp_cd = maxf(tp_cd - delta, 0.0)
 	_since_damage += delta
@@ -648,6 +683,15 @@ func _physics_process(delta: float) -> void:
 		for i in _ability_pressed.size():
 			_ability_pressed[i] = false
 
+	if root_left > 0.0 or stance_on:
+		# обездвижен или в обороне: ноги стоят, корпус крутится, стреляет
+		_move = Vector2.ZERO
+		_run = false
+		_dash_pressed = false
+	if disarm_left > 0.0:
+		_fire = false
+		_fire2 = false
+
 	if blink_left > 0.0:
 		# готовится к прыжку: стоит на месте
 		_move = Vector2.ZERO
@@ -671,7 +715,7 @@ func _physics_process(delta: float) -> void:
 		_snap_next = false
 		snap_interpolation(self)
 	_update_ability_fx(delta)
-	visual.braced = braced
+	visual.braced = braced or stance_on
 	if _bar != null:
 		_bar.set_ratio(hp / maxf(max_hp(), 1.0))
 		var ctl := control_info()
@@ -759,6 +803,8 @@ func take_damage(amount: float, pos: Vector3, _dir: Vector3, kind := "", src: No
 	var plate: float = stats.get("armor_flat", 0.0)
 	if plate > 0.0 and kind != "beam":
 		amount = maxf(amount - plate, amount * 0.3)
+	if stance_on:
+		amount *= 1.0 - clampf(ability_param(_stance_i, "reduce"), 0.0, 0.95)
 	_since_damage = 0.0
 	if src != null and is_instance_valid(src) and src != self:
 		last_attacker = src
@@ -781,7 +827,7 @@ func take_damage(amount: float, pos: Vector3, _dir: Vector3, kind := "", src: No
 func stun(seconds: float) -> void:
 	if dead or shield_left > 0.0:
 		return
-	seconds *= 1.0 - stats.get("resist_stun", 0.0)
+	seconds *= (1.0 - stats.get("resist_stun", 0.0)) * control_k()
 	if seconds > stun_left:
 		_stun_total = seconds
 	stun_left = maxf(stun_left, seconds)
@@ -872,10 +918,10 @@ func respawn(pos: Vector3, drop := true) -> void:
 #  ВЫСАДКА С НЕБА: мех падает быстро, у земли включает тормозные двигатели и мягко садится
 # ------------------------------------------------------------------
 
-func start_landing() -> void:
-	if Cfg.drop_time <= 0.05:
+func start_landing(time := -1.0) -> void:
+	if time < 0.0 and Cfg.drop_time <= 0.05:
 		return
-	_landing_total = Cfg.drop_time
+	_landing_total = Cfg.drop_time if time < 0.0 else maxf(time, 0.1)
 	landing_left = _landing_total
 	velocity = Vector3.ZERO
 	_col.set_deferred("disabled", true)
@@ -912,7 +958,11 @@ func _finish_landing() -> void:
 	_col.set_deferred("disabled", false)
 	hitbox.set_active(true)
 	_set_ghost(true)
-	shield_left = Cfg.spawn_shield
+	if _jump_land:
+		_jump_land = false
+		_jump_slam()
+	else:
+		shield_left = Cfg.spawn_shield
 	if _landing_marker != null and is_instance_valid(_landing_marker):
 		_landing_marker.queue_free()
 	_landing_marker = null
@@ -1041,9 +1091,50 @@ func _update_energy(delta: float) -> void:
 		run_locked = false
 
 
+# во сколько раз контроль (оглушение, ЭМИ, притяжение, толчок) сильнее обычного: базовая масса / масса меха
+# (F2 → «Контроль»). Мех вдвое тяжелее базового — вдвое слабее
+func control_k() -> float:
+	return clampf(Cfg.control_mass / maxf(stats.get("weight", Cfg.control_mass), 1.0), 0.2, 4.0)
+
+
+# связка: ноги не ходят (нет ходьбы, рывка, блинка, прыжка), корпус крутится, пушки стреляют
+func root(seconds: float) -> void:
+	if dead or shield_left > 0.0 or is_landing():
+		return
+	if seconds > root_left:
+		_root_total = seconds
+	root_left = maxf(root_left, seconds)
+	if blink_left > 0.0:
+		_cancel_blink()
+
+
+# глушащий дротик: пушки не стреляют, остальное можно
+func disarm(seconds: float) -> void:
+	if dead or shield_left > 0.0 or is_landing():
+		return
+	if seconds > disarm_left:
+		_disarm_total = seconds
+	disarm_left = maxf(disarm_left, seconds)
+
+
+# ЭМИ-снаряд сжигает энергию (тяжёлому меньше)
+func drain_energy(amount: float) -> void:
+	if dead or shield_left > 0.0 or is_landing():
+		return
+	energy = maxf(energy - amount * control_k(), 0.0)
+
+
+# гравитационный якорь тянет: скорость на этот тик (тяжёлого тянет слабее)
+func pull(v: Vector3) -> void:
+	if dead or is_landing() or shield_left > 0.0:
+		return
+	_pull += v * control_k()
+
+
 func block_regen(seconds: float) -> void:
 	if dead or shield_left > 0.0:
 		return
+	seconds *= control_k()
 	if seconds > no_regen_left:
 		_no_regen_total = seconds
 	no_regen_left = maxf(no_regen_left, seconds)
@@ -1112,10 +1203,23 @@ func _update_move(delta: float) -> void:
 		vy = -1.0
 	else:
 		vy -= 30.0 * delta
-	velocity = Vector3(hv.x + _ghost_push.x, vy, hv.z + _ghost_push.z)
+	var extra := _ghost_push + _pull
+	_pull = Vector3.ZERO
+	velocity = Vector3(hv.x + extra.x, vy, hv.z + extra.z)
 	_push_wrecks(wish * max_speed if dash_left <= 0.0 else hv, delta)
 	move_and_slide()
-	velocity -= _ghost_push         # отход в сторону не копится в скорости
+	# отход в сторону и притяжение не копятся в скорости. Если упёрлись (притянуло к стене), своя скорость
+	# только скользит вдоль преграды — иначе вычитание давало скорость от стены, и мех застывал
+	var after := velocity - extra
+	if extra.length() > 0.01 and get_slide_collision_count() > 0:
+		after = hv
+		for k in get_slide_collision_count():
+			var nrm := get_slide_collision(k).get_normal()
+			nrm.y = 0.0
+			if nrm.length() > 0.1 and after.dot(nrm) < 0.0:
+				after = after.slide(nrm.normalized())
+		after.y = velocity.y
+	velocity = after
 
 	# упор: стоит на месте достаточно долго
 	var real := Vector3(velocity.x, 0, velocity.z)
@@ -1157,10 +1261,11 @@ func _ram() -> void:
 		Sfx.play_at("cannon", global_position, -2.0, 0.1)
 
 
-# толчок со стороны (таран): скорость, которая гаснет сама
+# толчок со стороны (таран, ударная волна): скорость, которая гаснет сама. Тяжёлого толкает слабее
 func knock(v: Vector3) -> void:
 	if dead or is_landing() or shield_left > 0.0:
 		return
+	v *= control_k()
 	velocity.x += v.x
 	velocity.z += v.z
 
@@ -1635,6 +1740,11 @@ func _try_ability(index: int) -> void:
 	if type == "shield" and barrier_on:
 		_set_barrier(false)
 		return
+	if type == "stance" and stance_on:
+		_set_stance(false)
+		return
+	if type in ["blink", "jump"] and (root_left > 0.0 or stance_on):
+		return          # ноги связаны или стоит в обороне
 	if ability_cd[index] > 0.0 or (type == "rockets" and _salvo_left > 0) or (type == "blink" and blink_left > 0.0):
 		ability_denied.emit(index, "cooldown")
 		return
@@ -1648,7 +1758,7 @@ func _try_ability(index: int) -> void:
 		ability_charges[index] -= 1.0
 	if type != "cloak":
 		_break_cloak()
-	if type != "shield":
+	if type != "shield" and type != "stance":
 		ability_cd[index] = ability_cooldown_max(index)
 	var p: Dictionary = abilities[index]["params"]
 	match type:
@@ -1673,6 +1783,31 @@ func _try_ability(index: int) -> void:
 			_start_blink(index)
 		"mine":
 			_cast_mine(index)
+		"bolas":
+			_cast_shot(index, "bolas")
+		"jammer":
+			_cast_shot(index, "jam")
+		"napalm":
+			_throw(index, {"kind": "napalm", "radius": p["radius"], "duration": p["duration"],
+				"dps": p["dps"] * damage_mult(), "slow": p["slow"]})
+		"emp_shell":
+			_throw(index, {"kind": "emp", "radius": p["radius"], "stun": p.get("stun_time", 0.0),
+				"no_regen": p.get("no_regen_time", 0.0), "burn": p.get("burn", 0.0), "damage": p.get("damage", 0.0) * damage_mult()})
+		"probe":
+			_throw(index, {"kind": "probe", "params": p})
+		"gravity":
+			_throw(index, {"kind": "gravity", "radius": p["radius"], "duration": p["duration"], "push": p["push"]})
+		"barricade":
+			_cast_barricade(index)
+		"drone":
+			_cast_drone(index)
+		"jump":
+			_start_jump(index)
+		"stance":
+			_stance_i = index
+			_set_stance(true)
+		"repulse":
+			_cast_repulse(index)
 	ability_used.emit(index)
 
 
@@ -1753,6 +1888,11 @@ func _reset_ability_states() -> void:
 	repair_left = 0.0
 	_set_barrier(false)
 	_cancel_blink()
+	_set_stance(false)
+	root_left = 0.0
+	disarm_left = 0.0
+	_jump_up = 0.0
+	_jump_land = false
 
 
 func _break_cloak() -> void:
@@ -2031,3 +2171,166 @@ func _cast_airstrike(index: int) -> void:
 		rk.setup(start, target, who, marker, p)
 		who.get_tree().current_scene.add_child(rk)
 		Sfx.play_at("launch", start, -4.0, 0.05))
+
+
+# ------------------------------------------------------------------
+#  Абилки 17.10.2026: связка, дротик, снаряды навесом (напалм, ЭМИ, зонд, якорь), баррикада,
+#  ремонтный дрон, прыжок, оборона, ударная волна
+# ------------------------------------------------------------------
+
+# связка или глушащий дротик: летит прямо из корпуса в сторону прицела
+func _cast_shot(index: int, kind: String) -> void:
+	var p: Dictionary = abilities[index]["params"]
+	var point := _ability_point()
+	var dir := point - global_position
+	dir.y = 0
+	if dir.length() < 0.1:
+		dir = torso_forward()
+	var sh := Bolas.new()
+	sh.setup(global_position + Vector3.UP * get_hit_height() * 0.55 + dir.normalized() * get_hit_radius(), dir, self, kind, p)
+	get_tree().current_scene.add_child(sh)
+	Sfx.play_at("launch", global_position, -7.0, 0.1)
+
+
+# снаряд навесом в точку прицела (не дальше «Дальности»). Зонд — по дуге над стенами точно в точку
+func _throw(index: int, payload: Dictionary) -> void:
+	var p: Dictionary = abilities[index]["params"]
+	var point := _ability_point()
+	var flat := Vector3(point.x - global_position.x, 0, point.z - global_position.z)
+	var rng: float = p.get("range", 30.0)
+	if flat.length() > rng:
+		flat = flat.normalized() * rng
+	var target := Vector3(global_position.x + flat.x, 0.0, global_position.z + flat.z)
+	var from := global_position + Vector3.UP * get_hit_height() + torso_forward() * 0.5
+	var lob := Lob.new()
+	if payload["kind"] == "probe":
+		lob.setup(from, target, PROBE_ARC, self, payload)
+	else:
+		lob.setup_ballistic(from, Lob.aim_velocity(from, target, p.get("speed", 28.0)), self, payload)
+	get_tree().current_scene.add_child(lob)
+	Sfx.play_at("launch", global_position, -6.0, 0.1)
+
+
+# баррикада: перед мехом в сторону прицела, развёрнута поперёк
+func _cast_barricade(index: int) -> void:
+	var p: Dictionary = abilities[index]["params"]
+	var dir := _ability_point() - global_position
+	dir.y = 0
+	if dir.length() < 0.1:
+		dir = torso_forward()
+	dir = dir.normalized()
+	var b := Barricade.new()
+	b.team = team
+	b.owner_mech = self
+	b.hp_max = p.get("hp", 400.0)
+	b.life = p.get("duration", 25.0)
+	var pos := global_position + dir * (get_hit_radius() + float(p.get("range", 4.5)))
+	b.position = Vector3(pos.x, 0.0, pos.z)
+	b.rotation.y = atan2(dir.x, dir.z)
+	get_tree().current_scene.add_child(b)
+	b.reset_physics_interpolation()
+
+
+# ремонтный дрон: к союзнику под прицелом (ближе 6 единиц к прицелу и в «Дальности»), иначе к себе
+func _cast_drone(index: int) -> void:
+	var p: Dictionary = abilities[index]["params"]
+	var point := _ability_point()
+	var best: Node3D = self
+	var bd := 6.0
+	for m in get_tree().get_nodes_in_group("mechs"):
+		if m == self or m.dead or m.team != team or m.is_landing():
+			continue
+		var d := Vector2(m.global_position.x - point.x, m.global_position.z - point.z).length()
+		if d < bd and m.global_position.distance_to(global_position) <= p.get("range", 30.0):
+			best = m
+			bd = d
+	var dr := RepairDrone.new()
+	dr.owner_mech = self
+	dr.target = best
+	dr.p = p
+	get_tree().current_scene.add_child(dr)
+	dr.global_position = global_position + Vector3.UP * (get_hit_height() + 0.5)
+	dr.reset_physics_interpolation()
+
+
+# ударная волна: мех бьёт в землю, врагов вокруг отбрасывает (тяжёлых слабее) и чуть ранит
+func _cast_repulse(index: int) -> void:
+	var p: Dictionary = abilities[index]["params"]
+	var c := global_position
+	var r: float = p.get("radius", 8.0)
+	Fx.dust_ring(c, r)
+	Fx.dust_cloud(c, r * 0.35)
+	Fx.shake_at.emit(c, Cfg.shake_explosion * 0.5)
+	Sfx.play_at("boom", c, -4.0, 0.1)
+	var g = get_tree().current_scene
+	if g == null or not g.has_method("units"):
+		return
+	for u in g.units():
+		if u[2] == team:
+			continue
+		var d: Vector3 = u[1] - c
+		d.y = 0
+		if d.length() > r + float(u[3]):
+			continue
+		var dir := d.normalized() if d.length() > 0.1 else torso_forward()
+		var n = u[0]
+		n.knock(dir * float(p.get("push", 30.0)))
+		if p.get("damage", 0.0) > 0.0:
+			n.take_damage(p["damage"] * damage_mult(), n.global_position + Vector3.UP * 1.5, dir, "", self)
+
+
+# оборона: включается и выключается одной кнопкой; перезарядка — после выключения
+func _set_stance(on: bool) -> void:
+	if stance_on and not on and _stance_i >= 0 and _stance_i < ability_cd.size():
+		ability_cd[_stance_i] = ability_cooldown_max(_stance_i)
+	if on != stance_on:
+		Sfx.play_at("land", global_position, -8.0 if on else -12.0, 0.1)
+	stance_on = on
+
+
+# прыжок: двигатели уносят меха вверх за кадр (неуязвим), потом он падает на точку, как при высадке,
+# и бьёт при приземлении (_jump_slam)
+func _start_jump(index: int) -> void:
+	var p: Dictionary = abilities[index]["params"]
+	var to := _ability_point() - global_position
+	to.y = 0
+	if to.length() > p.get("range", 26.0):
+		to = to.normalized() * p.get("range", 26.0)
+	_jump_dest = _free_spot(global_position + to)
+	_jump_i = index
+	_jump_up = JUMP_UP
+	_cancel_blink()
+	dash_left = 0.0
+	velocity = Vector3.ZERO
+	_col.set_deferred("disabled", true)
+	hitbox.set_active(false)
+	if seen:
+		Fx.dust_ring(global_position, get_hit_radius() * 2.5)
+	Fx.shake_at.emit(global_position, Cfg.shake_explosion * 0.3)
+	Sfx.play_at("launch", global_position, -1.0, 0.05)
+
+
+func _update_jump_up(delta: float) -> void:
+	_jump_up = maxf(_jump_up - delta, 0.0)
+	var u := 1.0 - _jump_up / JUMP_UP
+	visual.visible = seen
+	visual.airborne = true
+	visual.set_jets(1.0 if seen else 0.0)
+	visual.update_visual(delta, global_position + Vector3.UP * Cfg.drop_height * u * u, Vector3.ZERO, legs_yaw, torso_yaw, true)
+	if _jump_up <= 0.0:
+		global_position = Vector3(_jump_dest.x, global_position.y, _jump_dest.z)
+		_snap_next = true
+		_jump_land = true
+		start_landing(ability_param(_jump_i, "delay") if _jump_i >= 0 and _jump_i < abilities.size() else 1.2)
+
+
+func _jump_slam() -> void:
+	if _jump_i < 0 or _jump_i >= abilities.size():
+		return
+	var p: Dictionary = abilities[_jump_i]["params"]
+	var c := global_position
+	Fx.blast(c, p.get("radius", 5.0), p.get("damage", 60.0) * damage_mult(), p.get("edge_damage", 0.4), team, self)
+	if seen:
+		Fx.dust_cloud(c, p.get("radius", 5.0) * 0.5)
+	Fx.shake_at.emit(c, Cfg.shake_explosion * 0.8)
+	Sfx.play_at("boom", c, -3.0, 0.1)

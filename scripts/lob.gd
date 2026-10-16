@@ -3,10 +3,11 @@ extends Node3D
 ## setup_ballistic (гранатомёт и турели): вылетает с постоянной скоростью и рвётся о то, во что врежется:
 ## стену (по её настоящей высоте — низкую может перелететь), меха, крипа, обломок или землю.
 ## Турели целятся по низкой дуге (aim_velocity): чем быстрее снаряд, тем прямее летит.
-## setup (сейчас не используется): летит по дуге заданной высоты в точку, ни обо что не цепляется.
+## setup (скан-зонд): летит по дуге заданной высоты в точку, ни обо что не цепляется — закинуть за стену.
 ## Баллистика настоящая: гравитация Cfg.gravity() (земная при масштабе Cfg.METERS_PER_UNIT),
 ## поэтому граната и снаряд падают как настоящие.
-## payload: kind "explosive" (урон по площади) или "emp" (урон + оглушение + энергия не растёт).
+## payload: kind "explosive" (урон по площади), "emp" (урон + оглушение + энергия не растёт + сжигание энергии),
+## "napalm" (горящее пятно), "probe" (скан-зонд), "gravity" (гравитационный якорь) — снаряды абилок меха.
 
 var team := 0
 var shooter: Node
@@ -97,6 +98,10 @@ func _ready() -> void:
 		# стены и скалы проверяем сами, по настоящему объёму (см. _cast)
 		for b in get_tree().get_nodes_in_group("solid_tops"):
 			_exclude.append(b.get_rid())
+		# свои баррикады свои гранаты перелетают
+		for b in get_tree().get_nodes_in_group("barricades"):
+			if b.team == team:
+				_exclude.append(b.get_rid())
 	var big: bool = _p.get("kind", "") == "explosive" and _p.get("radius", 4.0) > 5.0
 	var emp: bool = _p.get("kind", "") == "emp"
 	_body = MeshInstance3D.new()
@@ -107,6 +112,11 @@ func _ready() -> void:
 	sm.rings = 5
 	_body.mesh = sm
 	_body.material_override = _m("emp" if emp else ("big" if big else "gr"), Color(0.4, 0.75, 1.0) * 2.0 if emp else Color(0.2, 0.22, 0.2), emp)
+	match _p.get("kind", ""):
+		"napalm":
+			_body.material_override = _m("napalm", Color(0.45, 0.2, 0.08))
+		"gravity":
+			_body.material_override = _m("gravity", Color(0.6, 0.35, 1.0) * 1.6, true)
 	add_child(_body)
 	# огонёк сзади, чтобы граната читалась в полёте
 	var glow := MeshInstance3D.new()
@@ -275,14 +285,55 @@ func _land() -> void:
 				n.stun(_p.get("stun", 1.0))
 			if n.has_method("block_regen"):
 				n.block_regen(_p.get("no_regen", 2.0))
+			if _p.get("burn", 0.0) > 0.0 and n.has_method("drain_energy"):
+				n.drain_energy(_p["burn"])
 			if _p.get("damage", 0.0) > 0.0 and n.has_method("take_damage"):
 				n.take_damage(_p["damage"], n.global_position + Vector3.UP * 2.0, d.normalized(), "", src)
+	elif _p.get("kind", "") in ["napalm", "probe", "gravity"]:
+		_spawn_device(Vector3(_to.x, 0.0, _to.z), src)
 	else:
 		Fx.explosion(pos, radius)
 		Sfx.play_at("boom", pos, -3.0 if radius < 5.0 else 1.0, 0.1)
 		Fx.blast(pos, radius, _p.get("damage", 40.0), _p.get("edge_damage", 0.35), team, src)
 	if marker != null and is_instance_valid(marker):
 		marker.queue_free()
+	_drop_trail()
+	queue_free()
+
+
+# снаряд абилки долетел: горящее пятно, зонд или якорь на земле
+func _spawn_device(at: Vector3, src: Node) -> void:
+	var n: Node3D
+	match _p["kind"]:
+		"napalm":
+			var f := NapalmFire.new()
+			f.team = team
+			f.shooter = src
+			f.radius = _p.get("radius", 4.5)
+			f.life = _p.get("duration", 5.0)
+			f.dps = _p.get("dps", 16.0)
+			f.slow = _p.get("slow", 0.35)
+			n = f
+		"probe":
+			var pr := ScanProbe.new()
+			pr.team = team
+			pr.owner_mech = src
+			pr.p = _p.get("params", {})
+			n = pr
+		"gravity":
+			var gw := GravityWell.new()
+			gw.team = team
+			gw.shooter = src
+			gw.radius = _p.get("radius", 9.0)
+			gw.life = _p.get("duration", 2.5)
+			gw.push = _p.get("push", 6.0)
+			n = gw
+	n.position = at
+	get_tree().current_scene.add_child(n)
+	n.reset_physics_interpolation()
+
+
+func _drop_trail() -> void:
 	if _trail != null:
 		var gp := _trail.global_position
 		remove_child(_trail)

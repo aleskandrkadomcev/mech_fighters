@@ -50,6 +50,7 @@ var _lobtest := false            # --lobtest: ЭМИ и осадное оруд�
 var _spawntest := false         # --spawntest --drop --enemies=0 --allies=1: мех садится прямо на другого — никто не подпрыгивает
 var _proptest := false           # --proptest: кучка ящиков не мешает пройти, ломается от меха и от взрыва
 var _pingtest := false           # --pingtest: Alt+клик — обычная метка, Alt + зажатая ЛКМ — круговое меню, выбор по направлению мыши
+var _abil2test := false         # --abil2test: абилки 17.10.2026 по очереди (связка, дротик, ЭМИ, напалм, зонд, баррикада, дрон, оборона, якорь, волна, прыжок)
 var _dashtest := false           # --dashtest: рывок разгоняется за «Разгон рывка», а не мгновенно; дальность как без разгона
 var _statustest := false         # --statustest: шкала контроля над полоской (оглушение → ЭМИ → замедление) и статусы своего меха
 var _cdtest := false             # --cdtest: нажал рывок на перезарядке — у курсора таймер «2,35», тает за 1 с
@@ -183,6 +184,8 @@ func setup(main_node: Node3D, args: PackedStringArray) -> void:
 			_statustest = true
 		elif a == "--dashtest":
 			_dashtest = true
+		elif a == "--abil2test":
+			_abil2test = true
 		elif a == "--pingtest":
 			_pingtest = true
 		elif a == "--ruintest":
@@ -283,6 +286,8 @@ func _process(_delta: float) -> void:
 		_run_statustest()
 	if _dashtest:
 		_run_dashtest()
+	if _abil2test:
+		_run_abil2test()
 	if _pingtest:
 		_run_pingtest()
 	if _ruintest:
@@ -364,7 +369,7 @@ func _process(_delta: float) -> void:
 		var img := get_viewport().get_texture().get_image()
 		img.save_png(("%s/%s_f%04d.png" % [_shot_dir, _target, shot_f]) if _fxreel else ("%s/f%04d.png" % [_shot_dir, shot_f]))
 		_shots_left.erase(shot_f)
-		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and not _linktest and _mechexport == "" and not _gfxbench and not _cpubench and not _fancheck and not _aimtest and not _creeptest and not _radartest and not _ruintest and not _coredmg and not _slidetest and not _lobtest and not _spawntest and not _proptest and not _cdtest and not _statustest and not _dashtest and not _pingtest:
+		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and not _linktest and _mechexport == "" and not _gfxbench and not _cpubench and not _fancheck and not _aimtest and not _creeptest and not _radartest and not _ruintest and not _coredmg and not _slidetest and not _lobtest and not _spawntest and not _proptest and not _cdtest and not _statustest and not _dashtest and not _pingtest and not _abil2test:
 			get_tree().quit()
 
 
@@ -3671,3 +3676,141 @@ func _run_pingtest() -> void:
 	if _frame >= 280 and _shots_left.is_empty():
 		print("[PING] итог: %s" % ("ВСЁ ВЕРНО" if fails == 0 else "ошибок %d" % fails))
 		get_tree().quit()
+
+
+# ------------------------------------------------------------------
+#  Абилки 17.10.2026 (--abil2test --enemies=0 --allies=0): свой мех (Крепость) по очереди бьёт
+#  стоящего врага связкой, дротиком, ЭМИ-снарядом, напалмом; ставит зонд и баррикаду; потом дрон
+#  чинит себя, оборона режет урон, якорь тянет врага, волна отбрасывает, прыжок бьёт при приземлении
+# ------------------------------------------------------------------
+
+func _abil2_cast(m, type: String, at: Vector3) -> void:
+	m.energy = m.energy_max()
+	var i: int = m.ability_index(type)
+	m.ability_cd[i] = 0.0
+	m.ability_aim_override = at
+	m._try_ability(i)
+
+
+func _abil2_check(name: String, ok: bool, info := "") -> void:
+	if not ok:
+		set_meta("fails", int(get_meta("fails", 0)) + 1)
+	print("[ABIL2] f=%d %s: %s %s" % [_frame, name, "ВЕРНО" if ok else "ОШИБКА", info])
+
+
+func _abil2_put(e, pos: Vector3) -> void:
+	e.global_position = pos
+	e.velocity = Vector3.ZERO
+	e.snap_interpolation(e)
+
+
+func _run_abil2test() -> void:
+	var m = main.mech
+	var spot := Vector3(-46, 0.05, -30)
+	if _frame == 5:
+		Cfg.creeps_enabled = 0
+		Cfg.bot_enemies = 1
+		Cfg.cam_distance = 40.0
+		m.set_build({"mech": "mech_fortress", "core": "core_combat", "weapons": ["autocannon", "autocannon"],
+			"modules": ["mod_bolas", "mod_jammer", "mod_emp_shell", "mod_napalm", "mod_probe", "mod_barricade"]})
+		m.shield_left = 0.0
+		m.global_position = spot
+		m.snap_interpolation(m)
+		m.demo = {"move": Vector2.ZERO, "fire": false, "aim": spot + Vector3(14, 1.5, 0)}
+		main.cam._started = false
+		var e = _stage_mech(main._spawn_bot(1), "mech_assault", ["autocannon", "laser"], spot + Vector3(14, 0.05, 0))
+		e.demo["fire"] = false
+		e.demo["aim"] = spot
+		set_meta("enemy", e)
+		for s in get_tree().get_nodes_in_group("structures"):
+			s.set_physics_process(false)      # турели не добивают врага-мишень
+	if _frame < 20:
+		return
+	var e = get_meta("enemy")
+	match _frame:
+		20:
+			print("[ABIL2] масса: свой %.0f т (контроль ×%.2f), враг %.0f т (×%.2f), база %.0f т" % [m.stats["weight"], m.control_k(), e.stats["weight"], e.control_k(), Cfg.control_mass])
+			_abil2_cast(m, "bolas", e.global_position)
+		60:
+			_abil2_check("связка обездвижила", e.root_left > 0.0, "осталось %.2f с" % e.root_left)
+		70:
+			_abil2_cast(m, "jammer", e.global_position)
+		110:
+			_abil2_check("дротик обезоружил", e.disarm_left > 0.0, "осталось %.2f с, шкала «%s»" % [e.disarm_left, e.control_info()[0]])
+		130:
+			e.energy = e.energy_max()
+			set_meta("en", e.energy)
+			_abil2_cast(m, "emp_shell", e.global_position)
+		200:
+			_abil2_check("ЭМИ-снаряд сжёг энергию", e.energy < float(get_meta("en")) - 10.0 and e.no_regen_left > 0.0, "%.0f → %.0f" % [float(get_meta("en")), e.energy])
+		210:
+			set_meta("hp", e.hp)
+			_abil2_cast(m, "napalm", e.global_position)
+		320:
+			_abil2_check("напалм жжёт и замедляет", e.hp < float(get_meta("hp")) - 5.0 and e.slow_left > 0.0, "HP %.0f → %.0f" % [float(get_meta("hp")), e.hp])
+		330:
+			_abil2_cast(m, "probe", spot + Vector3(26, 0, 12))
+		560:
+			var prs := get_tree().get_nodes_in_group("probes")
+			var ok := prs.size() == 1
+			if ok:
+				var pr = prs[0]
+				ok = pr.seen and not main.vision.is_visible_to(1, pr)
+				var view := false
+				for v in main.vision._viewers(0):
+					view = view or v["node"] == pr
+				ok = ok and view
+				_abil2_check("зонд стоит, даёт обзор, врагу не виден", ok, "в %.1f м от цели" % Vector2(pr.global_position.x - spot.x - 26, pr.global_position.z - spot.z - 12).length())
+			else:
+				_abil2_check("зонд стоит", false, "зондов %d" % prs.size())
+		570:
+			_abil2_cast(m, "barricade", e.global_position)
+		600:
+			var bs := get_tree().get_nodes_in_group("barricades")
+			var ok2: bool = bs.size() == 1 and bs[0].collision_layer == 16 and not main.nav.is_free(bs[0].global_position)
+			_abil2_check("баррикада стоит, твёрдая, боты обходят", ok2, "")
+		610:
+			m.set_build({"mech": "mech_fortress", "core": "core_combat", "weapons": ["autocannon", "autocannon"],
+				"modules": ["mod_drone", "mod_jump", "mod_stance", "mod_gravity", "mod_repulse"]})
+			m.hp = m.max_hp() * 0.5
+			set_meta("hp", m.hp)
+			_abil2_cast(m, "drone", m.global_position)
+		760:
+			_abil2_check("дрон чинит", m.hp > float(get_meta("hp")) + 50.0, "HP %.0f → %.0f" % [float(get_meta("hp")), m.hp])
+		770:
+			_abil2_cast(m, "stance", m.global_position)
+		780:
+			var h0: float = m.hp
+			m.take_damage(100.0, m.global_position, Vector3.ZERO, "", e)
+			_abil2_check("оборона режет урон", m.stance_on and absf(h0 - m.hp - 40.0) < 1.0, "100 урона → %.0f" % (h0 - m.hp))
+			_abil2_cast(m, "stance", m.global_position)
+			_abil2_check("оборона выключается", not m.stance_on and m.ability_cd[m.ability_index("stance")] > 0.0, "")
+		790:
+			for b in get_tree().get_nodes_in_group("barricades"):
+				b._break()
+		800:
+			_abil2_put(e, spot + Vector3(14, 0.05, 0))
+			_abil2_cast(m, "gravity", spot + Vector3(6, 0, 0))
+		1000:
+			var d := Vector2(e.global_position.x - spot.x - 6, e.global_position.z - spot.z).length()
+			_abil2_check("якорь притянул", d < 6.0, "от якоря %.1f (было 8)" % d)
+		1004:
+			_abil2_put(e, spot + Vector3(5, 0.05, 0))
+		1010:
+			_abil2_cast(m, "repulse", m.global_position)
+		1012:
+			# сразу после удара: скорость от меха (дальше враг тут упирается в стену карты)
+			_abil2_check("волна отбросила", e.velocity.x > 20.0, "скорость %.0f ед/с от меха (база 30 × контроль %.2f)" % [e.velocity.x, e.control_k()])
+		1060:
+			_abil2_put(e, spot + Vector3(24, 0.05, -10))
+			set_meta("hp", e.hp)
+			_abil2_cast(m, "jump", spot + Vector3(22, 0, -10))
+		1080:
+			_abil2_check("в прыжке неуязвим", m.is_landing(), "")
+		1200:
+			var d3 := Vector2(m.global_position.x - spot.x - 22, m.global_position.z - spot.z + 10).length()
+			_abil2_check("прыжок: приземлился и ударил", d3 < 4.0 and not m.is_landing() and e.hp < float(get_meta("hp")) - 10.0, "от точки %.1f, урон %.0f" % [d3, float(get_meta("hp")) - e.hp])
+		1220:
+			var f: int = get_meta("fails", 0)
+			print("[ABIL2] итог: %s" % ("ВСЁ ВЕРНО" if f == 0 else "ошибок %d" % f))
+			get_tree().quit()

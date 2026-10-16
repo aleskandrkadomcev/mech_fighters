@@ -167,6 +167,34 @@ const DATA := {
 		"delay": 0.5, "damage": 60.0, "radius": 6.0, "edge_damage": 0.5, "slow": 0.3, "slow_time": 4.0},
 	"mod_blink": {"slot": "module", "ability": "blink", "name": "Телепорт", "short": "Блинк",
 		"weight": 3.0, "energy": 10.0, "cost": 25.0, "cooldown": 9.0, "range": 14.0, "delay": 1.0},
+	# абилки 17.10.2026 (разбор с Саней): у каждой есть носитель — снаряд, граната или устройство
+	"mod_bolas": {"slot": "module", "ability": "bolas", "name": "Метатель связки", "short": "Связка",
+		"weight": 3.0, "energy": 5.0, "cost": 25.0, "cooldown": 12.0, "speed": 34.0, "range": 30.0, "duration": 2.0},
+	"mod_jammer": {"slot": "module", "ability": "jammer", "name": "Глушащий дротик", "short": "Глушилка",
+		"weight": 3.0, "energy": 5.0, "cost": 25.0, "cooldown": 14.0, "speed": 40.0, "range": 30.0, "duration": 2.0},
+	"mod_napalm": {"slot": "module", "ability": "napalm", "name": "Напалм-мортирка", "short": "Напалм",
+		"weight": 4.0, "energy": 5.0, "cost": 30.0, "cooldown": 14.0, "speed": 28.0, "range": 32.0, "radius": 4.5,
+		"duration": 5.0, "dps": 16.0, "slow": 0.35},
+	"mod_emp_shell": {"slot": "module", "ability": "emp_shell", "name": "ЭМИ-мортирка", "short": "ЭМИ-снаряд",
+		"weight": 4.0, "energy": 5.0, "cost": 30.0, "cooldown": 12.0, "speed": 30.0, "range": 34.0, "radius": 5.0,
+		"burn": 60.0, "no_regen_time": 3.0, "stun_time": 0.0, "damage": 0.0},
+	"mod_probe": {"slot": "module", "ability": "probe", "name": "Скан-зонд", "short": "Зонд",
+		"weight": 2.0, "energy": 5.0, "cost": 20.0, "cooldown": 8.0, "charges": 2, "speed": 26.0, "range": 30.0,
+		"radius": 22.0, "omni": 6.0, "duration": 60.0, "hp": 50.0},
+	"mod_barricade": {"slot": "module", "ability": "barricade", "name": "Раскладная баррикада", "short": "Баррикада",
+		"weight": 5.0, "energy": 5.0, "cost": 25.0, "cooldown": 16.0, "range": 4.5, "hp": 400.0, "duration": 25.0},
+	"mod_drone": {"slot": "module", "ability": "drone", "name": "Ремонтный дрон", "short": "Дрон",
+		"weight": 3.0, "energy": 10.0, "cost": 30.0, "cooldown": 18.0, "range": 30.0, "duration": 6.0, "heal_per_sec": 25.0},
+	"mod_jump": {"slot": "module", "ability": "jump", "name": "Прыжковые двигатели", "short": "Прыжок",
+		"weight": 5.0, "energy": 10.0, "cost": 35.0, "cooldown": 14.0, "range": 26.0, "delay": 1.2,
+		"damage": 60.0, "radius": 5.0, "edge_damage": 0.4},
+	"mod_stance": {"slot": "module", "ability": "stance", "name": "Оборонительная позиция", "short": "Оборона",
+		"weight": 4.0, "energy": 5.0, "cost": 10.0, "cooldown": 3.0, "reduce": 0.6},
+	"mod_gravity": {"slot": "module", "ability": "gravity", "name": "Гравитационный якорь", "short": "Гравитация",
+		"weight": 4.0, "energy": 10.0, "cost": 35.0, "cooldown": 16.0, "speed": 26.0, "range": 30.0, "radius": 9.0,
+		"duration": 2.5, "push": 6.0},
+	"mod_repulse": {"slot": "module", "ability": "repulse", "name": "Ударная волна", "short": "Толчок",
+		"weight": 4.0, "energy": 10.0, "cost": 30.0, "cooldown": 10.0, "radius": 8.0, "push": 30.0, "damage": 10.0},
 
 	# ---------------- ПОСТРОЙКИ (не для ангара: турели и штаб на карте) ----------------
 	"turret_t1": {"slot": "structure", "name": "Турель 1 уровня (у центра)",
@@ -300,6 +328,9 @@ const FIELDS := {
 	"energy_per_damage": ["Энергии за 1 урона", 0, 5, 0.05, "сколько энергии сжигает каждая единица урона, которую принял щит"],
 	"absorb": ["Поглощение", 0, 1, 0.05, "доля урона, которую берёт щит; остальное проходит в броню"],
 	"no_regen_time": ["Без восстановления энергии", 0, 10, 0.1, "секунд, сколько у задетых врагов не восстанавливается энергия"],
+	"burn": ["Сжигает энергию", 0, 300, 1, "энергии у каждого задетого врага (меха базовой массы, см. «Контроль»)"],
+	"push": ["Сила", 0, 80, 0.5, "м/с: как быстро тянет или толкает меха базовой массы; тяжелее — слабее"],
+	"reduce": ["Снижение урона", 0, 0.95, 0.05, "доля урона, которую режет, пока включено"],
 	"emp_cooldown": ["ЭМИ-граната: перезарядка", 1, 30, 0.5, "секунд"],
 	"emp_range": ["ЭМИ-граната: дальность", 5, 80, 1, "метров"],
 	"emp_radius": ["ЭМИ-граната: радиус", 1, 15, 0.5, "метров"],
@@ -343,7 +374,7 @@ const WEAPON_STATS := ["ammo", "fire_rate", "damage", "bullet_speed", "range", "
 	"radius", "edge_damage", "charge_time", "pierce", "spin_up"]
 const ABILITY_STATS := ["cost", "cooldown", "count", "salvo_delay", "speed", "range", "damage", "radius",
 	"edge_damage", "scatter", "stun_time", "no_regen_time",
-	"duration", "break_on_fire", "charges", "trigger_radius", "arm_time", "slow", "slow_time", "heal_per_sec", "delay", "upkeep", "energy_per_damage", "absorb"]
+	"duration", "break_on_fire", "charges", "trigger_radius", "arm_time", "slow", "slow_time", "heal_per_sec", "delay", "upkeep", "energy_per_damage", "absorb", "dps", "burn", "push", "reduce", "omni", "hp"]
 # значения, если у меха такого числа нет
 const MECH_DEFAULTS := {"dash_charges": 1.0, "moving_spread": 1.0, "energy_regen_mult": 1.0, "cd_mult": 1.0, "brace_time": 0.6,
 	"regen_delay": 4.0, "legs_scale": 1.0, "hull_scale": 1.0, "stance": 1.0}
@@ -599,7 +630,29 @@ func describe(id: String) -> String:
 					out.append("%s урона, радиус %s м, замедление %s на %s с" % [_n(v(id, "damage")), _m(v(id, "radius")), _pct(v(id, "slow")).trim_prefix("+"), _n(v(id, "slow_time"))])
 				"blink":
 					out.append("прыжок до %s м через %s с (стоишь)" % [_m(v(id, "range")), _n(v(id, "delay"))])
-			if d.get("ability", "") == "shield":
+				"bolas":
+					out.append("связка: обездвиживает %s с, до %s м" % [_n(v(id, "duration")), _m(v(id, "range"))])
+				"jammer":
+					out.append("дротик: не стреляет %s с, до %s м" % [_n(v(id, "duration")), _m(v(id, "range"))])
+				"napalm":
+					out.append("огонь %s урона/с %s с, замедление %s, радиус %s м" % [_n(v(id, "dps")), _n(v(id, "duration")), _pct(v(id, "slow")).trim_prefix("+"), _m(v(id, "radius"))])
+				"emp_shell":
+					out.append("сжигает %s эн., энергия не растёт %s с, радиус %s м" % [_n(v(id, "burn")), _n(v(id, "no_regen_time")), _m(v(id, "radius"))])
+				"probe":
+					out.append("обзор %s м на %s с, врагу виден вблизи" % [_m(v(id, "radius")), _n(v(id, "duration"))])
+				"barricade":
+					out.append("стенка %s HP на %s с" % [_n(v(id, "hp")), _n(v(id, "duration"))])
+				"drone":
+					out.append("чинит союзника +%s HP за %s с" % [_n(v(id, "heal_per_sec") * v(id, "duration")), _n(v(id, "duration"))])
+				"jump":
+					out.append("прыжок до %s м, удар %s урона, радиус %s м" % [_m(v(id, "range")), _n(v(id, "damage")), _m(v(id, "radius"))])
+				"stance":
+					out.append("стоит и стреляет, урон %s" % _pct(-v(id, "reduce")))
+				"gravity":
+					out.append("тянет врагов %s с, радиус %s м" % [_n(v(id, "duration")), _m(v(id, "radius"))])
+				"repulse":
+					out.append("отбрасывает врагов, радиус %s м" % _m(v(id, "radius")))
+			if d.get("ability", "") in ["shield", "stance"]:
 				out.append("вкл. %s эн., кд %s с после выкл." % [_n(v(id, "cost")), _n(v(id, "cooldown"))])
 			elif d.has("ability"):
 				out.append("%s эн., кд %s с" % [_n(v(id, "cost")), _n(v(id, "cooldown"))])

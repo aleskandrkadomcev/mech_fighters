@@ -875,7 +875,15 @@ func _nav_boxes() -> Array:
 	for w in walls:
 		if not w.is_destroyed():
 			out.append(w.box())
+	for b in get_tree().get_nodes_in_group("barricades"):
+		out.append(b.box())
 	return out + _static_boxes
+
+
+# баррикаду поставили или сломали: пересчитать проходимость вокруг неё
+func obstacle_changed(area: Rect2) -> void:
+	if nav != null:
+		nav.refresh(area, _nav_boxes())
 
 
 func structures_left(team: int) -> int:
