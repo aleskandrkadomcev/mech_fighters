@@ -1451,16 +1451,20 @@ func _fire_rail(i: int, w: Dictionary) -> void:
 		var from := origin
 		var dmg: float = w["damage"] * damage_mult()
 		for step in 10:
-			var q := PhysicsRayQueryParameters3D.create(from, end, 1 | 4 | 16)
+			var q := PhysicsRayQueryParameters3D.create(from, end, 1 | 4 | 16 | 128)
 			q.collide_with_areas = true
 			q.exclude = ex
 			var hit := space.intersect_ray(q)
 			if hit.is_empty():
 				break
 			var col = hit["collider"]
+			if col is Area3D and col.has_meta("prop"):      # мелочь: ломает и летит дальше
+				col.get_meta("prop").bullet_hit(dir, self)
+				ex.append(hit["rid"])
+				continue
 			if col != null and col.has_method("take_damage"):
 				col.take_damage(dmg, hit["position"], dir, "", self)
-			Fx.spark(hit["position"], hit["normal"], col is Area3D)
+			Fx.impact(hit["position"], hit["normal"], "armor" if col is Area3D else ("ground" if hit["normal"].y > 0.6 else "concrete"), dmg)
 			# насквозь только через мехов и крипов (хитбоксы); стена или обломок останавливают
 			if col is Area3D and w["pierce"] > 0.5:
 				ex.append(hit["rid"])
@@ -1499,10 +1503,18 @@ func _update_beam(i: int, w: Dictionary, delta: float, pressed: bool) -> void:
 		if _beam_ex_t <= 0.0:
 			_beam_ex_t = 0.5
 			_beam_exclude = Fx.team_rids(team)
-		var q := PhysicsRayQueryParameters3D.create(origin, end, 1 | 4 | 16)
+		var q := PhysicsRayQueryParameters3D.create(origin, end, 1 | 4 | 16 | 128)
 		q.collide_with_areas = true
-		q.exclude = _beam_exclude
+		var ex_l: Array[RID] = _beam_exclude.duplicate()
+		q.exclude = ex_l
 		var hit := get_world_3d().direct_space_state.intersect_ray(q)
+		for _guard in 4:      # мелочь луч режет и идёт дальше
+			if hit.is_empty() or not (hit["collider"] is Area3D and hit["collider"].has_meta("prop")):
+				break
+			hit["collider"].get_meta("prop").bullet_hit(dir, self)
+			ex_l.append(hit["rid"])
+			q.exclude = ex_l
+			hit = get_world_3d().direct_space_state.intersect_ray(q)
 		if not hit.is_empty():
 			end = hit["position"]
 			normal = hit["normal"]

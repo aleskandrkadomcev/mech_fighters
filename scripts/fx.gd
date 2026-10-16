@@ -114,24 +114,67 @@ func _mesh_node(mesh: Mesh, mat: Material, pos: Vector3) -> MeshInstance3D:
 # ------------------------------------------------------------------
 
 func spark(pos: Vector3, normal: Vector3, on_target: bool, sound := true) -> void:
+	impact(pos, normal, "armor" if on_target else ("ground" if normal.y > 0.6 else "concrete"), 15.0, sound)
+
+
+# попадание по виду поверхности и силе (урон выстрела): броня — искры и вспышка, у крупного калибра
+# ещё отлетают кусочки металла, звезда и дымок; бетон — серая пыль и крошка; земля — фонтанчик земли
+# с комьями, без искр. Слабые выстрелы (дробь, Гатлинг) — мелко, тяжёлые — крупно
+func impact(pos: Vector3, normal: Vector3, surface: String, power: float, sound := true) -> void:
 	var scene := get_tree().current_scene
 	if scene == null:
 		return
-	if on_target:
-		# броня: веер оранжевых искр и короткая вспышка
-		_streaks(pos, normal, 9, Color(1.0, 0.62, 0.22), 6.0, 15.0, 0.28, 60.0, 0.75)
-		_flare(pos, "circle_05", 1.6, Color(1.0, 0.55, 0.2, 1.0), 0.09)
-		light_flash(pos, Color(1.0, 0.6, 0.25), 4.5, 2.0, 0.06)
-	else:
-		# земля или стена: пара искр и облачко пыли (бурой с земли, серой со стены)
-		var ground := normal.y > 0.6
-		_streaks(pos, normal, 4, Color(1.0, 0.7, 0.35), 4.0, 10.0, 0.2, 55.0, 0.5)
-		_emit(pos + normal * 0.2, _quad(), _sprite_mat("smoke_07"), 3, 0.8, {"dir": normal, "spread": 40.0,
-			"v0": 0.8, "v1": 2.2, "damp": 1.5, "g": Vector3(0, -0.4 if ground else 0.3, 0), "s0": 0.6, "s1": 1.1,
-			"grow": [0.5, 1.6], "spin": 40.0, "ramp": _dust_ramp(Color(0.42, 0.34, 0.25) if ground else Color(0.55, 0.53, 0.5))})
-		_flare(pos, "circle_05", 0.7, Color(1.0, 0.6, 0.3, 1.0), 0.06)
+	var k := clampf(power / 25.0, 0.45, 2.2)          # 25 урона — обычный снаряд автопушки с усилением
+	var n := normal.normalized() if normal.length() > 0.01 else Vector3.UP
+	match surface:
+		"armor":
+			_streaks(pos, n, int(6 + 6 * k), Color(1.0, 0.62, 0.22), 5.0 + 3.0 * k, 12.0 + 6.0 * k, 0.22 + 0.1 * k, 60.0, 0.55 + 0.25 * k)
+			_flare(pos, "circle_05", 1.0 + 0.9 * k, Color(1.0, 0.55, 0.2, 1.0), 0.07 + 0.03 * k)
+			light_flash(pos, Color(1.0, 0.6, 0.25), 3.5 + 2.0 * k, 1.5 + 1.2 * k, 0.06)
+			if k > 1.0:
+				_flare(pos, "star_07", 1.2 * k, Color(1.0, 0.85, 0.6, 1.0), 0.06)
+				_emit(pos, _chunk(), _chunk_tint("metal", Color(0.12, 0.12, 0.13)), int(3 * k), 0.7, {"dir": n, "spread": 70.0,
+					"v0": 4.0, "v1": 9.0, "g": Vector3(0, -22, 0), "s0": 0.5, "s1": 0.9, "spin": 500.0})
+				_emit(pos + n * 0.2, _quad(), _sprite_mat("smoke_04"), 2, 1.0, {"dir": n, "spread": 30.0, "v0": 0.6, "v1": 1.4,
+					"damp": 1.0, "g": Vector3(0, 0.8, 0), "s0": 0.5 * k, "s1": 0.8 * k, "grow": [0.6, 1.6], "spin": 30.0, "ramp": _smoke_ramp2()})
+		"concrete":
+			_streaks(pos, n, int(2 + 2 * k), Color(1.0, 0.7, 0.35), 4.0, 9.0, 0.18, 55.0, 0.45)
+			_emit(pos + n * 0.2, _quad(), _sprite_mat("smoke_04"), int(3 + 2 * k), 1.0, {"dir": n, "spread": 45.0,
+				"v0": 1.0, "v1": 2.5 + k, "damp": 1.6, "g": Vector3(0, -0.3, 0), "s0": 0.5 + 0.3 * k, "s1": 0.9 + 0.5 * k,
+				"grow": [0.5, 1.8], "spin": 40.0, "ramp": _impact_dust(Color(0.6, 0.58, 0.54))})
+			_emit(pos, _chunk(), _chunk_tint("concrete", Color(0.5, 0.49, 0.46)), int(2 + 3 * k), 0.8, {"dir": n, "spread": 60.0,
+				"v0": 3.0, "v1": 6.0 + 2.0 * k, "g": Vector3(0, -22, 0), "s0": 0.6, "s1": 1.0 + 0.4 * k, "spin": 400.0})
+			_flare(pos, "circle_05", 0.6 + 0.3 * k, Color(1.0, 0.6, 0.3, 1.0), 0.05)
+		_:
+			# земля: фонтанчик пыли и комья земли вверх
+			_emit(pos + Vector3.UP * 0.1, _quad(), _sprite_mat("smoke_04"), int(3 + 2 * k), 1.1, {"dir": Vector3.UP, "spread": 25.0,
+				"v0": 1.5, "v1": 3.0 + 1.5 * k, "damp": 1.8, "g": Vector3(0, -1.5, 0), "s0": 0.5 + 0.3 * k, "s1": 0.9 + 0.5 * k,
+				"grow": [0.5, 1.7], "spin": 30.0, "ramp": _impact_dust(Color(0.42, 0.34, 0.25))})
+			_emit(pos, _chunk(), _chunk_tint("dirt", Color(0.2, 0.15, 0.1)), int(3 + 3 * k), 0.7, {"dir": Vector3.UP, "spread": 35.0,
+				"v0": 3.0, "v1": 6.0 + 2.0 * k, "g": Vector3(0, -22, 0), "s0": 0.6, "s1": 1.0 + 0.4 * k, "spin": 300.0})
 	if sound:
-		Sfx.play_at("hit" if on_target else "wall", pos, -6.0 if on_target else -14.0, 0.12)
+		var armor := surface == "armor"
+		Sfx.play_at("hit" if armor else "wall", pos, (-6.0 if armor else -14.0) + clampf((k - 1.0) * 4.0, -4.0, 4.0), 0.12)
+
+
+var _chunk_tints := {}
+
+
+# пыль от попадания: плотнее обычной (её хорошо видно на земле и бетоне), быстро редеет
+func _impact_dust(c: Color) -> Gradient:
+	return _ramp("idust_" + c.to_html(), [[0.0, Color(c.r, c.g, c.b, 0.0)], [0.1, Color(c.r, c.g, c.b, 0.9)], [0.45, Color(c.r, c.g, c.b, 0.55)],
+		[1.0, Color(c.r * 1.1, c.g * 1.1, c.b * 1.1, 0.0)]])
+
+
+func _chunk_tint(key: String, col: Color) -> StandardMaterial3D:
+	if not _chunk_tints.has(key):
+		var m := StandardMaterial3D.new()
+		m.albedo_color = col
+		m.roughness = 0.9
+		_chunk_tints[key] = m
+	return _chunk_tints[key]
+
+
 
 
 # ------------------------------------------------------------------

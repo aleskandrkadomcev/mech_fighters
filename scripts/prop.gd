@@ -109,6 +109,47 @@ func _ready() -> void:
 	add_to_group("props")
 	add_to_group("damageable")
 	_rng.seed = hash(global_position)
+	_make_bullet_zone()
+
+
+# зона попадания для пуль (слой 128): пуля, пролетая, ломает предмет и летит дальше (projectile.gd).
+# Бетонные блоки и машины пули не берут — у них зоны нет
+var _zone: Area3D
+
+
+func _make_bullet_zone() -> void:
+	var size := Vector3.ZERO
+	match kind:
+		"crates":
+			size = Vector3(2.6, 2.0, 2.2)
+		"post":
+			size = Vector3(0.45, 4.6, 0.45)
+		"sandbags":
+			size = Vector3(half.x * 2.0, 0.9, half.y * 2.0)
+		"fence":
+			size = Vector3(half.x * 2.0, 2.3, 0.4)
+	if size == Vector3.ZERO:
+		return
+	_zone = Area3D.new()
+	_zone.collision_layer = 128
+	_zone.collision_mask = 0
+	_zone.monitoring = false
+	var cs := CollisionShape3D.new()
+	var bs := BoxShape3D.new()
+	bs.size = size
+	cs.shape = bs
+	cs.position = Vector3(0, size.y * 0.5 + (0.3 if kind == "post" else 0.0), 0)
+	_zone.add_child(cs)
+	_zone.set_meta("prop", self)
+	add_child(_zone)
+
+
+# пуля пролетела сквозь: ломает (зона больше не нужна)
+func bullet_hit(dir: Vector3, who: Node) -> void:
+	if _zone != null:
+		_zone.queue_free()
+		_zone = null
+	smash(dir, who)
 
 
 func get_hit_radius() -> float:
@@ -169,6 +210,9 @@ func smash(dir: Vector3, who: Node = null) -> void:
 	if broken:
 		return
 	broken = true
+	if _zone != null:
+		_zone.queue_free()
+		_zone = null
 	if kind != "car" or burnt:
 		remove_from_group("damageable")      # несгоревшую смятую машину ещё можно поджечь
 	var g = get_tree().current_scene

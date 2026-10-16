@@ -1525,6 +1525,8 @@ func _run_targetshot() -> void:
 		_stage_after(m)
 	elif _target == "small":
 		_stage_small(m)
+	elif _target == "hits":
+		_stage_hits(m)
 	# все стреляют в свои цели и не умирают, пока идёт съёмка
 	for a in _actors:
 		var b = a[0]
@@ -1540,7 +1542,7 @@ func _run_targetshot() -> void:
 					if not _shots_left.has(f):         # два меха под молнией в один кадр — не снимать дважды
 						_shots_left.append(f)
 		a[0].set_meta("was_stun", a[0].stun_left > 0.0)
-	var end_f: int = {"fight": 200, "base": 500, "calm": 220, "ground": 250, "list": 530, "props": 330, "death": 420, "after": 1400, "small": 620}.get(_target, 300)
+	var end_f: int = {"fight": 200, "base": 500, "calm": 220, "ground": 250, "list": 530, "props": 330, "death": 420, "after": 1400, "small": 620, "hits": 760}.get(_target, 300)
 	if _frame >= end_f and _shots_left.is_empty():
 		if _capbench:
 			_run_capbench()
@@ -1916,6 +1918,89 @@ func _stage_small(m) -> void:
 			set_meta(key + "_t", _frame)
 			if _shot_dir != "":
 				_shots_left.append_array([_frame + 6, _frame + 30])
+
+
+# попадания и машины (--targetshot=hits): тяжёлое орудие по стене (кадры 46, 50), по земле (96, 100), по
+# вражескому меху (146, 150); автопушка по ящикам (230, 240); мех сминает машину (после касания +4, +30);
+# взрыв у другой машины — горит (+10, +150)
+func _stage_hits(m) -> void:
+	if _frame == 3:
+		Cfg.bot_allies = 0
+		Cfg.bot_enemies = 1
+		Cfg.creeps_enabled = 0
+		m.set_build({"mech": "mech_fortress", "core": "core_combat", "weapons": ["heavy_cannon", "heavy_cannon"], "modules": []})
+		var wall = null
+		for w in main.walls:
+			if wall == null or w.global_position.distance_to(Vector3(-46, 0, -30)) < wall.global_position.distance_to(Vector3(-46, 0, -30)):
+				wall = w
+		set_meta("h_wall", wall)
+		_props_at(m, wall.global_position + Vector3(2, 0.05, 10), 24.0)
+		if _shot_dir != "":
+			_shots_left.append_array([46, 50, 58, 146, 150, 230, 240])
+	if _frame < 4:
+		return
+	m.refill_all()
+	var wall = get_meta("h_wall")
+	if _frame == 44:
+		# попадания прицельно: слабое и тяжёлое по бетону (стена), по земле и по броне (вражеский мех)
+		var face: Vector3 = wall.global_position + Vector3(0, 0, wall.c[4] * 0.5 + 0.05)
+		Fx.impact(face + Vector3(-3, 1.5, 0), Vector3.BACK, "concrete", 13.0)
+		Fx.impact(face + Vector3(3, 1.5, 0), Vector3.BACK, "concrete", 90.0)
+		Fx.impact(m.global_position + Vector3(-4, 0.05, -3), Vector3.UP, "ground", 13.0)
+		Fx.impact(m.global_position + Vector3(5, 0.05, -3), Vector3.UP, "ground", 90.0)
+	if _frame < 52:
+		m.demo = {"move": Vector2.ZERO, "fire": false, "aim": wall.global_position + Vector3(0, 1.5, 1.0)}
+		wall.hp = maxf(wall.hp, wall.hp_max * 0.6)
+	elif _frame < 102:
+		m.demo = {"move": Vector2.ZERO, "fire": false, "aim": m.global_position + Vector3(6, 0, 2)}
+	elif _frame == 102:
+		for b in main.bots:
+			b.brain = null
+			b.global_position = m.global_position + Vector3(9, 0, 0)
+			b.snap_interpolation(b)
+			b.demo = {"move": Vector2.ZERO, "fire": false, "aim": m.global_position}
+			set_meta("h_bot", b)
+	elif _frame < 152:
+		var b = get_meta("h_bot")
+		b.hp = b.max_hp()
+		b.shield_left = 0.0
+		m.demo = {"move": Vector2.ZERO, "fire": false, "aim": b.global_position + Vector3(0, 2.0, 0)}
+		if _frame == 144:
+			Fx.impact(b.global_position + Vector3(-1.2, 2.2, 0.6), Vector3(-1, 0.3, 0.4).normalized(), "armor", 13.0)
+			Fx.impact(b.global_position + Vector3(-1.2, 2.6, -0.8), Vector3(-1, 0.3, -0.2).normalized(), "armor", 90.0)
+	elif _frame == 160:
+		var cr := _pt_kind("crates", Vector3(-62, 0, -16))
+		m.set_build({"mech": "mech_assault", "core": "core_combat", "weapons": ["autocannon", "autocannon"], "modules": []})
+		_props_at(m, cr.global_position + Vector3(-9, 0.05, 4), 24.0)
+		set_meta("h_cr", cr)
+	elif _frame > 160 and _frame < 245:
+		m.demo = {"move": Vector2.ZERO, "fire": _frame > 215, "aim": get_meta("h_cr").global_position + Vector3(0, 1.0, 0)}
+	elif _frame == 300:
+		var car := _pt_kind("car", Vector3(-72, 0, 12))
+		set_meta("h_car", car)
+		_props_at(m, car.global_position + Vector3(-7, 0.05, 1), 22.0)
+		m.demo = {"move": Vector2.ZERO, "fire": false, "aim": car.global_position + Vector3(0, 1, 0)}
+		if _shot_dir != "":
+			_shots_left.append(330)
+	elif _frame == 340:
+		var car2: Node3D = get_meta("h_car")
+		m.demo = {"move": Vector2(1, 0), "fire": false, "aim": car2.global_position + Vector3(10, 1, 0)}
+	elif _frame == 470:
+		var car3 := _pt_kind("car", Vector3(-38, 0, -47))
+		set_meta("h_car3", car3)
+		_props_at(m, car3.global_position + Vector3(-8, 0.05, 3), 22.0)
+		m.demo = {"move": Vector2.ZERO, "fire": false, "aim": car3.global_position}
+	elif _frame == 500:
+		var car4: Node3D = get_meta("h_car3")
+		Fx.explosion(car4.global_position + Vector3(1.5, 0.5, 1.5), 3.0)
+		Fx.blast(car4.global_position + Vector3(1.5, 0.5, 1.5), 3.0, 10.0, 0.5, 1, null)
+		if _shot_dir != "":
+			_shots_left.append_array([510, 650])
+	if has_meta("h_car") and not has_meta("h_car_t") and get_meta("h_car").broken:
+		set_meta("h_car_t", _frame)
+		m.demo = {"move": Vector2.ZERO, "fire": false, "aim": m.global_position + Vector3(10, 1, 0)}
+		if _shot_dir != "":
+			_shots_left.append_array([_frame + 4, _frame + 30])
 
 
 func _props_at(m, at: Vector3, cam: float) -> void:
@@ -3316,7 +3401,22 @@ func _run_proptest() -> void:
 		var tilt := rad_to_deg(acos(clampf(pst2._pivot.global_basis.y.normalized().dot(Vector3.UP), -1.0, 1.0)))
 		_pt_check(pst2.broken and tilt > 70.0, "мех задел фонарь — столб упал (наклон %.0f°)" % tilt)
 		m.demo = {"move": Vector2.ZERO, "fire": false, "aim": m.global_position + Vector3(10, 1.5, 0)}
-	if _frame == 640:
+	# пуля через кучку ящиков: ломает и летит дальше
+	if _frame == 580:
+		var cr := _pt_kind("crates", Vector3(62, 0, 16))
+		set_meta("bul_c", cr)
+		var Proj = load("res://scripts/projectile.gd")
+		var pr = Proj.new()
+		pr.setup(cr.global_position + Vector3(-12, 1.0, 0), Vector3(90, 0, 0), 10.0, 40.0, m)
+		get_tree().current_scene.add_child(pr)
+		set_meta("bul", pr)
+	if _frame == 596:
+		var pr2 = get_meta("bul")
+		var cr2: Node3D = get_meta("bul_c")
+		var past: bool = is_instance_valid(pr2) and pr2.global_position.x > cr2.global_position.x + 3.0
+		_pt_check(cr2.broken and past, "пуля пролетела через ящики — сломала и летит дальше (x пули %.1f, ящики %.0f)" % [
+			pr2.global_position.x if is_instance_valid(pr2) else -1.0, cr2.global_position.x])
+	if _frame == 1000:
 		var left := 0
 		for n in get_tree().current_scene.get_children():
 			if n is MeshInstance3D and n.physics_interpolation_mode == Node.PHYSICS_INTERPOLATION_MODE_OFF and n.material_override == _pt_prop(a)._mat:

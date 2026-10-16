@@ -120,10 +120,20 @@ func _physics_process(delta: float) -> void:
 	var step := vel * delta
 	var to := from + step
 	# снаряд видит стены (слой 1), хитбоксы (слой 3) и обломки (слой 5), но не капсулы для ходьбы
-	var q := PhysicsRayQueryParameters3D.create(from, to, 1 | 4 | 16)
+	var q := PhysicsRayQueryParameters3D.create(from, to, 1 | 4 | 16 | 128)
 	q.collide_with_areas = true
 	q.exclude = _exclude
 	var hit := get_world_3d().direct_space_state.intersect_ray(q)
+	# мелочь (слой 128) пуля ломает и летит дальше — не укрытие
+	for _guard in 4:
+		if hit.is_empty() or not (hit["collider"] is Area3D and hit["collider"].has_meta("prop")):
+			break
+		var pr = hit["collider"].get_meta("prop")
+		if is_instance_valid(pr):
+			pr.bullet_hit(vel, shooter if is_instance_valid(shooter) else null)
+		_exclude.append(hit["rid"])
+		q.exclude = _exclude
+		hit = get_world_3d().direct_space_state.intersect_ray(q)
 	if not hit.is_empty():
 		var col = hit["collider"]
 		var is_target := false
@@ -137,7 +147,8 @@ func _physics_process(delta: float) -> void:
 		if style == "plasma":
 			Fx.plasma_hit(hit["position"], team == Fx.player_team)
 		else:
-			Fx.spark(hit["position"], hit["normal"], is_target)
+			var surface := "armor" if is_target or (col != null and col.is_in_group("wrecks")) else ("ground" if hit["normal"].y > 0.6 else "concrete")
+			Fx.impact(hit["position"], hit["normal"], surface, damage)
 		# след на стене (только если стрелка видно — иначе выдаст его в тумане)
 		if not is_target and col is StaticBody3D and (team == Fx.player_team or (is_instance_valid(shooter) and shooter.get("seen") != false)):
 			Fx.wall_mark(hit["position"], hit["normal"], clampf(0.25 + damage * 0.012, 0.3, 1.1))

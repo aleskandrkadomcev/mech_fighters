@@ -391,10 +391,11 @@ float n3(vec3 x) {
 void fragment() {
 	vec3 c = texture(atlas, UV).rgb;
 	float l = dot(c, vec3(0.3, 0.59, 0.11));
-	c = mix(vec3(l), c, 0.35) * 0.5;                                   // краска выцвела и потемнела
+	c = mix(vec3(l), c, 0.3) * 0.36;                                   // краска выцвела и потемнела
 	float n = n3(wpos * 2.3);
-	float rust = smoothstep(0.5, 0.78, n3(wpos * 0.8 + 5.0) * 0.7 + n * 0.3);
-	c = mix(c, vec3(0.3, 0.15, 0.07) * (0.6 + 0.7 * n), rust * 0.8);   // ржавчина пятнами
+	float rust = smoothstep(0.38, 0.68, n3(wpos * 0.8 + 5.0) * 0.7 + n * 0.3);
+	c = mix(c, vec3(0.28, 0.14, 0.06) * (0.6 + 0.7 * n), rust * 0.85);  // ржавчина пятнами
+	c = mix(c, vec3(0.2, 0.16, 0.11), smoothstep(0.55, 0.8, n3(wpos * 1.6 + 11.0)) * 0.5);   // пыль и грязь
 	c *= mix(0.55, 1.0, clamp(wpos.y / 1.3, 0.0, 1.0));                // грязь снизу
 	c = mix(c, vec3(0.035, 0.03, 0.028) * (0.7 + 0.6 * n), burnt);     // обгорел
 	float vis = texture(fog_tex, (wpos.xz - fog_rect.xy) / fog_rect.zw).r;
