@@ -770,16 +770,12 @@ func _setup_model_legs() -> void:
 	_l2 = l2 * k
 
 
-# корпус модели, полосы цвета команды; возвращает [подвесы пушек, ракетные блоки, двигатели рывка]
-# в координатах корпуса
+# корпус модели; возвращает [подвесы пушек, ракетные блоки, двигатели рывка] в координатах корпуса.
+# Полосы цвета команды (точки accent_N в модели) не ставим: мехи не красим, у каждого свой облик
 func _hull_model() -> Array:
 	var off := Vector3(0, _hip_h + WAIST_UP, 0)
 	var h := _holder(torso, Transform3D(Basis.IDENTITY, -off))
 	_model_part(h, "hull")
-	for nm in _pts:
-		if String(nm).begins_with("accent_"):
-			var tr: Transform3D = _pts[nm]
-			_box(h, tr.basis.get_scale(), tr.origin, m_accent)
 	var pods := [_pt("gun_l") - off, _pt("gun_r") - off]
 	# ракетные блоки на первые два крепления модулей (левый — слева)
 	var ports := []
