@@ -121,6 +121,7 @@ func spark(pos: Vector3, normal: Vector3, on_target: bool, sound := true) -> voi
 		# броня: веер оранжевых искр и короткая вспышка
 		_streaks(pos, normal, 9, Color(1.0, 0.62, 0.22), 6.0, 15.0, 0.28, 60.0, 0.75)
 		_flare(pos, "circle_05", 1.6, Color(1.0, 0.55, 0.2, 1.0), 0.09)
+		light_flash(pos, Color(1.0, 0.6, 0.25), 4.5, 4.0, 0.06)
 	else:
 		# земля или стена: пара искр и облачко пыли (бурой с земли, серой со стены)
 		var ground := normal.y > 0.6
@@ -166,7 +167,7 @@ func explosion(pos: Vector3, radius: float) -> void:
 
 	# кольца ударной волны по земле нет (решение Сани, 16.10.2026): круги смотрелись жирно и некрасиво
 
-	_flash_light(pos + Vector3.UP * 1.5, Color(1.0, 0.6, 0.25), r * 3.0, 0.35)
+	_flash_light(pos + Vector3.UP * 1.5, Color(1.0, 0.6, 0.25), r * 3.5, 0.35)
 	shake_at.emit(pos, Cfg.shake_explosion)
 	if pos.y < 3.5:
 		scorch(Vector3(pos.x, 0, pos.z), r * 0.8)
@@ -206,27 +207,108 @@ func scorch(pos: Vector3, radius: float) -> void:
 		mi.queue_free())
 
 
-# короткая вспышка настоящего света (освещает землю и стены вокруг взрыва).
-# Одновременно не больше нескольких, чтобы не тормозило: на высокой графике 6, на средней 3, на низкой нет
-var _lights := 0
-
-
+# короткая яркая вспышка настоящего света (взрыв, рельса, молния)
 func _flash_light(pos: Vector3, col: Color, rng: float, time: float) -> void:
-	if _lights >= Cfg.gfx(0, 3, 6) or get_tree().current_scene == null:
+	light_flash(pos, col, rng, 14.0, time * 1.3)
+
+
+# ------------------------------------------------------------------
+#  Свет от вспышек: выстрелы, лучи, попадания и взрывы подсвечивают землю, стены и мехов вокруг.
+#  Общий набор источников: разом не больше лимита графики (низкие 0, средние 4, высокие 8); когда все
+#  заняты, новый свет занимает самый слабый. Свет «держится» (лазер, летящая плазма), пока его
+#  обновляют по ключу (hold). Яркость — F2 → Прочее → «Свет от вспышек»
+# ------------------------------------------------------------------
+
+var _lpool: Array = []            # [{l: OmniLight3D, t, life, e, key, hold}]
+var _lscene: Node = null
+
+
+func light_flash(pos: Vector3, col: Color, rng: float, energy: float, life: float, key := "", hold := false) -> void:
+	var n: int = Cfg.gfx(0, 4, 8)
+	var scene := get_tree().current_scene
+	if n <= 0 or scene == null or Cfg.flash_light <= 0.0:
 		return
-	_lights += 1
-	var l := OmniLight3D.new()
-	l.tree_exiting.connect(func() -> void: _lights -= 1)     # и когда бой закрыли посреди вспышки
-	l.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
-	l.light_color = col
-	l.light_energy = 5.0
-	l.omni_range = rng
-	l.shadow_enabled = false
-	get_tree().current_scene.add_child(l)
+	if _lscene != scene:
+		_lpool.clear()
+		_lscene = scene
+	# далеко за краем экрана — свет не тратим
+	var cam := get_viewport().get_camera_3d()
+	if cam != null:
+		var c := cam.global_position
+		if Vector2(pos.x - c.x, pos.z - c.z).length() > maxf(c.y, 20.0) * 1.6 + rng:
+			return
+	var slot = null
+	if key != "":
+		for s in _lpool:
+			if s["key"] == key and s["t"] > 0.0:
+				slot = s
+				break
+	if slot == null:
+		for s in _lpool:
+			if s["t"] <= 0.0:
+				slot = s
+				break
+	if slot == null and _lpool.size() < n:
+		var nl := OmniLight3D.new()
+		nl.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
+		nl.shadow_enabled = false
+		nl.omni_attenuation = 0.7          # мягче спадает к краю: пятно света шире
+		nl.visible = false
+		scene.add_child(nl)
+		slot = {"l": nl, "t": 0.0, "life": 1.0, "e": 0.0, "key": "", "hold": false}
+		_lpool.append(slot)
+	if slot == null:
+		# все заняты: занимаем самый слабый сейчас, если новый ярче
+		var wv := 1e9
+		for s in _lpool:
+			var v: float = _lcur(s)
+			if v < wv:
+				wv = v
+				slot = s
+		if wv > energy:
+			return
+	if not is_instance_valid(slot["l"]):
+		return
+	slot["t"] = life
+	slot["life"] = life
+	slot["e"] = energy
+	slot["key"] = key
+	slot["hold"] = hold
+	var l: OmniLight3D = slot["l"]
 	l.global_position = pos
-	var tw := l.create_tween()
-	tw.tween_property(l, "light_energy", 0.0, time).set_ease(Tween.EASE_OUT)
-	tw.tween_callback(l.queue_free)
+	if l.light_color != col:
+		l.light_color = col
+	if l.omni_range != rng:
+		l.omni_range = rng
+	_lset(slot)
+
+
+# яркость источника сейчас: вспышка быстро гаснет, «держащийся» свет ровный
+func _lcur(s: Dictionary) -> float:
+	if s["t"] <= 0.0:
+		return 0.0
+	if s["hold"]:
+		return s["e"]
+	var k: float = s["t"] / maxf(s["life"], 0.001)
+	return s["e"] * k * k
+
+
+func _lset(s: Dictionary) -> void:
+	var l: OmniLight3D = s["l"]
+	var e: float = _lcur(s) * Cfg.flash_light
+	var on := e > 0.02
+	if l.visible != on:
+		l.visible = on
+	if on:
+		l.light_energy = e
+
+
+func _process(delta: float) -> void:
+	for s in _lpool:
+		if s["t"] > 0.0:
+			s["t"] -= delta
+			if is_instance_valid(s["l"]):
+				_lset(s)
 
 
 # ------------------------------------------------------------------
@@ -407,6 +489,7 @@ func blast(pos: Vector3, radius: float, dmg: float, edge: float, team: int, src:
 # попадание сгустка плазмы: голубая (у врага розовая) вспышка
 func plasma_hit(pos: Vector3, friend: bool) -> void:
 	var c := Color(0.45, 0.9, 1.0) if friend else Color(1.0, 0.35, 0.8)
+	light_flash(pos, c, 6.0, 7.0, 0.1)
 	_flare(pos, "circle_05", 2.4, Color(c.r, c.g, c.b, 1.0), 0.15)
 	_flare(pos, "star_07", 1.8, Color(c.r, c.g, c.b, 1.0), 0.1)
 	Sfx.play_at("hit", pos, -10.0, 0.2)

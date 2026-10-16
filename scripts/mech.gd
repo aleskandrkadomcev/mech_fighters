@@ -1298,8 +1298,25 @@ func _eject_casing(i: int, w: Dictionary, origin: Vector3) -> void:
 func _after_shot(i: int, w: Dictionary) -> void:
 	_break_cloak()
 	visual.kick(i, w["recoil"])
+	_shot_light(i, w)
 	_w_bloom[i] = minf(_w_bloom[i] + w["spread_per_shot"], w["spread_shot_max"])
 	fired.emit(i)
+
+
+# вспышка выстрела подсвечивает землю и мехов вокруг. Только если меха видно: иначе свет выдаст его в тумане
+func _shot_light(i: int, w: Dictionary) -> void:
+	if not seen and team != Fx.player_team:
+		return
+	var friend := team == Fx.player_team
+	match String(w["look"]):
+		"laser", "rail":
+			return      # у лазера свет держится, пока он горит; у рельсы своя вспышка
+		"blaster":
+			Fx.light_flash(visual.get_muzzle(i), Color(0.5, 0.9, 1.0) if friend else Color(1.0, 0.4, 0.85), 8.0, 7.0, 0.08)
+		"heavy", "grenade", "shotgun":
+			Fx.light_flash(visual.get_muzzle(i), Color(1.0, 0.68, 0.32), 10.0, 9.0, 0.1)
+		_:
+			Fx.light_flash(visual.get_muzzle(i), Color(1.0, 0.72, 0.38), 7.0, 6.0, 0.07)
 
 
 # гранатомёт: граната вылетает с постоянной скоростью, ствол сам поднимается или опускается под
@@ -1438,6 +1455,12 @@ func _update_beam(i: int, w: Dictionary, delta: float, pressed: bool) -> void:
 				col.take_damage(w["dps"] * damage_mult() * delta, end, dir, "beam", self)
 
 	visual.set_beam(i, true, origin, end)
+	# лазер светит на землю вдоль луча и ярче в месте попадания, пока горит
+	if seen or team == Fx.player_team:
+		var lc := Color(0.45, 0.85, 1.0) if team == Fx.player_team else Color(1.0, 0.35, 0.35)
+		var lkey := "lz%d_%d" % [get_instance_id(), i]
+		Fx.light_flash(origin.lerp(end, 0.5), lc, origin.distance_to(end) * 0.5 + 4.0, 3.5, 0.12, lkey + "m", true)
+		Fx.light_flash(end, lc, 6.0, 7.0, 0.12, lkey + "e", true)
 	_beam_fx_t[i] -= delta
 	if _beam_fx_t[i] <= 0.0 and end.distance_to(origin) < w_range(i) - 0.1:
 		_beam_fx_t[i] = 0.09

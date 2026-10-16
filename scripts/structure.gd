@@ -626,6 +626,7 @@ func _fire() -> void:
 	get_tree().current_scene.add_child(p)
 	Sfx.play_at("cannon", global_position, -6.0, 0.1)
 	Fx.spark(origin, dir, false, false)
+	Fx.light_flash(origin, Color(1.0, 0.7, 0.35), 9.0, 8.0, 0.09)
 
 
 # снаряд навесом в точку, куда цель придёт (с лёгким упреждением). Меток на земле нет:

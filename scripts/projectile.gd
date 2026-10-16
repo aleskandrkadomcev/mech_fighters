@@ -19,6 +19,8 @@ var _max_range := 50.0
 var _exclude: Array[RID] = []
 
 static var _mats := {}
+var _glow_key := ""               # плазма: свет, который летит вместе со сгустком (Fx.light_flash)
+var _glow_col := Color.WHITE
 static var _plasma_mesh: QuadMesh
 
 
@@ -76,6 +78,10 @@ func _streak(mat: Material, w: float, len: float, back: float) -> void:
 func _ready() -> void:
 	var friend := team == Fx.player_team
 	if style == "plasma":
+		# свет от сгустка на землю и мехов рядом — только если стрелка видно (иначе выдаст его в тумане)
+		if friend or (is_instance_valid(shooter) and shooter.get("seen") == true):
+			_glow_key = "pl%d" % get_instance_id()
+			_glow_col = Color(0.5, 0.9, 1.0) if friend else Color(1.0, 0.4, 0.85)
 		# сгусток плазмы: яркое ядро и мягкое свечение вокруг
 		_streak(_core_mat("pl_core_%s" % friend, Color(0.55, 0.95, 1.0) if friend else Color(1.0, 0.4, 0.85)), tracer * 1.6, tracer * 4.0, 0.0)
 		var glow_t := Art.fx_tex("circle_05")
@@ -128,6 +134,8 @@ func _physics_process(delta: float) -> void:
 		queue_free()
 		return
 	global_position = to
+	if _glow_key != "":
+		Fx.light_flash(to, _glow_col, 6.0, 4.0, 0.12, _glow_key, true)
 	left_range -= step.length()
 	if left_range <= 0.0:
 		queue_free()

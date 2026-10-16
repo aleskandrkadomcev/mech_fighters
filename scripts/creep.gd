@@ -343,6 +343,7 @@ func _fire() -> void:
 	get_tree().current_scene.add_child(p)
 	if seen:
 		Fx.spark(origin, dir, false, false)
+		Fx.light_flash(origin, Color(1.0, 0.7, 0.35), 6.0, 5.0, 0.07)
 	Sfx.play_at("shot", global_position, -12.0, 0.15)
 
 
