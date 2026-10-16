@@ -138,6 +138,9 @@ func _physics_process(delta: float) -> void:
 			Fx.plasma_hit(hit["position"], team == Fx.player_team)
 		else:
 			Fx.spark(hit["position"], hit["normal"], is_target)
+		# след на стене (только если стрелка видно — иначе выдаст его в тумане)
+		if not is_target and col is StaticBody3D and (team == Fx.player_team or (is_instance_valid(shooter) and shooter.get("seen") != false)):
+			Fx.wall_mark(hit["position"], hit["normal"], clampf(0.25 + damage * 0.012, 0.3, 1.1))
 		queue_free()
 		return
 	global_position = to

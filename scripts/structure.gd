@@ -471,7 +471,9 @@ func _die() -> void:
 		var off := Vector3(randf_range(-3, 3), randf_range(0.5, 4), randf_range(-3, 3)) * (1.5 if big else 0.6)
 		Fx.explosion(global_position + off, 6.0 if big else 4.5)
 	Sfx.play_at("boom", global_position, 2.0, 0.05)
-	# остаётся чёрная развалина
+	# остаётся чёрная развалина, горит и тлеет
+	if not big:
+		Fx.smolder(self, Vector3(0, 2.0, 0), 2.2, 18.0)
 	for m in _mats:
 		m.albedo_color = Color(0.06, 0.055, 0.05)
 	if _head != null:

@@ -750,8 +750,8 @@ func die() -> void:
 	slow_left = 0.0
 	death_velocity = Vector3(velocity.x, 0, velocity.z)
 	velocity = Vector3.ZERO
-	Fx.explosion(global_position + Vector3.UP * 1.8, 3.5)
-	Sfx.play_at("boom", global_position, 0.0, 0.08)
+	Fx.mech_death(global_position, get_hit_radius())
+	Sfx.play_at("boom", global_position, 2.0, 0.08)
 	died.emit(self)
 
 

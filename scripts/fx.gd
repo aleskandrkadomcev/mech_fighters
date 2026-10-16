@@ -323,6 +323,7 @@ func _lset(s: Dictionary) -> void:
 
 
 func _process(delta: float) -> void:
+	_fade_marks(delta)
 	for s in _lpool:
 		if s["t"] > 0.0:
 			s["t"] -= delta
@@ -1225,3 +1226,191 @@ func _streaks(pos: Vector3, dir: Vector3, n: int, col: Color, v0: float, v1: flo
 		_sprite_mats[key] = beam_material(col, 4.0, 1.2, 0.5, true, 0.35)
 	_emit(pos, _streak_quad, _sprite_mats[key], n, life, {"dir": dir, "spread": spread, "v0": v0, "v1": v1,
 		"g": Vector3(0, -18, 0), "s0": size * 0.6, "s1": size, "align": true, "grow": [1.0, 0.3]})
+
+
+# ------------------------------------------------------------------
+#  ПОСЛЕДСТВИЯ БОЯ (16.10.2026): большой взрыв при смерти меха, тлеющие обломки и развалины,
+#  долгая пыль от обвала стены, следы попаданий на стенах
+# ------------------------------------------------------------------
+
+# смерть меха: большой взрыв, через доли секунды рвётся боекомплект (ещё два хлопка), высокий столб дыма,
+# горящие обломки разлетаются
+func mech_death(pos: Vector3, r: float) -> void:
+	var scene := get_tree().current_scene
+	if scene == null:
+		return
+	explosion(pos + Vector3.UP * 1.8, Cfg.boom_size_max)
+	for k in 2:
+		var off := Vector3(randf_range(-1, 1), randf_range(0.6, 2.4), randf_range(-1, 1)) * r
+		get_tree().create_timer(0.22 + k * 0.33, false).timeout.connect(func() -> void:
+			_boom_small(pos + off, Cfg.boom_size_max * 0.55)
+			light_flash(pos + off, Color(1.0, 0.6, 0.25), 9.0, 3.0, 0.25)
+			Sfx.play_at("boom", pos + off, -6.0, 0.15))
+	_emit(pos + Vector3.UP * 2.0, _quad(), _sprite_mat("smoke_04"), 14, 4.5, {"burst": 0.6, "sphere": r * 0.4, "spread": 25.0,
+		"v0": 2.0, "v1": 4.5, "damp": 0.5, "g": Vector3(0.5, 1.5, 0.2), "s0": r * 0.9, "s1": r * 1.5, "grow": [0.8, 2.6],
+		"spin": 20.0, "ramp": _smoke_ramp2()})
+	_streaks(pos + Vector3.UP * 1.5, Vector3.UP, 26, Color(1.0, 0.5, 0.12), 8.0, 18.0, 1.3, 70.0, 1.2)
+	shake_at.emit(pos, Cfg.shake_explosion * 1.6)
+
+
+# тлеет: низкий огонь (burn секунд), угли искрами вверх, густой дым, мерцающий оранжевый свет.
+# Потом огонь гаснет, дольше всех держатся угли. Узел — ребёнок parent (уходит вместе с ним)
+func smolder(parent: Node3D, at: Vector3, r: float, burn := 14.0) -> Node3D:
+	var root := Node3D.new()
+	root.position = at
+	parent.add_child(root)
+	var flames := _loop_emitter(root, _sprite_mat("fire_01", true), 10, 0.7, {"sphere": r * 0.45, "v0": 0.6, "v1": 1.8,
+		"g": Vector3(0, 2.5, 0), "s0": r * 0.35, "s1": r * 0.6, "grow": [1.0, 0.3], "spin": 40.0, "ramp": _hot_ramp()})
+	var embers := _loop_emitter(root, _sprite_mat("spark_01", true), 12, 1.8, {"sphere": r * 0.5, "v0": 0.8, "v1": 2.2,
+		"g": Vector3(0.3, 1.2, 0.0), "damp": 0.4, "s0": 0.12, "s1": 0.25, "spin": 200.0,
+		"ramp": _ramp("embers", [[0.0, Color(1.0, 0.75, 0.3, 1.0)], [0.5, Color(1.0, 0.35, 0.08, 0.9)], [1.0, Color(0.6, 0.1, 0.02, 0.0)]])})
+	var smoke := _loop_emitter(root, _sprite_mat("smoke_04"), 9, 3.5, {"sphere": r * 0.4, "spread": 20.0, "v0": 1.2, "v1": 2.6,
+		"damp": 0.3, "g": Vector3(0.4, 0.8, 0.15), "s0": r * 0.6, "s1": r * 1.1, "grow": [0.7, 2.2], "spin": 15.0, "ramp": _smoke_ramp2()})
+	var key := "smolder_%d" % root.get_instance_id()
+	var tw := root.create_tween()
+	tw.tween_method(func(t: float) -> void:
+		if is_instance_valid(root) and root.is_visible_in_tree():
+			var fl := 0.75 + 0.25 * sin(t * 23.0) * sin(t * 7.3)
+			light_flash(root.global_position + Vector3.UP * 0.6, Color(1.0, 0.5, 0.2), 6.0 + r, 1.3 * fl * clampf(1.0 - t / burn, 0.0, 1.0) + 0.05, 0.1, key),
+		0.0, burn, burn)
+	tw.tween_callback(func() -> void: flames.emitting = false)
+	tw.tween_interval(burn * 1.5)
+	tw.tween_callback(func() -> void: smoke.emitting = false)
+	tw.tween_interval(burn * 1.5)
+	tw.tween_callback(func() -> void: embers.emitting = false)
+	tw.tween_interval(4.0)
+	tw.tween_callback(root.queue_free)
+	return root
+
+
+# частицы, которые идут непрерывно (в мире: не тянутся за предметом), настройки как у _emit
+func _loop_emitter(parent: Node3D, mat: Material, amount: int, life: float, cfg := {}) -> CPUParticles3D:
+	var p := CPUParticles3D.new()
+	p.mesh = _quad()
+	p.material_override = mat
+	p.amount = maxi(int(round(amount * _gfx_k())), 1)
+	p.lifetime = life
+	p.local_coords = false
+	p.direction = cfg.get("dir", Vector3.UP)
+	p.spread = cfg.get("spread", 30.0)
+	p.initial_velocity_min = cfg.get("v0", 1.0)
+	p.initial_velocity_max = cfg.get("v1", 2.0)
+	p.gravity = cfg.get("g", Vector3.ZERO)
+	p.damping_min = cfg.get("damp", 0.0)
+	p.damping_max = cfg.get("damp", 0.0)
+	p.scale_amount_min = cfg.get("s0", 1.0)
+	p.scale_amount_max = cfg.get("s1", 1.0)
+	if cfg.has("grow"):
+		var c := Curve.new()
+		c.max_value = 4.0
+		c.add_point(Vector2(0.0, cfg["grow"][0]))
+		c.add_point(Vector2(1.0, cfg["grow"][1]))
+		p.scale_amount_curve = c
+	if cfg.has("ramp"):
+		p.color_ramp = cfg["ramp"]
+	if cfg.get("spin", 0.0) > 0.0:
+		p.angle_max = 360.0
+		p.angular_velocity_min = -cfg["spin"]
+		p.angular_velocity_max = cfg["spin"]
+	p.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+	p.emission_sphere_radius = maxf(cfg.get("sphere", 0.5), 0.05)
+	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	p.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
+	parent.add_child(p)
+	p.emitting = true
+	return p
+
+
+# обвал стены: облако пыли расползается и медленно оседает
+func dust_cloud(pos: Vector3, size: float) -> void:
+	if get_tree().current_scene == null:
+		return
+	_emit(pos + Vector3.UP * 0.8, _quad(), _sprite_mat("smoke_04"), 30, 4.0, {"burst": 0.9, "sphere": size * 0.5, "spread": 85.0,
+		"v0": 3.0, "v1": 7.0, "damp": 1.3, "g": Vector3(0, 0.2, 0), "s0": size * 0.9, "s1": size * 1.5, "grow": [0.8, 2.8],
+		"spin": 20.0, "ramp": _ramp("wall_dust", [[0.0, Color(0.5, 0.42, 0.3, 1.0)], [0.35, Color(0.55, 0.47, 0.36, 0.85)], [1.0, Color(0.56, 0.5, 0.42, 0.0)]])})
+	# мелкая пыль сыплется из облака вниз
+	_emit(pos + Vector3.UP * 2.0, _quad(), _sprite_mat("smoke_04"), 14, 2.2, {"burst": 0.5, "sphere": size * 0.6, "spread": 30.0,
+		"dir": Vector3.DOWN, "v0": 0.5, "v1": 1.5, "g": Vector3(0, -1.5, 0), "s0": size * 0.3, "s1": size * 0.5, "grow": [1.0, 1.8],
+		"ramp": _ramp("wall_dust", [])})
+
+
+# следы попаданий на стенах: тёмные выбоины с копотью. Все — одна отрисовка (MultiMesh), по кругу
+# заменяются старые, через MARK_LIFE секунд гаснут
+const MARK_MAX := 240
+const MARK_LIFE := 45.0
+var _marks: MultiMeshInstance3D
+var _mark_i := 0
+var _mark_born := PackedFloat32Array()
+var _mark_fade_t := 0.0
+
+
+func wall_mark(pos: Vector3, normal: Vector3, size: float) -> void:
+	var scene := get_tree().current_scene
+	if scene == null or absf(normal.y) > 0.6:
+		return
+	if _marks == null or not is_instance_valid(_marks) or _marks.get_parent() != scene:
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.use_colors = true
+		var qm := QuadMesh.new()
+		qm.size = Vector2(1, 1)
+		mm.mesh = qm
+		mm.instance_count = MARK_MAX
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = Color(0.06, 0.055, 0.05)
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.vertex_color_use_as_albedo = true
+		mat.roughness = 1.0
+		var t := Art.fx_tex("scorch_02")
+		if t != null:
+			mat.albedo_texture = t
+		_marks = MultiMeshInstance3D.new()
+		_marks.multimesh = mm
+		_marks.material_override = mat
+		_marks.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_marks.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
+		scene.add_child(_marks)
+		_mark_born.resize(MARK_MAX)
+		_mark_born.fill(-1.0)
+		for i in MARK_MAX:
+			mm.set_instance_transform(i, Transform3D(Basis.from_scale(Vector3.ZERO), Vector3(0, -50, 0)))
+			mm.set_instance_color(i, Color(0.06, 0.055, 0.05, 0.0))
+		_mark_i = 0
+	var n := normal.normalized()
+	var b := Basis.looking_at(-n, Vector3.UP) * Basis(Vector3.FORWARD, randf() * TAU) * Basis.from_scale(Vector3(size, size, 1.0))
+	_marks.multimesh.set_instance_transform(_mark_i, Transform3D(b, pos + n * 0.03))
+	_marks.multimesh.set_instance_color(_mark_i, Color(0.06, 0.055, 0.05, 0.9))
+	_mark_born[_mark_i] = Time.get_ticks_msec() / 1000.0
+	_mark_i = (_mark_i + 1) % MARK_MAX
+
+
+# стену разрушили: следы попаданий на ней пропадают (иначе висели бы в воздухе над обломками)
+func clear_marks(box: AABB) -> void:
+	if _marks == null or not is_instance_valid(_marks):
+		return
+	var grown := box.grow(0.3)
+	for i in MARK_MAX:
+		if _mark_born[i] >= 0.0 and grown.has_point(_marks.multimesh.get_instance_transform(i).origin):
+			_marks.multimesh.set_instance_color(i, Color(0, 0, 0, 0))
+			_mark_born[i] = -1.0
+
+
+# раз в секунду: старые следы бледнеют и пропадают
+func _fade_marks(delta: float) -> void:
+	if _marks == null or not is_instance_valid(_marks):
+		return
+	_mark_fade_t -= delta
+	if _mark_fade_t > 0.0:
+		return
+	_mark_fade_t = 1.0
+	var now := Time.get_ticks_msec() / 1000.0
+	for i in MARK_MAX:
+		var born := _mark_born[i]
+		if born < 0.0:
+			continue
+		var age := now - born
+		if age > MARK_LIFE * 0.6:
+			var a := clampf(1.0 - (age - MARK_LIFE * 0.6) / (MARK_LIFE * 0.4), 0.0, 1.0) * 0.9
+			_marks.multimesh.set_instance_color(i, Color(0.06, 0.055, 0.05, a))
+			if a <= 0.0:
+				_mark_born[i] = -1.0

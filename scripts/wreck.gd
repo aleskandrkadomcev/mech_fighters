@@ -92,6 +92,7 @@ func start() -> void:
 	_make_skid()
 	_detach_parts(fwd, sp)
 	_make_smoke(2.2)
+	Fx.smolder(self, Vector3(0, 1.0, 0), radius * 0.8, 14.0)       # горит и тлеет
 
 
 func _build_crate() -> void:

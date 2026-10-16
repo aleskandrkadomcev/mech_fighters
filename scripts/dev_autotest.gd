@@ -1521,6 +1521,8 @@ func _run_targetshot() -> void:
 		_stage_props(m)
 	elif _target == "death":
 		_stage_death(m)
+	elif _target == "after":
+		_stage_after(m)
 	# все стреляют в свои цели и не умирают, пока идёт съёмка
 	for a in _actors:
 		var b = a[0]
@@ -1536,7 +1538,7 @@ func _run_targetshot() -> void:
 					if not _shots_left.has(f):         # два меха под молнией в один кадр — не снимать дважды
 						_shots_left.append(f)
 		a[0].set_meta("was_stun", a[0].stun_left > 0.0)
-	var end_f: int = {"fight": 200, "base": 500, "calm": 220, "ground": 250, "list": 530, "props": 330, "death": 420}.get(_target, 300)
+	var end_f: int = {"fight": 200, "base": 500, "calm": 220, "ground": 250, "list": 530, "props": 330, "death": 420, "after": 1400}.get(_target, 300)
 	if _frame >= end_f and _shots_left.is_empty():
 		if _capbench:
 			_run_capbench()
@@ -1839,6 +1841,47 @@ func _stage_death(m) -> void:
 		_props_at(m, Vector3(-66, 0.05, -20), 26.0)
 		if _shot_dir != "":
 			_shots_left.append(380)
+
+
+# последствия боя (--targetshot=after): автопушка по стене — следы попаданий (кадр 110), стена рушится —
+# пыль (140, 175, 240); вражеский мех погибает рядом — большой взрыв и тушка горит (290, 330, 520, 900);
+# вражеская турель 1 уровня гибнет — развалина горит (1010, 1300)
+func _stage_after(m) -> void:
+	if _frame == 3:
+		Cfg.bot_allies = 0
+		Cfg.bot_enemies = 1
+		Cfg.creeps_enabled = 0
+		var best = null
+		for w in main.walls:
+			if best == null or w.global_position.distance_to(Vector3(-46, 0, -30)) < best.global_position.distance_to(Vector3(-46, 0, -30)):
+				best = w
+		set_meta("wall", best)
+		m.set_build({"mech": "mech_assault", "core": "core_combat", "weapons": ["autocannon", "autocannon"], "modules": []})
+		_props_at(m, best.global_position + Vector3(0, 0.05, 11), 30.0)
+		if _shot_dir != "":
+			_shots_left.append_array([110, 140, 175, 240, 290, 330, 520, 900, 1010, 1300])
+	var wall = get_meta("wall") if has_meta("wall") else null
+	if _frame > 3 and _frame < 115 and wall != null:
+		m.demo = {"move": Vector2.ZERO, "fire": true, "aim": wall.global_position + Vector3(randf_range(-2, 2), 1.4, 0)}
+		m.refill_all()
+		wall.hp = maxf(wall.hp, wall.hp_max * 0.6)      # пусть стоит, пока стреляем
+	if _frame == 115:
+		m.demo = {"move": Vector2.ZERO, "fire": false, "aim": wall.global_position}
+	if _frame == 125 and wall != null:
+		wall.take_damage(1e6, wall.global_position + Vector3.UP, Vector3.FORWARD, "explosion", m)
+	if _frame == 260:
+		for b in main.bots:
+			b.brain = null
+			b.global_position = m.global_position + Vector3(-7, 0.0, -2)
+			b.snap_interpolation(b)
+			b.shield_left = 0.0
+			b.velocity = Vector3(6, 0, 0)
+			b.take_damage(1e6, b.global_position + Vector3.UP * 2.0, Vector3.RIGHT, "", m)
+	if _frame == 960:
+		var t1 = _enemy_structure("turret_t1", "mid")
+		if t1 != null:
+			_props_at(m, t1.global_position + Vector3(-9, 0.05, 7), 30.0)
+			t1.take_damage(1e9, t1.global_position, Vector3.ZERO, "", m)
 
 
 func _props_at(m, at: Vector3, cam: float) -> void:

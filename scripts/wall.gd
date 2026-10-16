@@ -143,6 +143,8 @@ func _collapse() -> void:
 	Art.merge_meshes(_rubble, [_mat, art.dark_metal()])
 	_debris(clampi(int(maxf(w, d) * 1.2), 10, 26), 1.0, 1.0)
 	Fx.dust_ring(global_position, maxf(w, d) * 0.6)
+	Fx.dust_cloud(global_position, clampf(maxf(w, d) * 0.5, 2.0, 5.0))      # пыль от обвала долго оседает
+	Fx.clear_marks(AABB(global_position - Vector3(w * 0.5, 0, d * 0.5), Vector3(w, h + 2.0, d)))
 	Fx.explosion(global_position + Vector3.UP * h * 0.4, minf(maxf(w, d) * 0.35, 4.0))
 	Sfx.play_at("wallbreak", global_position, 2.0, 0.08)
 	destroyed.emit(self)
