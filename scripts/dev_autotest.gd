@@ -3640,6 +3640,15 @@ func _run_pingtest() -> void:
 			set_meta("n0", get_meta("got").size())
 		if _frame == f0 + 1:
 			_ping_mouse(at, 1, true)
+		if _frame == f0 + 2:
+			# в окне прицел меха идёт за настоящим курсором: ставим метку ровно под точкой нажатия теста
+			# (нажатие доходит до игры кадром позже)
+			var cam := get_viewport().get_camera_3d()
+			var ro := cam.project_ray_origin(at)
+			var rd := cam.project_ray_normal(at)
+			if absf(rd.y) > 0.01:
+				var g := ro + rd * (-ro.y / rd.y)
+				hud._ping_pos = Vector3(g.x, 0, g.z)
 		if hold and _frame > f0 + 1 and _frame <= f0 + 16:
 			_ping_mouse(at + mv * minf((_frame - f0 - 1) / 10.0, 1.0))
 		if hold and _frame == f0 + 18:

@@ -348,7 +348,7 @@ func _on_poi_captured(title: String, team: int) -> void:
 func _send_ping(kind: String) -> void:
 	Fx.ping(_ping_pos, mech.team, kind)
 	if _minimap != null:
-		_minimap.add_ping(_ping_pos, Fx.PINGS.get(kind, Fx.PINGS[""])["col"])
+		_minimap.add_ping(_ping_pos, kind)
 
 
 func _ping_end() -> void:
@@ -394,7 +394,6 @@ func _wheel_pick(p: Vector2) -> String:
 func _draw_wheel() -> void:
 	var c := _ping_press
 	_wheel.draw_circle(c, PING_WHEEL_R, Color(0, 0, 0, 0.5))
-	var font: Font = ThemeDB.fallback_font
 	for s in PING_SECTORS:
 		var info: Dictionary = Fx.PINGS[s[0]]
 		var col: Color = info["col"]
@@ -411,12 +410,10 @@ func _draw_wheel() -> void:
 		var outline := pts.duplicate()
 		outline.append(pts[0])
 		_wheel.draw_polyline(outline, Color(col.r, col.g, col.b, 1.0 if on else 0.5), 2.0 if on else 1.0, true)
-		var fs := 18 if on else 16
-		var tc := c + Vector2.from_angle(s[1]) * 64.0
-		var tw := font.get_string_size(info["name"], HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-		var base := tc + Vector2(-tw * 0.5, fs * 0.35)
-		_wheel.draw_string_outline(font, base, info["name"], HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 5, Color(0, 0, 0, 0.85))
-		_wheel.draw_string(font, base, info["name"], HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color.WHITE if on else col)
+		# значок метки в середине сектора, выбранный крупнее
+		var sz := 48.0 if on else 38.0
+		var ic := c + Vector2.from_angle(s[1]) * 63.0
+		_wheel.draw_texture_rect(info["icon"], Rect2(ic - Vector2(sz, sz) * 0.5, Vector2(sz, sz)), false, col if on else Color(col.r, col.g, col.b, 0.8))
 	# середина: отпустил здесь — отмена
 	_wheel.draw_arc(c, PING_WHEEL_IN - 2.0, 0, TAU, 24, Color(1, 1, 1, 0.35 if _ping_sel != "" else 0.8), 2.0, true)
 

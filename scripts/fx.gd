@@ -875,24 +875,28 @@ func casing(pos: Vector3, side: Vector3, big := false, sound := true) -> void:
 
 
 # ------------------------------------------------------------------
-#  Метки игрока (пинги): Alt+клик — обычная метка, Alt + зажатая ЛКМ — круговое меню (hud.gd) с метками
-#  «Атака», «Внимание», «Иду сюда», «Помогите». Кольцо на земле, над ним слово (у меню), звук. Видит только своя команда
+#  Метки игрока (пинги): Alt+клик — «Внимание», Alt + зажатая ЛКМ — круговое меню (hud.gd) с метками
+#  «Атака», «Внимание», «Иду сюда», «Помогите». Кольцо на земле и над ним значок своего цвета, звук.
+#  Видит только своя команда. Значки — assets/ui/ping_*.png (tools/make_ping_icons.py), белые: красятся цветом метки
 # ------------------------------------------------------------------
 
-# вид метки: название (над кольцом и в меню), цвет, высота звука
+# вид метки: значок, цвет, высота звука. «» — обычный Alt+клик, это «Внимание»
 const PINGS := {
-	"": {"name": "", "col": Color(0.4, 1.0, 0.6), "pitch": 1.0},
-	"attack": {"name": "Атака", "col": Color(1.0, 0.36, 0.3), "pitch": 0.8},
-	"attention": {"name": "Внимание", "col": Color(0.4, 1.0, 0.6), "pitch": 1.0},
-	"going": {"name": "Иду сюда", "col": Color(0.45, 0.75, 1.0), "pitch": 1.2},
-	"help": {"name": "Помогите", "col": Color(1.0, 0.75, 0.25), "pitch": 1.05},
+	"attack": {"icon": preload("res://assets/ui/ping_attack.png"), "col": Color(1.0, 0.32, 0.27), "pitch": 0.8},
+	"attention": {"icon": preload("res://assets/ui/ping_attention.png"), "col": Color(1.0, 0.84, 0.22), "pitch": 1.0},
+	"going": {"icon": preload("res://assets/ui/ping_going.png"), "col": Color(0.38, 0.68, 1.0), "pitch": 1.2},
+	"help": {"icon": preload("res://assets/ui/ping_help.png"), "col": Color(0.42, 0.92, 0.48), "pitch": 1.05},
 }
 
 signal pinged(pos: Vector3, team: int, kind: String)
 
 
+func ping_info(kind: String) -> Dictionary:
+	return PINGS.get(kind, PINGS["attention"])
+
+
 func ping(pos: Vector3, team: int, kind := "") -> void:
-	var info: Dictionary = PINGS.get(kind, PINGS[""])
+	var info: Dictionary = ping_info(kind)
 	var col: Color = info["col"]
 	var r := ground_marker(pos, 1.6, col, team, 3.0, false, true)
 	var tw := r.create_tween()
@@ -903,26 +907,25 @@ func ping(pos: Vector3, team: int, kind := "") -> void:
 		Sfx.play("ping", -4.0, 0.0, info["pitch"])
 		if kind == "help":       # просьба о помощи — двойной сигнал
 			get_tree().create_timer(0.16).timeout.connect(func(): Sfx.play("ping", -5.0, 0.0, info["pitch"] * 1.12))
-		if info["name"] != "":
-			# слово над кольцом: всплывает и через 2,5 с тает
-			var l := Label3D.new()
-			l.text = info["name"]
-			l.modulate = col
-			l.outline_modulate = Color(0, 0, 0, 0.85)
-			l.font_size = 64
-			l.outline_size = 14
-			l.pixel_size = 0.016
-			l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-			l.no_depth_test = true
-			l.render_priority = 6
-			l.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
-			get_tree().current_scene.add_child(l)
-			l.global_position = Vector3(pos.x, 2.2, pos.z)
-			var lt := l.create_tween()
-			lt.tween_property(l, "global_position:y", 3.4, 0.3).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
-			lt.tween_interval(2.2)
-			lt.tween_property(l, "modulate:a", 0.0, 0.5)
-			lt.tween_callback(l.queue_free)
+		# значок над кольцом: выскакивает и через 2,5 с тает
+		var icon := Sprite3D.new()
+		icon.texture = info["icon"]
+		icon.modulate = col
+		icon.pixel_size = 0.02
+		icon.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		icon.no_depth_test = true
+		icon.shaded = false
+		icon.render_priority = 6
+		icon.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		icon.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
+		get_tree().current_scene.add_child(icon)
+		icon.global_position = Vector3(pos.x, 2.6, pos.z)
+		icon.scale = Vector3.ONE * 0.3
+		var it := icon.create_tween()
+		it.tween_property(icon, "scale", Vector3.ONE, 0.25).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+		it.tween_interval(2.25)
+		it.tween_property(icon, "modulate:a", 0.0, 0.5)
+		it.tween_callback(icon.queue_free)
 	pinged.emit(pos, team, kind)
 
 

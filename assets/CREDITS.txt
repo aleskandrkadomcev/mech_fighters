@@ -2,3 +2,4 @@
 Эффекты: Kenney Particle Pack (CC0), kenney.nl.
 Земля: Poly Haven (CC0 1.0), polyhaven.com: aerial_grass_rock, aerial_ground_rock, aerial_mud_1, dirt_aerial_02, aerial_rocks_02 (assets/textures/ground_*; уменьшены до 1K, затенение впечено в цвет).
 Модели машин: Kenney Car Kit (kenney.nl, CC0 1.0) — sedan, suv, delivery, truck-flat, hatchback-sports (брошенная техника на карте, 16.10.2026).
+Значки меток (assets/ui/ping_*.png): свои, нарисованы скриптом tools/make_ping_icons.py — 16.10.2026.
