@@ -14,6 +14,9 @@ var _tabs := {}          # "cfg"/"parts" -> ScrollContainer
 var _tab_buttons := {}
 var _tab := "cfg"
 var _updating := false
+var _reset_btn: Button
+var _reset_armed_until := 0          # до какого времени (мс) второе нажатие «Сбросить вкладку» сбросит
+const RESET_TEXT := "Сбросить вкладку…"
 
 
 func _ready() -> void:
@@ -75,9 +78,6 @@ func _build() -> void:
 	title.add_theme_font_size_override("font_size", 24)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(title)
-	var reset_all := _button("Сбросить вкладку")
-	reset_all.pressed.connect(_on_reset_all)
-	head.add_child(reset_all)
 	var close := _button("Закрыть (F2)")
 	close.pressed.connect(toggle)
 	head.add_child(close)
@@ -144,6 +144,14 @@ func _build() -> void:
 					func(val: float) -> void: Parts.set_value(pid, field, val),
 					func() -> void: Parts.reset_value(pid, field),
 					func() -> bool: return Parts.is_changed(pid, field))
+
+	# «Сбросить вкладку» — в самом низу, далеко от «Закрыть», и срабатывает только со второго нажатия
+	var foot := HBoxContainer.new()
+	col.add_child(foot)
+	_reset_btn = _button(RESET_TEXT)
+	_reset_btn.add_theme_color_override("font_color", Color(1, 1, 1, 0.45))
+	_reset_btn.pressed.connect(_on_reset_all)
+	foot.add_child(_reset_btn)
 
 	_show_tab("parts")
 	_update_group_titles()
@@ -315,8 +323,22 @@ func _update_group_titles() -> void:
 
 
 func _on_reset_all() -> void:
+	# первое нажатие только спрашивает; сброс — если нажать ещё раз в течение 3 секунд
+	if Time.get_ticks_msec() > _reset_armed_until:
+		_reset_armed_until = Time.get_ticks_msec() + 3000
+		_reset_btn.text = "Точно сбросить ВСЮ вкладку? Нажми ещё раз"
+		_reset_btn.add_theme_color_override("font_color", Color(1.0, 0.45, 0.4))
+		get_tree().create_timer(3.0, true, false, true).timeout.connect(_disarm_reset)
+		return
+	_disarm_reset()
 	if _tab == "cfg":
 		Cfg.reset_all()
 	else:
 		Parts.reset_all()
 	_refresh_all()
+
+
+func _disarm_reset() -> void:
+	_reset_armed_until = 0
+	_reset_btn.text = RESET_TEXT
+	_reset_btn.add_theme_color_override("font_color", Color(1, 1, 1, 0.45))

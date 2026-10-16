@@ -495,8 +495,12 @@ func _run_paneltest() -> void:
 				print("[TEST] file: %s" % FileAccess.get_file_as_string(Cfg._tuning_path()).replace("\n", " / "))
 		90:
 			if _shots_left.is_empty():
+				# сброс только со второго нажатия: первое лишь спрашивает
+				panel._on_reset_all()
+				print("[TEST] reset pressed once: mech_assault still changed=%s" % Parts.is_changed("mech_assault", "walk_speed"))
 				panel._on_reset_all()
 				panel._show_tab("cfg")
+				panel._on_reset_all()
 				panel._on_reset_all()
 		100:
 			if _shots_left.is_empty():
