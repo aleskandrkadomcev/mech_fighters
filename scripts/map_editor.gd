@@ -18,12 +18,12 @@ const TOOLS := [
 	["Точки", [["poi_regen", "Реактор"], ["poi_damage", "Арсенал"], ["poi_radar", "Радар"], ["poi_dock", "Ремонтный док"], ["crate", "Место ящика"], ["lanepoint", "Точка линии"]]],
 	["Украшения", [["decor_container", "Контейнер"], ["decor_generator", "Генератор"], ["decor_tank", "Цистерна"],
 		["decor_terminal", "Терминал"], ["decor_crates", "Ящики"], ["decor_antenna", "Антенна"], ["lamp", "Фонарь"], ["target", "Мишень"],
-		["decor_sandbags", "Мешки с песком"], ["decor_jersey", "Бетонные блоки"], ["decor_fence", "Забор"]]],
+		["decor_sandbags", "Мешки с песком"], ["decor_jersey", "Бетонные блоки"], ["decor_fence", "Забор"], ["decor_car", "Брошенная машина"]]],
 	["Инструменты", [["select", "Выбор и перенос"], ["erase", "Ластик"]]],
 ]
 const DECOR_SIZE := {"container": Vector2(2.6, 6.2), "generator": Vector2(3.4, 2.4), "tank": Vector2(3.6, 3.6),
 	"terminal": Vector2(1.6, 1.2), "crates": Vector2(3.2, 2.6), "antenna": Vector2(2.2, 2.2),
-	"sandbags": Vector2(4.8, 7.6), "jersey": Vector2(6.6, 1.0), "fence": Vector2(9.4, 0.7)}
+	"sandbags": Vector2(4.8, 7.6), "jersey": Vector2(6.6, 1.0), "fence": Vector2(9.4, 0.7), "car": Vector2(2.4, 3.6)}
 const LANE_COLORS := {"top": Color(0.4, 0.8, 1.0), "mid": Color(1.0, 0.85, 0.3), "bot": Color(0.6, 1.0, 0.45), "base": Color(0.8, 0.8, 0.8)}
 const TEAM_COLORS := [Color(1.0, 0.55, 0.15), Color(0.95, 0.2, 0.2)]
 

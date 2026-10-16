@@ -1,6 +1,7 @@
 extends Node3D
 ## Разрушаемая мелочь на карте: кучки ящиков (разлетаются на куски), столбики-фонари (падают целиком),
-## мешки с песком (разлетаются), бетонные блоки (сдвигаются и заваливаются), заборы-решётки (падают плашмя).
+## мешки с песком (разлетаются), бетонные блоки (сдвигаются и заваливаются), заборы-решётки (падают плашмя),
+## брошенные машины (мех сминает; взрыв поджигает — горит и остаётся обгорелым остовом; пули сквозь неё летят).
 ## Без урона и без влияния на бой — только декор (решение Сани 16.10.2026).
 ## Не мешает ходить, стрелять и видеть: мехи и крипы идут сквозь неё, боты и крипы её не обходят
 ## (её нет в карте проходимости). Ломается с первого касания меха или крипа и от взрыва:
@@ -114,8 +115,28 @@ func get_hit_radius() -> float:
 	return radius
 
 
-func take_damage(_amount: float, _point: Vector3, dir: Vector3, _kind := "", who: Node = null) -> void:
+var burnt := false                # машина сгорела
+
+
+func take_damage(_amount: float, _point: Vector3, dir: Vector3, dmg_kind := "", who: Node = null) -> void:
+	if kind == "car":
+		if dmg_kind == "explosion" and not burnt:
+			_ignite()
+		return
 	smash(dir, who)
+
+
+# машина загорелась: огонь и дым (Fx.smolder), краска за пару секунд обгорает дочерна
+func _ignite() -> void:
+	burnt = true
+	if broken:
+		remove_from_group("damageable")
+	Fx.smolder(self, Vector3(0, 0.9, 0), 1.5, 20.0)
+	Fx.light_flash(global_position + Vector3.UP, Color(1.0, 0.55, 0.2), 8.0, 3.0, 0.3)
+	var m = get_meta("car_mat", null)
+	if m != null:
+		var tw := create_tween()
+		tw.tween_method(func(v: float) -> void: m.set_shader_parameter("burnt", v), 0.0, 1.0, 2.5)
 
 
 func _physics_process(_delta: float) -> void:
@@ -148,7 +169,8 @@ func smash(dir: Vector3, who: Node = null) -> void:
 	if broken:
 		return
 	broken = true
-	remove_from_group("damageable")
+	if kind != "car" or burnt:
+		remove_from_group("damageable")      # несгоревшую смятую машину ещё можно поджечь
 	var g = get_tree().current_scene
 	var seen := true
 	if g != null and g.has_method("is_visible_to") and who != null and is_instance_valid(who):
@@ -175,6 +197,8 @@ func _process(delta: float) -> void:
 			_fence_fall(global_basis.z, true)
 		elif kind == "jersey":
 			_knock(global_basis.z, true)
+		elif kind == "car":
+			_crush(global_basis.z, true)
 		elif _intact != null:
 			_intact.visible = false     # сломали без нас: обломки уже ушли в землю
 		else:
@@ -291,7 +315,29 @@ func _bags(dir: Vector3) -> void:
 	Sfx.play_at("step", global_position, -4.0, 0.2)
 
 
+# машину смял мех: корпус проседает и чуть кренится, хруст и пыль, стёкла искрами; так и стоит
+func _crush(dir: Vector3, instant := false) -> void:
+	var flat := Vector3(dir.x, 0, dir.z)
+	flat = flat.normalized() if flat.length() > 0.01 else global_basis.z
+	var axis := Vector3.UP.cross(flat).normalized()
+	var end := Basis(axis, _rng.randf_range(0.05, 0.16)) * _pivot.basis * Basis.from_scale(Vector3(1.06, 0.55, 1.04))
+	if instant:
+		_pivot.basis = end
+		return
+	var start := _pivot.basis
+	var tw := _pivot.create_tween()
+	tw.tween_method(func(k: float) -> void: _pivot.basis = start.slerp(end.orthonormalized(), k) * Basis.from_scale(Vector3.ONE.lerp(Vector3(1.06, 0.55, 1.04), k)), 0.0, 1.0, 0.18)
+	Fx.dust_ring(global_position, 2.0)
+	Fx.spark(global_position + Vector3.UP * 1.0, Vector3.UP, true, false)
+	Fx.spark(global_position + Vector3.UP * 0.8 + flat, (Vector3.UP + flat).normalized(), true, false)
+	Sfx.play_at("wall", global_position, -5.0, 0.2)
+	Sfx.play_at("casing", global_position, -4.0, 0.3)
+
+
 func _burst(dir: Vector3) -> void:
+	if kind == "car":
+		_crush(dir)
+		return
 	if kind == "post":
 		_fall(dir)
 		return

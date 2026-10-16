@@ -11,7 +11,8 @@ const GrassShader := preload("res://shaders/grass.gdshader")
 const Prop := preload("res://scripts/prop.gd")
 
 const DECOR_KINDS := {"container": "Контейнер", "generator": "Генератор", "tank": "Цистерна", "terminal": "Терминал",
-	"crates": "Ящики", "antenna": "Антенна", "sandbags": "Мешки с песком", "jersey": "Бетонные блоки", "fence": "Забор"}
+	"crates": "Ящики", "antenna": "Антенна", "sandbags": "Мешки с песком", "jersey": "Бетонные блоки", "fence": "Забор",
+	"car": "Брошенная машина"}
 
 var vision: Node
 var ground_mask: Image           # где дороги и площадки (из main.gd): трава там не растёт
@@ -280,6 +281,9 @@ func _decor(kind: String, pos: Vector3, rot: float) -> void:
 		"sandbags", "jersey", "fence":
 			_small_stuff(kind, pos, rot)
 			return
+		"car":
+			_car(pos, rot)
+			return
 		"antenna":
 			foot = Vector2(2.2, 2.2)
 			height = 2.0
@@ -365,6 +369,87 @@ func _small_stuff(kind: String, pos: Vector3, rot: float) -> void:
 	add_child(pr)
 	var wide := absf(sin(rot)) < 0.5
 	prop_boxes.append([pos.x, pos.z, hx * 2.0 if wide else hz * 2.0, 1.0, hz * 2.0 if wide else hx * 2.0])
+
+
+# брошенная техника (модели Kenney Car Kit, CC0): краска выцвела, ржавчина пятнами, грязь снизу; пропорции
+# чуть приплюснуты (у Kenney игрушечные). Мех сминает (prop.gd, вид «car»), взрыв поджигает — горит остовом
+const CAR_MODELS := ["sedan", "suv", "delivery", "truck-flat", "hatchback-sports"]
+const CAR_SHADER := """shader_type spatial;
+uniform sampler2D atlas : source_color, filter_linear_mipmap;
+uniform float burnt = 0.0;
+uniform sampler2D fog_tex : filter_linear, repeat_disable;
+uniform vec4 fog_rect = vec4(-120.0, -70.0, 240.0, 140.0);
+uniform float fog_dark = 0.0;
+varying vec3 wpos;
+void vertex() { wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; }
+float h3(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float n3(vec3 x) {
+	vec3 i = floor(x); vec3 f = fract(x); f = f * f * (3.0 - 2.0 * f);
+	return mix(mix(mix(h3(i), h3(i + vec3(1, 0, 0)), f.x), mix(h3(i + vec3(0, 1, 0)), h3(i + vec3(1, 1, 0)), f.x), f.y),
+		mix(mix(h3(i + vec3(0, 0, 1)), h3(i + vec3(1, 0, 1)), f.x), mix(h3(i + vec3(0, 1, 1)), h3(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+}
+void fragment() {
+	vec3 c = texture(atlas, UV).rgb;
+	float l = dot(c, vec3(0.3, 0.59, 0.11));
+	c = mix(vec3(l), c, 0.35) * 0.5;                                   // краска выцвела и потемнела
+	float n = n3(wpos * 2.3);
+	float rust = smoothstep(0.5, 0.78, n3(wpos * 0.8 + 5.0) * 0.7 + n * 0.3);
+	c = mix(c, vec3(0.3, 0.15, 0.07) * (0.6 + 0.7 * n), rust * 0.8);   // ржавчина пятнами
+	c *= mix(0.55, 1.0, clamp(wpos.y / 1.3, 0.0, 1.0));                // грязь снизу
+	c = mix(c, vec3(0.035, 0.03, 0.028) * (0.7 + 0.6 * n), burnt);     // обгорел
+	float vis = texture(fog_tex, (wpos.xz - fog_rect.xy) / fog_rect.zw).r;
+	c *= 1.0 - fog_dark * (1.0 - vis);
+	ALBEDO = c;
+	ROUGHNESS = mix(0.7, 0.95, max(rust, burnt));
+	METALLIC = 0.25 * (1.0 - max(rust, burnt));
+}
+"""
+static var _car_shader: Shader
+
+
+func _car(pos: Vector3, rot: float) -> void:
+	var pick: String = CAR_MODELS[absi(int(pos.x * 7.0 + pos.z * 13.0)) % CAR_MODELS.size()]
+	var path := "res://assets/props/cars/%s.glb" % pick
+	if not ResourceLoader.exists(path):
+		return
+	if _car_shader == null:
+		_car_shader = Shader.new()
+		_car_shader.code = CAR_SHADER
+	var scene: Node3D = (load(path) as PackedScene).instantiate()
+	var mat := ShaderMaterial.new()
+	mat.shader = _car_shader
+	if vision != null:
+		vision.register_material(mat)
+	var k := 1.2
+	var squash := Basis.from_scale(Vector3(k, k * 0.82, k))
+	var parts: Array = []
+	for mi in scene.find_children("*", "MeshInstance3D", true, false):
+		var m: Mesh = mi.mesh
+		var src = m.surface_get_material(0)
+		if src != null and src.get("albedo_texture") != null and mat.get_shader_parameter("atlas") == null:
+			mat.set_shader_parameter("atlas", src.albedo_texture)
+		var xf: Transform3D = Transform3D(squash, Vector3.ZERO) * (scene.global_transform.affine_inverse() * mi.global_transform if mi.is_inside_tree() else _rel_xf(scene, mi))
+		parts.append({"mesh": m, "xf": xf, "mat": mat, "group": 0})
+	scene.free()
+	var pr := Prop.new()
+	pr.position = pos
+	pr.rotation.y = rot
+	pr.setup_parts(parts, "car", 0.95 * k, 1.35 * k)
+	pr.set_meta("car_mat", mat)
+	add_child(pr)
+	_blob(pos, Vector2(2.4, 3.6) * k if absf(sin(rot)) < 0.5 else Vector2(3.6, 2.4) * k)
+	prop_boxes.append([pos.x, pos.z, 2.0 * k, 1.0, 2.8 * k] if absf(sin(rot)) < 0.5 else [pos.x, pos.z, 2.8 * k, 1.0, 2.0 * k])
+
+
+# положение детали модели относительно корня (модель ещё не в сцене — считаем по цепочке родителей)
+func _rel_xf(root: Node3D, n: Node3D) -> Transform3D:
+	var xf := Transform3D()
+	var cur: Node = n
+	while cur != null and cur != root:
+		if cur is Node3D:
+			xf = (cur as Node3D).transform * xf
+		cur = cur.get_parent()
+	return xf
 
 
 # сетка забора: картинка с прозрачностью (ambientCG Fence007A), отсекается по альфе, видна с обеих сторон
