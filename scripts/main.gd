@@ -17,7 +17,6 @@ const Nav := preload("res://scripts/nav.gd")
 const CameraRig := preload("res://scripts/camera_rig.gd")
 const Crosshair := preload("res://scripts/crosshair.gd")
 const Hud := preload("res://scripts/hud.gd")
-const TuningPanel := preload("res://scripts/tuning_panel.gd")
 const Hangar := preload("res://scripts/hangar.gd")
 const GameMenu := preload("res://scripts/game_menu.gd")
 const TargetDummy := preload("res://scripts/target_dummy.gd")
@@ -142,8 +141,6 @@ func _ready() -> void:
 	# миникарта вписана в 360 × 260 пикселей (квадратная карта не вылезает за низ экрана)
 	var mm_k := minf(360.0 / map_rect().size.x, 260.0 / map_rect().size.y)
 	minimap.setup(self, vision, map_rect(), covers, map_rect().size * mm_k)
-
-	add_child(TuningPanel.new())
 
 	hangar = Hangar.new()
 	hangar.applied.connect(_on_build_applied)

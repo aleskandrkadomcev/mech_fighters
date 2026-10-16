@@ -82,8 +82,11 @@ extends Node
 @export_range(0, 1, 0.05) var poi_regen_bonus := 0.3     # Бонус «Реактор» | доля к восстановлению энергии всей команды-владельца
 @export_range(0, 1, 0.05) var poi_damage_bonus := 0.1    # Бонус «Арсенал» | доля к урону всей команды-владельца
 @export_range(0, 40, 1) var poi_vision := 12.0           # Обзор с точки | метров вижена у команды-владельца
-@export_range(5, 90, 1) var poi_radar_period := 25.0     # Радар: скан | раз в сколько секунд команда-владелец видит всех врагов
-@export_range(0.5, 5, 0.1) var poi_radar_reveal := 1.5   # Радар: длительность скана | секунд враги видны сквозь туман войны и невидимость
+@export_range(0.5, 15, 0.5) var poi_radar_capture := 2.0   # Радар: время захвата | секунд стоять у вышки без врагов (быстрее других точек)
+@export_range(10, 90, 1) var poi_radar_range := 40.0     # Радар: обзор | метров вокруг вышки, пока у неё стоит мех команды-владельца; видно сквозь стены
+@export_range(0.1, 5, 0.1) var poi_radar_grow := 0.8     # Радар: раскрытие обзора | секунд от нуля до полного круга
+@export_range(0.1, 5, 0.1) var poi_radar_shrink := 0.5   # Радар: сворачивание обзора | секунд: круг сужается до нуля, когда своих у вышки нет
+@export_range(0, 1, 1) var poi_radar_cloak := 1          # Радар видит невидимок | 1 = невидимки в круге радара видны, 0 = нет
 @export_range(0, 100, 1) var poi_dock_heal := 25.0       # Ремонтный док: ремонт | здоровья в секунду своим мехам в круге точки
 @export_range(0, 1, 0.01) var poi_dock_refill := 0.1     # Ремонтный док: патроны | доля полного боезапаса в секунду своим мехам в круге
 @export_range(10, 300, 5) var crate_interval := 60.0     # Дроп припасов | раз в сколько секунд падает ящик
@@ -184,8 +187,12 @@ var _save_in := 0.0
 var _persist := true
 
 
+var panel: CanvasLayer        # панель F2: живёт здесь, поэтому открывается везде — в меню, в ангаре, в бою и на паузе
+
+
 func _ready() -> void:
 	_collect_items()
+	call_deferred("_make_panel")     # после остальных глобальных (панели нужны числа деталей из Parts)
 	# во время автопроверки сохранённые настройки не трогаем
 	var args := OS.get_cmdline_user_args()
 	_persist = args.is_empty() or args.has("--tuning-test")
@@ -335,6 +342,12 @@ func _read_labels() -> Dictionary:
 		else:
 			out[m.get_string(1)] = [text.strip_edges(), ""]
 	return out
+
+
+func _make_panel() -> void:
+	panel = load("res://scripts/tuning_panel.gd").new()
+	panel.process_mode = Node.PROCESS_MODE_ALWAYS      # работает и на паузе
+	add_child(panel)
 
 
 func _load_tuning() -> void:

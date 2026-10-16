@@ -279,7 +279,7 @@ func _build_settings() -> void:
 	_check_row(col, "Цифры урона", "damage_numbers")
 	_check_row(col, "Две одинаковые пушки — обе на ЛКМ (по очереди, рельсы залпом)", "link_guns")
 	var note := Label.new()
-	note.text = "Все остальные числа игры (мехи, оружие, турели, крипы, боты) — в бою на F2."
+	note.text = "Все остальные числа игры (мехи, оружие, турели, крипы, боты) — на F2 (в меню, в бою и на паузе)."
 	note.add_theme_font_size_override("font_size", 16)
 	note.add_theme_color_override("font_color", Color(1, 1, 1, 0.55))
 	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART

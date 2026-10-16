@@ -85,11 +85,7 @@ func _build_pause() -> void:
 			toggle_pause()
 			if main.winner < 0:
 				main.hangar.open(main.mech.build)],
-		["Настройки (F2)", func() -> void:
-			toggle_pause()
-			for n in main.get_children():
-				if n.has_method("toggle") and n.get_script() != null and n.get_script().resource_path.ends_with("tuning_panel.gd"):
-					n.toggle()],
+		["Настройки (F2)", func() -> void: Cfg.panel.toggle()],     # пауза остаётся
 		["Начать заново", func() -> void: main.restart()],
 	]
 	if Maps.from_editor:

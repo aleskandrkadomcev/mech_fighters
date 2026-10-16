@@ -17,7 +17,7 @@ var _updating := false
 
 
 func _ready() -> void:
-	layer = 10
+	layer = 20       # поверх ангара и меню паузы
 	_build()
 	_panel.visible = false
 

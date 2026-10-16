@@ -145,6 +145,10 @@ func _viewers(team: int) -> Array:
 	for p in get_tree().get_nodes_in_group("pois"):
 		if p.owner_team == team and Cfg.poi_vision > 0.0:
 			out.append({"node": p, "pos": p.global_position, "r": Cfg.poi_vision, "omni": 0.0})
+		# радар: большой круг обзора сквозь стены (nolos), пока у вышки стоят свои
+		if p.kind == "radar" and p.owner_team == team and p.radar_r > 0.5 and p.radar_eye != null:
+			out.append({"node": p.radar_eye, "pos": p.global_position, "r": p.radar_r,
+				"omni": p.radar_r if Cfg.poi_radar_cloak == 1 else 0.0, "nolos": true})
 	for c in get_tree().get_nodes_in_group("creeps"):
 		if c.dead or c.team != team:
 			continue
@@ -170,7 +174,7 @@ func _seen_by(viewers: Array, pos: Vector3, radius: float, hidden: bool) -> bool
 		var reach: float = (v["omni"] if hidden else v["r"]) + radius
 		if d.length() > reach:
 			continue
-		if _los(v["pos"], pos):
+		if v.get("nolos", false) or _los(v["pos"], pos):
 			return true
 	return false
 
@@ -194,12 +198,6 @@ func _update() -> void:
 				continue
 			if mn.triggered or _seen_by(viewers, mn.global_position, 0.5, true):
 				vis[mn.get_instance_id()] = true
-		# радар команды сканирует: видны все враги, даже невидимки и те, что в тумане
-		for p in get_tree().get_nodes_in_group("pois"):
-			if p.kind == "radar" and p.owner_team == team and p.scan_left > 0.0:
-				for m in get_tree().get_nodes_in_group("mechs"):
-					if not m.dead and m.team != team:
-						vis[m.get_instance_id()] = true
 		if team == player_team:
 			for pk in get_tree().get_nodes_in_group("pickups"):
 				if _seen_by(viewers, pk.global_position, 0.5, false):
@@ -263,7 +261,14 @@ func _update_fans() -> void:
 			if moving and (now - old["t"] < FAN_EVERY_MS or old["pos"].distance_to(pos) < 0.05):
 				continue
 		var n_rays := RAYS_CREEP if node.is_in_group("creeps") else RAYS
-		_fans[id] = _make_fan(node, pos, r, _fan_dists(space, Vector3(pos.x, EYE, pos.z), r, n_rays))
+		if v.get("nolos", false):
+			# радар видит сквозь стены: веер — полный круг, лучи не нужны
+			var full := PackedFloat32Array()
+			full.resize(n_rays)
+			full.fill(r)
+			_fans[id] = _make_fan(node, pos, r, full)
+		else:
+			_fans[id] = _make_fan(node, pos, r, _fan_dists(space, Vector3(pos.x, EYE, pos.z), r, n_rays))
 
 
 # дальность обзора по лучам веера. Луч пускаем, только если в его сторону есть укрытие внутри круга

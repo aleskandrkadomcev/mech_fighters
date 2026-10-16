@@ -43,6 +43,7 @@ var _boom := false               # взрыв рядом с игроком на 
 var _moba_secs := 60
 var _perf := false               # с mobatest: каждые 20 с сколько узлов, объектов, ресурсов и время кадра
 var _fxreel := false             # --fxreel: эффекты одним запуском — драка со взрывами, штурм базы, своя база
+var _radartest := false          # --radartest (с --map=arena --enemies=1 --allies=0): круг обзора радара и F2 на паузе
 var _creeptest := false          # --creeptest: у крипа после склейки деталей есть корпус, гусеницы и башня
 var _aimtest := false            # --aimtest: прицел (земля / середина хитбокса), пределы стволов, гранатомёт
 var _fancheck := false           # --fancheck: веер обзора с пропуском лучей совпадает с полным (все лучи)
@@ -153,6 +154,8 @@ func setup(main_node: Node3D, args: PackedStringArray) -> void:
 			_aimtest = true
 		elif a == "--creeptest":
 			_creeptest = true
+		elif a == "--radartest":
+			_radartest = true
 		elif a == "--fxreel" or a.begins_with("--fxreel="):
 			_fxreel = true
 			_nohud = true
@@ -230,6 +233,8 @@ func _process(_delta: float) -> void:
 		_run_aimtest()
 	if _creeptest and _frame == 5:
 		_run_creeptest()
+	if _radartest:
+		_run_radartest()
 	if _demo:
 		_run_demo()
 	if _inputtest:
@@ -301,7 +306,7 @@ func _process(_delta: float) -> void:
 		var img := get_viewport().get_texture().get_image()
 		img.save_png(("%s/%s_f%04d.png" % [_shot_dir, _target, shot_f]) if _fxreel else ("%s/f%04d.png" % [_shot_dir, shot_f]))
 		_shots_left.erase(shot_f)
-		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and not _linktest and _mechexport == "" and not _gfxbench and not _cpubench and not _fancheck and not _aimtest and not _creeptest:
+		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and not _linktest and _mechexport == "" and not _gfxbench and not _cpubench and not _fancheck and not _aimtest and not _creeptest and not _radartest:
 			get_tree().quit()
 
 
@@ -442,10 +447,7 @@ func _run_inputtest() -> void:
 		920:
 			_tap(KEY_F2)
 		925:
-			var panel = null
-			for c in main.get_children():
-				if c.get_script() == load("res://scripts/tuning_panel.gd"):
-					panel = c
+			var panel = Cfg.panel
 			print("[TEST] F2 pressed, panel visible: %s, rows: %d" % [panel._panel.visible, panel._rows.size()])
 		930:
 			print("[TEST] done")
@@ -455,10 +457,7 @@ func _run_inputtest() -> void:
 # --- проверка панели настроек: открыть, раскрыть группы, подвигать числа общих правил и деталей ---
 
 func _panel() -> Node:
-	for c in main.get_children():
-		if c.get_script() == load("res://scripts/tuning_panel.gd"):
-			return c
-	return null
+	return Cfg.panel
 
 
 func _run_paneltest() -> void:
@@ -2458,3 +2457,71 @@ func _run_creeptest() -> void:
 	print("[CREEP] корпус на месте — %s" % ("ВЕРНО" if body_ok else "ОШИБКА"))
 	print("[CREEP] все склеенные детали рисуются — %s" % ("ВЕРНО" if fails == 0 else "ОШИБКА (%d моделей с пропавшими кусками)" % fails))
 	get_tree().quit()
+
+
+# ------------------------------------------------------------------
+#  Радар (--radartest --map=arena --enemies=1 --allies=0): стоишь у вышки — захват, круг обзора раскрывается,
+#  враг далеко за пределами обзора меха виден; ушёл — круг сворачивается, враг пропадает, радар остаётся твоим.
+#  В конце F2 на паузе открывает панель
+# ------------------------------------------------------------------
+
+var _rt_radar: Node3D
+var _rt_enemy: Node3D
+var _rt_fails := 0
+
+
+func _rt_check(ok: bool, text: String) -> void:
+	print("[RADAR] %s — %s" % [text, "ВЕРНО" if ok else "ОШИБКА"])
+	if not ok:
+		_rt_fails += 1
+
+
+func _run_radartest() -> void:
+	var m = main.mech
+	if _frame == 5:
+		for p in get_tree().get_nodes_in_group("pois"):
+			if p.kind == "radar":
+				_rt_radar = p
+		for mm in get_tree().get_nodes_in_group("mechs"):
+			if mm.team != m.team:
+				_rt_enemy = mm
+		if _rt_radar == null or _rt_enemy == null:
+			print("[RADAR] нет радара или врага на карте — ОШИБКА")
+			get_tree().quit()
+			return
+		Cfg.poi_radar_range = 80.0
+		var rp: Vector3 = _rt_radar.global_position
+		var dir := Vector3(-rp.x, 0, -rp.z).normalized()
+		m.global_position = rp + Vector3(0, 0.05, 0)
+		m.snap_interpolation(m)
+		m.demo = {"move": Vector2.ZERO, "fire": false, "aim": rp + dir * 10.0}
+		_rt_enemy.global_position = rp + dir * 68.0 + Vector3(0, 0.05, 0)
+		_rt_enemy.snap_interpolation(_rt_enemy)
+		_rt_enemy.stun(99.0)
+		print("[RADAR] обзор меха %.0f, враг в %.0f от вышки" % [m.stats.get("vision", 35.0), 68.0])
+	if _rt_radar == null:
+		return
+	if _frame == 60:
+		_rt_check(_rt_radar.owner_team == -1 and not main.vision.is_visible_to(m.team, _rt_enemy),
+			"через 1 с ещё не захвачен, врага не видно")
+	if _frame == 200:
+		var r: float = _rt_radar.radar_r
+		_rt_check(_rt_radar.owner_team == m.team and r > 79.0, "захват за 2 с, круг раскрылся до %.0f" % r)
+		_rt_check(main.vision.is_visible_to(m.team, _rt_enemy), "враг в 68 от вышки (дальше обзора меха) виден")
+		var dir2: Vector3 = (_rt_enemy.global_position - _rt_radar.global_position).normalized()
+		m.global_position = _rt_radar.global_position + dir2.cross(Vector3.UP) * 15.0 + Vector3(0, 0.05, 0)
+		m.snap_interpolation(m)
+	if _frame == 222:
+		_rt_check(_rt_radar.radar_r < 79.0 and _rt_radar.radar_r > 0.0, "ушёл от вышки: круг сужается (%.0f)" % _rt_radar.radar_r)
+	if _frame == 260:
+		_rt_check(_rt_radar.radar_r == 0.0, "через 0,6 с круг свернулся")
+		_rt_check(not main.vision.is_visible_to(m.team, _rt_enemy), "врага больше не видно")
+		_rt_check(_rt_radar.owner_team == m.team, "радар остаётся твоим")
+		get_tree().paused = true
+		_tap(KEY_F2)
+	if _frame == 266:
+		_rt_check(Cfg.panel._panel.visible, "на паузе F2 открыл панель")
+		Cfg.panel.toggle()
+		get_tree().paused = false
+		print("[RADAR] итог: %s" % ("ВСЁ ВЕРНО" if _rt_fails == 0 else "ошибок %d" % _rt_fails))
+		get_tree().quit()

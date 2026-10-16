@@ -42,6 +42,8 @@ var _hitmark_kill := false
 var _hint_full := true
 var _minimap: Control
 var _feed: VBoxContainer          # лента убийств справа сверху
+var _announce: Label              # крупная подпись по центру сверху: «Радар захвачен»
+var _announce_tw: Tween
 
 
 func _ready() -> void:
@@ -129,6 +131,17 @@ void fragment() {
 	_feed.add_theme_constant_override("separation", 4)
 	root.add_child(_feed)
 	Battle.feed.connect(_on_feed)
+
+	_announce = _label("", 40)
+	_announce.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	_announce.offset_left = -500
+	_announce.offset_right = 500
+	_announce.offset_top = 150
+	_announce.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_announce.add_theme_constant_override("outline_size", 10)
+	_announce.visible = false
+	root.add_child(_announce)
+	Battle.poi_captured.connect(_on_poi_captured)
 
 	# нижняя панель: сверху слоты абилок (сколько модулей с абилками, столько слотов), под ними полоски
 	var bottom := VBoxContainer.new()
@@ -282,6 +295,20 @@ func _on_feed(killer: String, killer_team: int, victim: String, victim_team: int
 	tw.tween_interval(6.0)
 	tw.tween_property(row, "modulate:a", 0.0, 0.8)
 	tw.tween_callback(row.queue_free)
+
+
+func _on_poi_captured(title: String, team: int) -> void:
+	var mine: bool = team == (mech.team if mech != null else 0)
+	_announce.text = ("%s захвачен" % title) if mine else ("Враг захватил: %s" % title)
+	_announce.add_theme_color_override("font_color", Color(0.55, 0.85, 1.0) if mine else Color(1.0, 0.45, 0.4))
+	_announce.visible = true
+	_announce.modulate.a = 1.0
+	if _announce_tw != null:
+		_announce_tw.kill()
+	_announce_tw = _announce.create_tween()
+	_announce_tw.tween_interval(2.2)
+	_announce_tw.tween_property(_announce, "modulate:a", 0.0, 0.6)
+	_announce_tw.tween_callback(func() -> void: _announce.visible = false)
 
 
 func _draw_hitmark() -> void:

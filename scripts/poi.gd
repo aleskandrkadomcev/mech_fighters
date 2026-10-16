@@ -3,7 +3,8 @@ extends Node3D
 ## Пока точка твоя, вся команда получает бонус (какой — задаёт kind) и видит вокруг точки.
 ## Если на точке стоят обе команды, захват замирает.
 ## Виды: regen — Реактор (+восстановление энергии), damage — Арсенал (+урон),
-## radar — Радар (раз в poi_radar_period секунд скан: команда видит всех врагов, даже невидимок; см. vision.gd),
+## radar — Радар (захватывается быстро; пока у вышки стоит мех команды-владельца, вокруг неё большой круг обзора
+##         сквозь стены — быстро раскрывается, без своих у вышки быстро сворачивается; см. vision.gd),
 ## dock — Ремонтный док (чинит и пополняет патроны своим мехам в круге).
 
 var kind := "regen"
@@ -14,8 +15,10 @@ var _ring_mat: StandardMaterial3D
 var _core_mat: StandardMaterial3D
 var _ring: MeshInstance3D
 var _label: Label3D
-var scan_left := 0.0             # радар: сколько ещё секунд идёт скан (vision.gd показывает врагов)
-var _scan_t := 0.0               # радар: до следующего скана
+var radar_r := 0.0               # радар: нынешний радиус круга обзора (vision.gd)
+var radar_eye: Node3D            # радар: «глаз» круга обзора (свой узел, чтобы не путаться с обзором самой точки)
+var _radar_ring: MeshInstance3D  # радар: граница круга на земле, видна только команде-владельцу
+var _radar_ring_mat: StandardMaterial3D
 var _dish: Node3D                # радар: вращающаяся антенна (только вид)
 
 
@@ -107,6 +110,22 @@ func _ready() -> void:
 		plate.position = Vector3(0, 1.0, 0.25)
 		plate.rotation.x = -0.35
 		_dish.add_child(plate)
+		radar_eye = Node3D.new()
+		add_child(radar_eye)
+		_radar_ring_mat = StandardMaterial3D.new()
+		_radar_ring_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_radar_ring_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		_radar_ring = MeshInstance3D.new()
+		var rt := TorusMesh.new()
+		rt.inner_radius = 0.985
+		rt.outer_radius = 1.0
+		rt.rings = 96
+		_radar_ring.mesh = rt
+		_radar_ring.material_override = _radar_ring_mat
+		_radar_ring.position.y = 0.1
+		_radar_ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_radar_ring.visible = false
+		add_child(_radar_ring)
 	elif kind == "dock":
 		# ремонтный док: две стрелы-манипулятора над площадкой
 		for sgn in [-1.0, 1.0]:
@@ -145,7 +164,7 @@ func bonus_text() -> String:
 		"regen":
 			return "+%d%% восстановления энергии" % int(round(Cfg.poi_regen_bonus * 100))
 		"radar":
-			return "скан раз в %d с: все враги видны" % int(round(Cfg.poi_radar_period))
+			return "обзор %d м, пока свои у вышки" % int(round(Cfg.poi_radar_range * Cfg.METERS_PER_UNIT))
 		"dock":
 			return "ремонт и патроны своим в круге"
 	return "+%d%% урона" % int(round(Cfg.poi_damage_bonus * 100))
@@ -166,7 +185,7 @@ func _physics_process(delta: float) -> void:
 		d.y = 0
 		if d.length() <= Cfg.poi_radius:
 			inside[m.team] += 1
-	var step := delta / maxf(Cfg.poi_capture_time, 0.1)
+	var step := delta / maxf(Cfg.poi_radar_capture if kind == "radar" else Cfg.poi_capture_time, 0.1)
 	if inside[0] > 0 and inside[1] == 0:
 		progress = maxf(progress - step, -1.0)
 	elif inside[1] > 0 and inside[0] == 0:
@@ -193,20 +212,11 @@ func _physics_process(delta: float) -> void:
 	_core_mat.albedo_color = own
 	_core_mat.emission = own
 
-	if owner_team < 0:
-		scan_left = 0.0
-		return
 	if kind == "radar":
-		scan_left = maxf(scan_left - delta, 0.0)
-		_scan_t -= delta
-		if _scan_t <= 0.0:
-			_scan_t = Cfg.poi_radar_period
-			scan_left = Cfg.poi_radar_reveal
-			# волна скана видна только команде-владельцу: враг не знает, что его засветили
-			if owner_team == Fx.player_team:
-				Fx.pulse(global_position + Vector3.UP * 4.5, 30.0)
-				Sfx.play_at("ping", global_position, -4.0, 0.0)
-	elif kind == "dock":
+		_update_radar(delta, inside)
+	if owner_team < 0:
+		return
+	if kind == "dock":
 		for m in get_tree().get_nodes_in_group("mechs"):
 			if m.dead or m.team != owner_team:
 				continue
@@ -217,11 +227,31 @@ func _physics_process(delta: float) -> void:
 				m.add_ammo(Cfg.poi_dock_refill * delta)
 
 
+# радар: круг обзора, пока у вышки стоит мех команды-владельца; быстро раскрывается и быстро сворачивается
+func _update_radar(delta: float, inside: Array) -> void:
+	var want: float = Cfg.poi_radar_range if owner_team >= 0 and inside[owner_team] > 0 else 0.0
+	var secs: float = Cfg.poi_radar_grow if want > radar_r else Cfg.poi_radar_shrink
+	radar_r = move_toward(radar_r, want, Cfg.poi_radar_range / maxf(secs, 0.05) * delta)
+	# граница круга на земле — только своей команде (враг не знает, что вышка смотрит)
+	var ring_on := owner_team == Fx.player_team and radar_r > 0.3
+	if _radar_ring.visible != ring_on:
+		_radar_ring.visible = ring_on
+	if ring_on:
+		var sc := Vector3(radar_r, 0.3, radar_r)
+		if not _radar_ring.scale.is_equal_approx(sc):
+			_radar_ring.scale = sc
+		var c: Color = Cfg.player_color if owner_team == 0 else Cfg.enemy_color
+		var cc := Color(c.r, c.g, c.b, 0.55)
+		if _radar_ring_mat.albedo_color != cc:
+			_radar_ring_mat.albedo_color = cc
+
+
 func _set_owner(t: int) -> void:
 	if t == owner_team:
 		return
 	owner_team = t
-	_scan_t = 0.0      # радар сканирует сразу после захвата
+	radar_r = 0.0      # круг прежнего владельца гаснет сразу, новый раскрывается с нуля
 	if t >= 0:
+		Battle.poi_captured.emit(title, t)
 		Fx.burst(global_position + Vector3.UP * 2.0, Cfg.player_color if t == 0 else Cfg.enemy_color, Cfg.poi_radius)
 		Sfx.play_at("emp", global_position, -6.0, 0.0)

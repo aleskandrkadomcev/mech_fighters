@@ -3,6 +3,7 @@ extends Node
 ## По этому строится таблица после боя. Ещё отсюда цифры урона и отметка попадания у прицела.
 
 signal player_hit(target: Node, amount: float)   # игрок попал по врагу (для отметки у прицела)
+signal poi_captured(title: String, team: int)   # точку интереса захватили: крупная подпись на экране
 signal feed(killer: String, killer_team: int, victim: String, victim_team: int)   # строка в ленту убийств
 
 var time := 0.0
