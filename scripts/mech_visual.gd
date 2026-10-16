@@ -64,7 +64,6 @@ var _lean := Vector3.ZERO
 var _was_moving := false
 var _crouch := 0.0
 var _inited := false
-var _flash_t := 0.0
 var stunned := false
 var braced := false              # упор (Мортира): сзади опускаются опоры
 var airborne := false            # летит при высадке: ноги поджаты, задние двигатели не горят
@@ -851,15 +850,9 @@ func _s(key: String, def: float) -> float:
 	return float(st.get(key, def))
 
 
-# короткая белая вспышка: по меху попали
-func flash() -> void:
-	_flash_t = 0.07
-
-
 # после возрождения ноги ставятся заново под корпус
 func reset() -> void:
 	_inited = false
-	_flash_t = 0.0
 	stunned = false
 	recoil = 0.0
 	phase = 0.0
@@ -917,12 +910,9 @@ func update_visual(delta: float, body_pos: Vector3, vel: Vector3, legs_yaw: floa
 	var walk := maxf(_s("walk_speed", 6.0), 0.1)
 	var run := maxf(_s("run_speed", 9.5), 0.1)
 
-	# подсветка брони: белая вспышка при попадании, синее мерцание при оглушении
-	_flash_t = maxf(_flash_t - delta, 0.0)
+	# подсветка брони: синее мерцание при оглушении. Белой вспышки от попаданий нет (решение Сани, 16.10.2026)
 	var glow := Color(0, 0, 0)
-	if _flash_t > 0.0:
-		glow = Color(0.2, 0.2, 0.2)
-	elif stunned:
+	if stunned:
 		glow = Color(0.1, 0.3, 0.8) * (0.6 + 0.4 * sin(Time.get_ticks_msec() * 0.025))
 	# в материалы только когда подсветка меняется: каждая установка заставляет отрисовку заново
 	# отправлять материал в видеокарту (на 10 мехах это сотни материалов за тик)

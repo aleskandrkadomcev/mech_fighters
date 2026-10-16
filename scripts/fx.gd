@@ -70,7 +70,7 @@ void fragment() {
 	float rays = texture(burst, UV).a * has_burst;
 	m = max(m * (0.6 + 0.4 * n(c * 6.0)), rays * 0.8 * (0.55 + 0.45 * n(c * 9.0)));
 	ALBEDO = mix(vec3(0.04, 0.035, 0.03), vec3(0.14, 0.1, 0.07), smoothstep(0.0, 0.9, r));
-	ALPHA = clamp(m * 0.72 * fade, 0.0, 1.0);
+	ALPHA = clamp(m * 0.6 * fade, 0.0, 1.0);
 }
 """
 
@@ -121,7 +121,7 @@ func spark(pos: Vector3, normal: Vector3, on_target: bool, sound := true) -> voi
 		# броня: веер оранжевых искр и короткая вспышка
 		_streaks(pos, normal, 9, Color(1.0, 0.62, 0.22), 6.0, 15.0, 0.28, 60.0, 0.75)
 		_flare(pos, "circle_05", 1.6, Color(1.0, 0.55, 0.2, 1.0), 0.09)
-		light_flash(pos, Color(1.0, 0.6, 0.25), 4.5, 4.0, 0.06)
+		light_flash(pos, Color(1.0, 0.6, 0.25), 4.5, 2.0, 0.06)
 	else:
 		# земля или стена: пара искр и облачко пыли (бурой с земли, серой со стены)
 		var ground := normal.y > 0.6
@@ -142,7 +142,15 @@ func explosion(pos: Vector3, radius: float) -> void:
 	var scene := get_tree().current_scene
 	if scene == null:
 		return
-	var r := radius
+	# вид не раздуваем по радиусу урона (у ракет он бывает огромным): огонь и гарь обычного размера,
+	# а большой круг показывают несколько обычных взрывов вокруг
+	var r := clampf(radius, 1.0, Cfg.boom_size_max)
+	if radius > r * 1.5:
+		var extra := mini(int(radius / r), 4)
+		for i in extra:
+			var a := TAU * (i + randf() * 0.6) / extra
+			var off := Vector3(cos(a), 0, sin(a)) * radius * randf_range(0.3, 0.6)
+			get_tree().create_timer(randf_range(0.04, 0.2)).timeout.connect(_boom_small.bind(pos + off, r * 0.7))
 	# вспышка
 	_flare(pos + Vector3.UP * 0.9, "star_09", r * 3.0, Color(1.0, 0.85, 0.6, 1.0), 0.12)
 	_flare(pos + Vector3.UP * 0.7, "circle_05", r * 3.4, Color(1.0, 0.5, 0.15, 1.0), 0.25)
@@ -170,7 +178,19 @@ func explosion(pos: Vector3, radius: float) -> void:
 	_flash_light(pos + Vector3.UP * 1.5, Color(1.0, 0.6, 0.25), r * 3.5, 0.35)
 	shake_at.emit(pos, Cfg.shake_explosion)
 	if pos.y < 3.5:
-		scorch(Vector3(pos.x, 0, pos.z), r * 0.8)
+		scorch(Vector3(pos.x, 0, pos.z), minf(r * 0.8, 4.0))
+
+
+# добавочный взрыв по кругу большого радиуса: только огонь и вспышка, без дыма, гари и тряски
+func _boom_small(pos: Vector3, r: float) -> void:
+	if get_tree().current_scene == null:
+		return
+	_flare(pos + Vector3.UP * 0.7, "circle_05", r * 2.6, Color(1.0, 0.5, 0.15, 1.0), 0.2)
+	_emit(pos + Vector3.UP * 0.6, _quad(), _sprite_mat("smoke_07"), 8, 0.6, {"sphere": r * 0.25, "v0": r * 0.6, "v1": r * 1.3,
+		"damp": r * 2.0, "g": Vector3(0, 3.0, 0), "s0": r * 0.45, "s1": r * 0.8, "grow": [0.7, 1.5], "spin": 60.0, "ramp": _fire_ramp()})
+	_emit(pos + Vector3.UP * 0.7, _quad(), _sprite_mat("smoke_07", true), 5, 0.3, {"sphere": r * 0.2, "v0": r * 0.4, "v1": r * 1.0,
+		"damp": r * 2.0, "s0": r * 0.4, "s1": r * 0.7, "grow": [0.8, 1.4], "spin": 60.0, "ramp": _hot_ramp()})
+	_streaks(pos + Vector3.UP * 0.6, Vector3.UP, 6, Color(1.0, 0.55, 0.15), 8.0, 16.0, 0.5, 80.0, 0.8)
 
 
 # тёмное пятно гари на земле после взрыва, медленно выцветает
@@ -209,7 +229,7 @@ func scorch(pos: Vector3, radius: float) -> void:
 
 # короткая яркая вспышка настоящего света (взрыв, рельса, молния)
 func _flash_light(pos: Vector3, col: Color, rng: float, time: float) -> void:
-	light_flash(pos, col, rng, 14.0, time * 1.3)
+	light_flash(pos, col, rng, 5.0, time * 1.3)
 
 
 # ------------------------------------------------------------------
@@ -252,7 +272,6 @@ func light_flash(pos: Vector3, col: Color, rng: float, energy: float, life: floa
 		var nl := OmniLight3D.new()
 		nl.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 		nl.shadow_enabled = false
-		nl.omni_attenuation = 0.7          # мягче спадает к краю: пятно света шире
 		nl.visible = false
 		scene.add_child(nl)
 		slot = {"l": nl, "t": 0.0, "life": 1.0, "e": 0.0, "key": "", "hold": false}
@@ -489,7 +508,7 @@ func blast(pos: Vector3, radius: float, dmg: float, edge: float, team: int, src:
 # попадание сгустка плазмы: голубая (у врага розовая) вспышка
 func plasma_hit(pos: Vector3, friend: bool) -> void:
 	var c := Color(0.45, 0.9, 1.0) if friend else Color(1.0, 0.35, 0.8)
-	light_flash(pos, c, 6.0, 7.0, 0.1)
+	light_flash(pos, c, 6.0, 3.5, 0.1)
 	_flare(pos, "circle_05", 2.4, Color(c.r, c.g, c.b, 1.0), 0.15)
 	_flare(pos, "star_07", 1.8, Color(c.r, c.g, c.b, 1.0), 0.1)
 	Sfx.play_at("hit", pos, -10.0, 0.2)
@@ -508,16 +527,18 @@ func rail_beam(from: Vector3, to: Vector3, team: int) -> void:
 	# ящик растягиваем по его собственным осям (умножение справа). Basis.scaled() тянет по осям МИРА:
 	# выстрел вдоль X рисовался полосой длиной во весь выстрел поперёк, по Z, «через всю карту»
 	# широкое свечение и тонкое белое ядро, оба мягкие по краям и гаснут
+	# толщина, яркость и время следа — F2 → «Вид выстрелов»
+	var gk: float = Cfg.rail_glow
 	for layer in 2:
-		var mat := beam_material(c if layer == 0 else Color(0.92, 0.97, 1.0), 3.5 if layer == 0 else 4.0, 1.4 if layer == 0 else 1.0, 0.35)
+		var mat := beam_material(c if layer == 0 else Color(0.85, 0.95, 1.0), (1.6 if layer == 0 else 2.2) * gk, 1.8 if layer == 0 else 1.2, 0.3)
 		var mi := _mesh_node(_unit_quad(), mat, from + d * 0.5)
-		place_beam(mi, from, to, 1.8 if layer == 0 else 0.45)
+		place_beam(mi, from, to, Cfg.rail_width * (1.0 if layer == 0 else 0.22))
 		var tw := mi.create_tween()
-		tw.tween_method(func(v: float): mat.set_shader_parameter("fade", v), 1.0, 0.0, 0.4).set_ease(Tween.EASE_IN)
+		tw.tween_method(func(v: float): mat.set_shader_parameter("fade", v), 1.0, 0.0, Cfg.rail_fade).set_ease(Tween.EASE_IN)
 		tw.tween_callback(mi.queue_free)
 	_streaks(to, -dir, 8, c, 5.0, 12.0, 0.3, 70.0, 0.8)
-	_flare(from, "flare_01", 4.0, Color(c.r, c.g, c.b, 1.0), 0.15)
-	_flare(to, "star_09", 3.0, Color(c.r, c.g, c.b, 1.0), 0.2)
+	_flare(from, "flare_01", 2.5, Color(c.r, c.g, c.b, 0.8), 0.12)
+	_flare(to, "star_09", 2.2, Color(c.r, c.g, c.b, 0.8), 0.15)
 	_flash_light(from, c, 10.0, 0.15)
 	shake_at.emit(from, shake_rail)
 

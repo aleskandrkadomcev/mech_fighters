@@ -31,7 +31,6 @@ var _bar: Node3D
 var _head: Node3D
 var _muzzle: Node3D
 var _cool := 0.0
-var _flash := 0.0
 var _mats: Array = []
 var _target: Node3D
 var _emp_cd := 3.0               # ЭМИ-граната (турель 2 уровня)
@@ -446,7 +445,6 @@ func take_damage(amount: float, pos: Vector3, _dir: Vector3, _kind := "", src: N
 	amount = minf(amount, hp)
 	hp -= amount
 	Battle.on_damage(src, self, amount, pos)
-	_flash = 0.07
 	if hp <= 0.0:
 		_die()
 
@@ -520,10 +518,6 @@ func _ruin_break() -> void:
 
 
 func _physics_process(delta: float) -> void:
-	if _flash > 0.0:
-		_flash -= delta
-		for m in _mats:
-			m.emission = Color(0.6, 0.6, 0.6) if _flash > 0.0 else Color.BLACK
 	if dead:
 		return
 	_bar.set_ratio(hp / maxf(max_hp(), 1.0))
@@ -626,7 +620,7 @@ func _fire() -> void:
 	get_tree().current_scene.add_child(p)
 	Sfx.play_at("cannon", global_position, -6.0, 0.1)
 	Fx.spark(origin, dir, false, false)
-	Fx.light_flash(origin, Color(1.0, 0.7, 0.35), 9.0, 8.0, 0.09)
+	Fx.light_flash(origin, Color(1.0, 0.7, 0.35), 9.0, 3.5, 0.09)
 
 
 # снаряд навесом в точку, куда цель придёт (с лёгким упреждением). Меток на земле нет:

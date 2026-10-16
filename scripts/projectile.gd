@@ -51,10 +51,11 @@ static func _mat(key: String, c: Color, tex: Texture2D = null) -> StandardMateri
 	return m
 
 
-static func _glow_mat(ours: bool) -> ShaderMaterial:
-	var key := "tr_glow_%s" % ours
+# свечение трассера: яркость растёт с толщиной трассера (тонкая дробь светит слабо)
+static func _glow_mat(ours: bool, energy: float) -> ShaderMaterial:
+	var key := "tr_glow_%s_%.1f" % [ours, energy]
 	if not _mats.has(key):
-		_mats[key] = Fx.beam_material(Color(1.0, 0.62, 0.22) if ours else Color(1.0, 0.28, 0.22), 2.6, 1.5, 0.25, true, 0.45)
+		_mats[key] = Fx.beam_material(Color(1.0, 0.62, 0.22) if ours else Color(1.0, 0.28, 0.22), energy, 1.5, 0.25, true, 0.45)
 	return _mats[key]
 
 
@@ -96,10 +97,16 @@ func _ready() -> void:
 			add_child(g)
 	else:
 		# трассер: яркая сердцевина и свечение за головой снаряда, шире и длиннее сердцевины
-		var cl := 1.4 + tracer * 3.0
-		_streak(_core_mat("tr_core_%s" % (team == 0), Color(1.0, 0.85, 0.55) if team == 0 else Color(1.0, 0.5, 0.42)), 0.16 + tracer * 0.8, cl, cl * 0.35)
-		var gl := 3.2 + tracer * 6.0
-		_streak(_glow_mat(team == 0), 0.55 + tracer * 2.0, gl, gl * 0.45)
+		# размер и яркость свечения — от толщины трассера (у каждой пушки в «Деталях») и общего множителя в F2
+		var k: float = Cfg.shot_glow
+		if k <= 0.0:
+			k = 0.0
+		var cl := (0.6 + tracer * 6.0) * maxf(k, 0.3)
+		_streak(_core_mat("tr_core_%s" % (team == 0), Color(1.0, 0.85, 0.55) if team == 0 else Color(1.0, 0.5, 0.42)), (0.06 + tracer * 0.9) * maxf(k, 0.3), cl, cl * 0.35)
+		if k > 0.0:
+			var gl := (0.8 + tracer * 14.0) * k
+			var ge := snappedf(clampf(0.8 + tracer * 7.0, 0.8, 2.6) * minf(k, 1.5), 0.1)
+			_streak(_glow_mat(team == 0, ge), (0.12 + tracer * 2.6) * k, gl, gl * 0.45)
 	global_position = _start
 	if vel.length() > 0.01:
 		look_at(_start + vel, Vector3.UP)
@@ -135,7 +142,7 @@ func _physics_process(delta: float) -> void:
 		return
 	global_position = to
 	if _glow_key != "":
-		Fx.light_flash(to, _glow_col, 6.0, 4.0, 0.12, _glow_key, true)
+		Fx.light_flash(to, _glow_col, 6.0, 2.0, 0.12, _glow_key, true)
 	left_range -= step.length()
 	if left_range <= 0.0:
 		queue_free()

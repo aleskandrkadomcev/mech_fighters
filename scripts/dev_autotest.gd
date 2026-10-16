@@ -299,6 +299,8 @@ func _process(_delta: float) -> void:
 		Fx.explosion(Vector3(58, 1.8, 0) if _frame == 30 else Vector3(61, 1.8, 8), 4.5)
 	if _fxreel and _target == "fight" and _frame >= 14 and _frame <= 23 and (_frame - 14) % 3 == 0:
 		_reel_rocket(_frame - 14)
+	if _fxreel and _target == "fight" and _frame == 70:
+		_reel_shotgun_rail()
 	if _fxreel and _target == "base" and (_frame == 200 or _frame == 212):
 		_reel_dome_hit(0.0 if _frame == 200 else 0.5)
 	if _boom and _frame == 5:
@@ -1478,7 +1480,7 @@ func _run_targetshot() -> void:
 
 
 # --fxreel: постановки по очереди (бой перезапускается), снимки с именем постановки
-const FX_REEL := [["fight", [33, 38, 45, 60, 100, 103, 110, 140, 175]], ["base", [150, 204, 214, 226, 240, 300, 450]], ["calm", [60, 130]]]
+const FX_REEL := [["fight", [33, 38, 45, 60, 73, 76, 100, 103, 110, 140, 175]], ["base", [150, 204, 214, 226, 240, 300, 450]], ["calm", [60, 130]]]
 
 
 # попадание в купол вражеского штаба со стороны камеры (волны на куполе). side — сдвиг вбок
@@ -1497,12 +1499,27 @@ static var _reel_only := false      # --fxreel=<этап>: снять тольк
 var _reel_done := false
 
 
+# дробь (тонкий трассер 0,07, 8 дробин) и выстрел рельсы из меха игрока (снимки 73 и 76)
+func _reel_shotgun_rail() -> void:
+	var m = main.mech
+	var from: Vector3 = m.global_position + Vector3(0.8, 2.6, 0)
+	var Proj = load("res://scripts/projectile.gd")
+	for k in 8:
+		var dir := (Vector3(60.0, 1.0, 4.0) - from).normalized().rotated(Vector3.UP, deg_to_rad(randf_range(-6.0, 6.0)))
+		var pr = Proj.new()
+		pr.setup(from, dir * 90.0, 1.0, 40.0, m)
+		pr.tracer = 0.07
+		get_tree().current_scene.add_child(pr)
+	var from2: Vector3 = m.global_position + Vector3(-0.8, 2.6, 0)
+	Fx.rail_beam(from2, Vector3(62.0, 1.5, -2.0), m.team)
+
+
 # ракета из меха игрока в сторону драки (снимки 33/38/45 — полёт и дым, 60 — взрыв без колец)
 func _reel_rocket(k: int) -> void:
 	var m = main.mech
 	var rk = load("res://scripts/rocket.gd").new()
 	var from: Vector3 = m.global_position + Vector3(0.6 if k % 2 == 0 else -0.6, 3.2, 0)
-	var p := {"speed": Parts.v("mod_rockets", "speed"), "radius": Parts.v("mod_rockets", "radius"),
+	var p := {"speed": Parts.v("mod_rockets", "speed"), "radius": 24.6,      # огромный радиус, как у Сани в F2
 		"damage": Parts.v("mod_rockets", "damage"), "edge_damage": 0.4}
 	rk.setup(from, Vector3(60.0 + k * 0.4, 0.0, 4.0 - k * 0.5), m, null, p)
 	get_tree().current_scene.add_child(rk)

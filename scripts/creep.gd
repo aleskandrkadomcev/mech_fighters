@@ -36,7 +36,6 @@ var _turret: Node3D
 var _muzzle: Node3D
 var _bar: Node3D
 var _mats: Array = []
-var _flash := 0.0
 var _knock := Vector3.ZERO
 var _yaw := 0.0
 
@@ -118,7 +117,6 @@ func take_damage(amount: float, pos: Vector3, _dir: Vector3, _kind := "", src: N
 		last_attacker = src
 	amount = minf(amount, hp)
 	hp -= amount
-	_flash = 0.06
 	Battle.on_damage(src, self, amount, pos)
 	if hp <= 0.0:
 		_die()
@@ -147,10 +145,6 @@ func _tick(delta: float) -> void:
 	visible = seen
 	_bar.visible = seen and hp < max_hp() - 0.5
 	_bar.set_ratio(hp / maxf(max_hp(), 1.0))
-	if _flash > 0.0:
-		_flash -= delta
-		for m in _mats:
-			m.emission = Color(0.5, 0.5, 0.5) if _flash > 0.0 else Color.BLACK
 	_cool = maxf(_cool - delta, 0.0)
 	stun_left = maxf(stun_left - delta, 0.0)
 	if stun_left > 0.0 and seen and Cfg.stun_zaps > 0 and randf() < 0.35:
@@ -343,7 +337,7 @@ func _fire() -> void:
 	get_tree().current_scene.add_child(p)
 	if seen:
 		Fx.spark(origin, dir, false, false)
-		Fx.light_flash(origin, Color(1.0, 0.7, 0.35), 6.0, 5.0, 0.07)
+		Fx.light_flash(origin, Color(1.0, 0.7, 0.35), 6.0, 2.0, 0.07)
 	Sfx.play_at("shot", global_position, -12.0, 0.15)
 
 
