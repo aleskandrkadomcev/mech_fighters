@@ -225,6 +225,7 @@ func _physics_process(delta: float) -> void:
 			if d.length() <= Cfg.poi_radius:
 				m.heal(Cfg.poi_dock_heal * delta)
 				m.add_ammo(Cfg.poi_dock_refill * delta)
+				m.dock_left = 0.2
 
 
 # радар: круг обзора, пока у вышки стоит мех команды-владельца; быстро раскрывается и быстро сворачивается

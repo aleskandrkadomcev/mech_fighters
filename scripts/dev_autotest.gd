@@ -49,6 +49,7 @@ var _slidetest := false          # --slidetest: убит в рывке и на �
 var _lobtest := false            # --lobtest: ЭМИ и осадное орудие турелей летят быстро и низко и попадают в меха
 var _spawntest := false         # --spawntest --drop --enemies=0 --allies=1: мех садится прямо на другого — никто не подпрыгивает
 var _proptest := false           # --proptest: кучка ящиков не мешает пройти, ломается от меха и от взрыва
+var _statustest := false         # --statustest: шкала контроля над полоской (оглушение → ЭМИ → замедление) и статусы своего меха
 var _cdtest := false             # --cdtest: нажал рывок на перезарядке — у курсора таймер «2,35», тает за 1 с
 var _capbench := false           # --capbench (окно, с --targetshot=ground или =fight): кадры и видеокарта при разных пределах кадров
 var _coredmg := false            # --coredmg: по ядрам-Теслам проходит урон, когда турели 3 уровня сломаны (стреляем автопушкой)
@@ -176,6 +177,8 @@ func setup(main_node: Node3D, args: PackedStringArray) -> void:
 			_proptest = true
 		elif a == "--cdtest":
 			_cdtest = true
+		elif a == "--statustest":
+			_statustest = true
 		elif a == "--ruintest":
 			_ruintest = true
 		elif a == "--radartest":
@@ -270,6 +273,8 @@ func _process(_delta: float) -> void:
 		_run_proptest()
 	if _cdtest:
 		_run_cdtest()
+	if _statustest:
+		_run_statustest()
 	if _ruintest:
 		_run_ruintest()
 	if _radartest:
@@ -349,7 +354,7 @@ func _process(_delta: float) -> void:
 		var img := get_viewport().get_texture().get_image()
 		img.save_png(("%s/%s_f%04d.png" % [_shot_dir, _target, shot_f]) if _fxreel else ("%s/f%04d.png" % [_shot_dir, shot_f]))
 		_shots_left.erase(shot_f)
-		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and not _linktest and _mechexport == "" and not _gfxbench and not _cpubench and not _fancheck and not _aimtest and not _creeptest and not _radartest and not _ruintest and not _coredmg and not _slidetest and not _lobtest and not _spawntest and not _proptest and not _cdtest:
+		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and not _linktest and _mechexport == "" and not _gfxbench and not _cpubench and not _fancheck and not _aimtest and not _creeptest and not _radartest and not _ruintest and not _coredmg and not _slidetest and not _lobtest and not _spawntest and not _proptest and not _cdtest and not _statustest:
 			get_tree().quit()
 
 
@@ -3450,4 +3455,72 @@ func _run_cdtest() -> void:
 		var ok: bool = get_meta("vis0") and str(get_meta("t0")).begins_with("2,") and str(get_meta("t1")) < str(get_meta("t0")) 			and float(get_meta("a1")) < 0.8 and hud._cd_tip != null and not hud._cd_tip.visible
 		print("[CD] у курсора «%s», через полсекунды «%s» (прозрачность %.2f), через секунду скрыт: %s — %s" % [get_meta("t0"), get_meta("t1"),
 			float(get_meta("a1")), not hud._cd_tip.visible if hud._cd_tip != null else false, "ВЕРНО" if ok else "ОШИБКА"])
+		get_tree().quit()
+
+
+# ------------------------------------------------------------------
+#  Шкала контроля и статусы (--statustest --enemies=0 --allies=0): свой мех оглушён на 1,5 с, ЭМИ на 3 с,
+#  замедлен на 4,5 с и чинится у дока; рядом оглушены вражеский мех и крип. Над полоской — самый жёсткий
+#  контроль, шкала сжимается; снизу — статусы. Снимки (--shot-dir, --shots=40,100,170,260): контроль по очереди
+# ------------------------------------------------------------------
+
+func _run_statustest() -> void:
+	var m = main.mech
+	var hud = main.hud
+	var spot := Vector3(-46, 0.05, -30)
+	if _frame == 5:
+		Cfg.creeps_enabled = 0
+		Cfg.bot_enemies = 1          # иначе бой уберёт лишнего бота
+		Cfg.cam_distance = 30.0
+		m.shield_left = 0.0
+		m.global_position = spot
+		m.snap_interpolation(m)
+		m.demo = {"move": Vector2.ZERO, "fire": false, "aim": spot + Vector3(10, 1.5, 0)}
+		main.cam._started = false
+		var e = _stage_mech(main._spawn_bot(1), "mech_assault", ["autocannon", "laser"], spot + Vector3(9, 0.05, -2))
+		e.demo["fire"] = false
+		e.demo["aim"] = spot
+		set_meta("enemy", e)
+		_stage_creeps(1, 1, spot.x + 6.0, spot.z + 5.0)
+	if _frame == 20:
+		var e = get_meta("enemy")
+		m.stun(1.5)
+		m.block_regen(3.0)
+		m.apply_slow(0.3, 4.5)
+		m.hp = m.max_hp() * 0.6
+		m.dock_left = 20.0
+		e.stun(3.0)
+		for c in get_tree().get_nodes_in_group("creeps"):
+			c.stun(3.0)
+			c.hp = c.max_hp() * 0.7
+	if _frame < 21:
+		return
+	m.dock_left = maxf(m.dock_left, 1.0)
+	var bar = m._bar
+	var chips: Array = []
+	for c in hud._status_chips:
+		if c["panel"].visible:
+			chips.append(c["label"].text)
+	var fails: int = get_meta("fails", 0)
+	var checks := {30: "Оглушён", 80: "Оглушён", 130: "ЭМИ", 230: "Замедлен", 320: ""}
+	if checks.has(_frame):
+		var want: String = checks[_frame]
+		var ok: bool = bar._ctl_name == want and bar._ctl_back.visible == (want != "")
+		ok = ok and (bar._label.position.y > bar._nick_y + 0.1) == (want != "")
+		if _frame == 80:
+			ok = ok and bar._ctl_k > 0.2 and bar._ctl_k < 0.5      # осталось 0,5 из 1,5 с
+		if _frame == 30:
+			ok = ok and chips.size() >= 4 and str(chips[0]).begins_with("Оглушён") and str(chips[1]).begins_with("ЭМИ") 				and str(chips[2]).begins_with("Замедлен") and chips.has("Чинится")
+			var e = get_meta("enemy")
+			ok = ok and e._bar._ctl_name == "Оглушён"
+			for c in get_tree().get_nodes_in_group("creeps"):
+				ok = ok and c._bar._ctl_name == "Оглушён"
+		if _frame == 320:
+			ok = ok and chips == ["Чинится"]
+		if not ok:
+			fails += 1
+		set_meta("fails", fails)
+		print("[STATUS] f=%d над полоской «%s» (шкала %.2f), статусы: %s — %s" % [_frame, bar._ctl_name, bar._ctl_k, ", ".join(chips), "ВЕРНО" if ok else "ОШИБКА"])
+	if _frame >= 330 and _shots_left.is_empty():
+		print("[STATUS] итог: %s" % ("ВСЁ ВЕРНО" if fails == 0 else "ошибок %d" % fails))
 		get_tree().quit()

@@ -47,6 +47,10 @@ var slow_left := 0.0            # замедление (мина): скольк�
 var death_velocity := Vector3.ZERO
 var _slow_k := 0.0
 var stun_left := 0.0
+var _stun_total := 1.0          # полное время текущего оглушения, замедления, ЭМИ — для шкалы контроля над полоской
+var _slow_total := 1.0
+var _no_regen_total := 1.0
+var dock_left := 0.0            # стоит в круге своего ремонтного дока (ставит poi.gd каждый тик) — для статусов
 var shield_left := 0.0          # неуязвимость после возрождения
 var landing_left := 0.0         # высадка с неба: сколько ещё лететь (пока летит, неуязвим и не управляется)
 var _landing_total := 1.0
@@ -407,6 +411,8 @@ func apply_slow(k: float, seconds: float) -> void:
 	if dead or shield_left > 0.0 or seconds <= 0.0:
 		return
 	_slow_k = maxf(_slow_k if slow_left > 0.0 else 0.0, k)
+	if seconds > slow_left:
+		_slow_total = seconds
 	slow_left = maxf(slow_left, seconds)
 
 
@@ -420,6 +426,50 @@ func is_stunned() -> bool:
 
 func is_cloaked() -> bool:
 	return cloak_left > 0.0
+
+
+# контроль для шкалы над полоской здоровья: самый жёсткий из действующих — [название, сколько осталось 0..1]
+func control_info() -> Array:
+	if stun_left > 0.0:
+		return ["Оглушён", stun_left / maxf(_stun_total, 0.01)]
+	if no_regen_left > 0.0:
+		return ["ЭМИ", no_regen_left / maxf(_no_regen_total, 0.01)]
+	if slow_left > 0.0:
+		return ["Замедлен", slow_left / maxf(_slow_total, 0.01)]
+	return ["", 0.0]
+
+
+# статусы своего меха для интерфейса: [название, сколько осталось секунд (-1 — без срока), полезный ли].
+# Сначала вредные, потом полезные
+func status_list() -> Array:
+	var out: Array = []
+	if dead:
+		return out
+	if stun_left > 0.0:
+		out.append(["Оглушён", stun_left, false])
+	if no_regen_left > 0.0:
+		out.append(["ЭМИ: энергия не растёт", no_regen_left, false])
+	if slow_left > 0.0:
+		out.append(["Замедлен −%d%%" % roundi(_slow_k * 100.0), slow_left, false])
+	if run_locked:
+		out.append(["Выдохся: нет бега", -1.0, false])
+	if shield_left > 0.0:
+		out.append(["Неуязвим", shield_left, true])
+	if repair_left > 0.0:
+		out.append(["Чинится", repair_left, true])
+	elif hp < max_hp() - 0.5 and (dock_left > 0.0 or (stats.get("regen_hp", 0.0) > 0.0 and _since_damage >= stats.get("regen_delay", 4.0))):
+		out.append(["Чинится", -1.0, true])
+	if barrier_on:
+		out.append(["Щит", -1.0, true])
+	if cloak_left > 0.0:
+		out.append(["Невидим", cloak_left, true])
+	if braced:
+		out.append(["Упор", -1.0, true])
+	if _game_mult("damage") > 1.0:
+		out.append(["Арсенал: +урон", -1.0, true])
+	if _game_mult("regen") > 1.0:
+		out.append(["Реактор: +энергия", -1.0, true])
+	return out
 
 
 # сколько ещё действует абилка (секунды); для щита 1, пока включён; 0 = не действует
@@ -571,6 +621,7 @@ func _physics_process(delta: float) -> void:
 	stun_left = maxf(stun_left - delta, 0.0)
 	shield_left = maxf(shield_left - delta, 0.0)
 	slow_left = maxf(slow_left - delta, 0.0)
+	dock_left = maxf(dock_left - delta, 0.0)
 	tp_cd = maxf(tp_cd - delta, 0.0)
 	_since_damage += delta
 	var blink_vis := shield_left <= 0.0 or fmod(shield_left, 0.2) > 0.08   # мигает, пока неуязвим
@@ -623,6 +674,8 @@ func _physics_process(delta: float) -> void:
 	visual.braced = braced
 	if _bar != null:
 		_bar.set_ratio(hp / maxf(max_hp(), 1.0))
+		var ctl := control_info()
+		_bar.set_control(ctl[0], ctl[1])
 
 
 func _read_demo() -> void:
@@ -729,6 +782,8 @@ func stun(seconds: float) -> void:
 	if dead or shield_left > 0.0:
 		return
 	seconds *= 1.0 - stats.get("resist_stun", 0.0)
+	if seconds > stun_left:
+		_stun_total = seconds
 	stun_left = maxf(stun_left, seconds)
 	if seconds > 0.0 and blink_left > 0.0:
 		_cancel_blink()     # оглушение сбивает подготовку блинка
@@ -989,6 +1044,8 @@ func _update_energy(delta: float) -> void:
 func block_regen(seconds: float) -> void:
 	if dead or shield_left > 0.0:
 		return
+	if seconds > no_regen_left:
+		_no_regen_total = seconds
 	no_regen_left = maxf(no_regen_left, seconds)
 
 

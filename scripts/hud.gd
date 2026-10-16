@@ -5,6 +5,8 @@ extends CanvasLayer
 const COL_ENERGY := Color(0.98, 0.8, 0.25)
 const COL_ACTIVE := Color(0.45, 0.85, 1.0)
 const COL_DENY := Color(1.0, 0.3, 0.25)
+const COL_BAD := Color(1.0, 0.38, 0.32)     # статус вредный (оглушён, ЭМИ, замедлен)
+const COL_GOOD := Color(0.5, 0.95, 0.55)    # статус полезный (чинится, щит, невидим)
 
 var mech: Node3D
 var main: Node3D
@@ -17,6 +19,8 @@ var _energy_label: Label
 var _energy_tick: ColorRect
 var _slots: Array = []
 var _slot_row: HBoxContainer
+var _status_row: HBoxContainer    # статусы своего меха над абилками
+var _status_chips: Array = []     # [{panel, style, label}], заводятся по мере надобности и прячутся
 var _deny_t := 0.0
 var _deny_slot := -1
 var _cd_tip: Label               # таймер у курсора: нажал абилку на перезарядке — сколько ей осталось («2,35»), тает за 1 с
@@ -151,12 +155,19 @@ void fragment() {
 	bottom.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
 	bottom.offset_left = -460
 	bottom.offset_right = 460
-	bottom.offset_top = -270
+	bottom.offset_top = -320
 	bottom.offset_bottom = -30
 	bottom.alignment = BoxContainer.ALIGNMENT_END
 	bottom.add_theme_constant_override("separation", 10)
 	bottom.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(bottom)
+
+	_status_row = HBoxContainer.new()
+	_status_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	_status_row.add_theme_constant_override("separation", 8)
+	_status_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_status_row.visible = false
+	bottom.add_child(_status_row)
 
 	_slot_row = HBoxContainer.new()
 	_slot_row.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -474,6 +485,7 @@ func _process(delta: float) -> void:
 	_hp.value = hk
 	_bg(_hp_fill, Color(0.9, 0.25, 0.2).lerp(Color(0.4, 0.9, 0.4), hk))
 	_txt(_hp_label, "ЗДОРОВЬЕ  %d" % int(ceil(maxf(hp, 0.0))))
+	_update_statuses()
 	_hit_t = maxf(_hit_t - delta * 2.5, 0.0)
 	var low := clampf((0.3 - hk) / 0.3, 0.0, 1.0) * 0.22 if not mech.dead else 0.0
 	var vig := clampf(_hit_t * 0.8 + low, 0.0, 0.9)
@@ -593,6 +605,50 @@ func _process(delta: float) -> void:
 	if _dbg.visible:
 		var speed := Vector2(mech.velocity.x, mech.velocity.z).length()
 		_txt(_dbg, "скорость  %.1f м/с\nразброс  %.1f°\nэнергия  %d\nкадров  %d" % [speed, mech.get_spread_deg(), int(en), Engine.get_frames_per_second()])
+
+
+# статусы своего меха над абилками: вредные красным, полезные зелёным, у временных — сколько осталось
+func _update_statuses() -> void:
+	var list: Array = mech.status_list()
+	while _status_chips.size() < list.size():
+		_status_chips.append(_make_status_chip())
+	for i in _status_chips.size():
+		var c: Dictionary = _status_chips[i]
+		var on := i < list.size()
+		if c["panel"].visible != on:
+			c["panel"].visible = on
+		if not on:
+			continue
+		var st: Array = list[i]
+		var t: String = st[0]
+		if st[1] >= 0.0:
+			t += "  " + ("%.1f" % st[1]).replace(".", ",")
+		_txt(c["label"], t)
+		var col: Color = COL_GOOD if st[2] else COL_BAD
+		_font_col(c["label"], col)
+		_border(c["style"], col)
+	var any := not list.is_empty()
+	if _status_row.visible != any:
+		_status_row.visible = any
+
+
+func _make_status_chip() -> Dictionary:
+	var panel := PanelContainer.new()
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var st := StyleBoxFlat.new()
+	st.bg_color = Color(0, 0, 0, 0.6)
+	st.border_color = COL_BAD
+	st.set_border_width_all(2)
+	st.set_corner_radius_all(4)
+	st.content_margin_left = 10
+	st.content_margin_right = 10
+	st.content_margin_top = 2
+	st.content_margin_bottom = 2
+	panel.add_theme_stylebox_override("panel", st)
+	var l := _label("", 17)
+	panel.add_child(l)
+	_status_row.add_child(panel)
+	return {"panel": panel, "style": st, "label": l}
 
 
 # состояние маленького слота (рывок, телепорт): затемнение, цифра перезарядки, подпись, активность

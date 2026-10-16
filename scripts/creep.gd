@@ -23,6 +23,7 @@ var seen := true
 var hitbox: Area3D
 var last_attacker: Node = null
 var stun_left := 0.0
+var _stun_total := 1.0     # полное время оглушения — для шкалы контроля над полоской
 var _wp := 1                      # к какой точке линии едем
 var _side := 0.0                  # смещение от середины линии, метров
 var _target: Node3D
@@ -99,6 +100,8 @@ func is_landing() -> bool:
 
 
 func stun(seconds: float) -> void:
+	if seconds > stun_left:
+		_stun_total = seconds
 	stun_left = maxf(stun_left, seconds)
 
 
@@ -143,10 +146,11 @@ func _die() -> void:
 # мысли крипа (цель, перезарядка) — каждый тик игры
 func _tick(delta: float) -> void:
 	visible = seen
-	_bar.visible = seen and hp < max_hp() - 0.5
-	_bar.set_ratio(hp / maxf(max_hp(), 1.0))
 	_cool = maxf(_cool - delta, 0.0)
 	stun_left = maxf(stun_left - delta, 0.0)
+	_bar.visible = seen and (hp < max_hp() - 0.5 or stun_left > 0.0)
+	_bar.set_ratio(hp / maxf(max_hp(), 1.0))
+	_bar.set_control("Оглушён" if stun_left > 0.0 else "", stun_left / maxf(_stun_total, 0.01))
 	if stun_left > 0.0 and seen and Cfg.stun_zaps > 0 and randf() < 0.35:
 		Fx.zap(global_position, 1.6, 1.8)
 	_think_t -= delta
