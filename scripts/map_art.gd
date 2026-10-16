@@ -8,6 +8,7 @@ extends Node3D
 const Art := preload("res://scripts/art.gd")
 const WorldShader := preload("res://shaders/world.gdshader")
 const GrassShader := preload("res://shaders/grass.gdshader")
+const Prop := preload("res://scripts/prop.gd")
 
 const DECOR_KINDS := {"container": "Контейнер", "generator": "Генератор", "tank": "Цистерна", "terminal": "Терминал",
 	"crates": "Ящики", "antenna": "Антенна"}
@@ -18,6 +19,7 @@ var biome: Image                 # где сухая грязь, грунт и �
 var puddles: Array = []          # лужи (из main.gd): Vector3(x, радиус, z); в них трава не растёт
 var mask_rect := Rect2()
 var decor_boxes: Array = []      # [x, z, ширина, высота, глубина] для карты проходимости ботов
+var prop_boxes: Array = []       # то же для разрушаемой мелочи (ящики): ботам не мешает, только трава под ней не растёт
 var _mats := {}
 var _rng := RandomNumberGenerator.new()
 
@@ -257,12 +259,19 @@ func _decor(kind: String, pos: Vector3, rot: float) -> void:
 			_box(root, Vector3(1.2, 0.7, 0.2), Vector3(0, 1.4, -0.2), dark_metal(), Vector3(-0.4, 0, 0))
 			_box(root, Vector3(0.9, 0.45, 0.04), Vector3(0, 1.42, -0.32), light_strip(Color(0.3, 0.85, 1.0)), Vector3(-0.4, 0, 0), false)
 		"crates":
-			foot = Vector2(3.2, 2.6)
-			height = 2.0
+			# разрушаемая мелочь: не мешает ходить, ломается от касания и взрыва (prop.gd)
 			var cm := _mat("crate", Color(0.36, 0.33, 0.22), 2, 0.8, 0.1)
-			_box(root, Vector3(1.4, 1.2, 1.2), Vector3(-0.7, 0.6, 0), cm, Vector3(0, 0.2, 0))
-			_box(root, Vector3(1.2, 1.0, 1.2), Vector3(0.8, 0.5, 0.3), cm, Vector3(0, -0.3, 0))
-			_box(root, Vector3(1.0, 0.8, 1.0), Vector3(-0.5, 1.6, 0.1), cm, Vector3(0, 0.6, 0))
+			var pr := Prop.new()
+			pr.position = pos
+			pr.rotation.y = rot
+			pr.setup([[Vector3(1.4, 1.2, 1.2), Vector3(-0.7, 0.6, 0), Vector3(0, 0.2, 0)],
+				[Vector3(1.2, 1.0, 1.2), Vector3(0.8, 0.5, 0.3), Vector3(0, -0.3, 0)],
+				[Vector3(1.0, 0.8, 1.0), Vector3(-0.5, 1.6, 0.1), Vector3(0, 0.6, 0)]], cm, 1.6)
+			add_child(pr)
+			var wide := absf(sin(rot)) < 0.5
+			_blob(pos, Vector2(5.0, 4.4) if wide else Vector2(4.4, 5.0))
+			prop_boxes.append([pos.x, pos.z, 3.2 if wide else 2.6, 2.0, 2.6 if wide else 3.2])
+			return
 		"antenna":
 			foot = Vector2(2.2, 2.2)
 			height = 2.0
@@ -366,7 +375,7 @@ func _grass(rect: Rect2, covers: Array, no_grass: Array) -> void:
 				ok[y * w + x] = 0
 	for c in covers:
 		block.call(c[0], c[1], c[2] * 0.5 + 0.6, c[4] * 0.5 + 0.6)
-	for b in decor_boxes:
+	for b in decor_boxes + prop_boxes:
 		block.call(b[0], b[1], b[2] * 0.5 + 0.4, b[4] * 0.5 + 0.4)
 	for p in no_grass:
 		block.call(p.x, p.z, 4.0, 4.0)

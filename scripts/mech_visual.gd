@@ -50,7 +50,7 @@ var gun_pitch := [0.0, 0.0]
 var muzzles: Array[Node3D] = []
 var flashes: Array[MeshInstance3D] = []
 var beams: Array[MeshInstance3D] = []
-var thrusters: Array[MeshInstance3D] = []
+var thrusters: Array[Node3D] = []      # струи рывка (держатель у сопла, внутри конусы), см. _dash_plume
 var missile_ports: Array[Node3D] = []
 var missile_flashes: Array[MeshInstance3D] = []
 var missile_flash_t := [0.0, 0.0]
@@ -85,6 +85,10 @@ var _model_mats := {}           # материал из файла -> его к�
 var _pod_z := [-0.1, -0.1]      # где по длине стоят подвесы пушек (их сдвигает отдача)
 var _jets: Array[MeshInstance3D] = []
 var _jet_light: OmniLight3D
+var _plume_mats: Array = []      # струя рывка: [внешний конус, сердцевина]; сила (k) меняется, только пока струя видна
+static var _plume_shader: Shader
+var _thrust_k := 0.0             # сила струи: 1 в рывке, после — за 0,4 с тает
+var _exhaust: CPUParticles3D     # тающий след горячего газа за мехом в рывке
 var _struts: Array[Node3D] = []
 var _brace_k := 0.0
 var _spinners: Array = [null, null]      # блок стволов Гатлинга по подвесам
@@ -162,6 +166,123 @@ func build(accent: Color, tint: Color, look: Dictionary, friend := true) -> void
 	keep.append_array(missile_flashes)
 	keep.append_array(_jets)
 	Art.merge_meshes(self, [m_armor, m_armor2, m_dark, m_accent, m_glow, m_light], keep)
+
+
+# струя рывка из сопла: два конуса (мягкий голубой край и почти белая сердцевина), широкие у сопла,
+# сходятся назад. Держатель стоит у сопла: его растягиваем по длине, когда струя тает
+func _dash_plume(parent: Node3D, at: Vector3) -> Node3D:
+	if _plume_shader == null:
+		# мягкое свечение: ярче у сопла, к кончику и к краям конуса тает, чуть дрожит
+		_plume_shader = Shader.new()
+		_plume_shader.code = """shader_type spatial;
+render_mode unshaded, blend_add, cull_disabled, depth_draw_never, shadows_disabled;
+uniform vec4 col : source_color = vec4(0.3, 0.6, 1.0, 1.0);
+uniform float k = 1.0;
+varying float along;
+void vertex() { along = UV.y * 2.0; }      // у бока цилиндра UV.y от 0 (кончик) до 0,5 (сопло)
+void fragment() {
+	float edge = pow(abs(dot(NORMAL, VIEW)), 1.6);
+	float len = pow(clamp(along, 0.0, 1.0), 1.4);
+	float flick = 0.85 + 0.15 * sin(TIME * 70.0 + along * 18.0);
+	ALBEDO = col.rgb;
+	ALPHA = clamp(edge * len * flick * col.a * k, 0.0, 1.0);
+}
+"""
+	if _plume_mats.is_empty():
+		for c in [Color(0.3, 0.6, 1.0, 0.8), Color(0.85, 0.95, 1.0, 1.0)]:
+			var m := ShaderMaterial.new()
+			m.shader = _plume_shader
+			m.set_shader_parameter("col", c)
+			_plume_mats.append(m)
+	var pivot := Node3D.new()
+	pivot.position = at
+	pivot.visible = false
+	parent.add_child(pivot)
+	for layer in 2:
+		var h := 2.6 if layer == 0 else 1.4
+		var cm := CylinderMesh.new()
+		cm.top_radius = 0.03                            # кончик (назад)
+		cm.bottom_radius = 0.3 if layer == 0 else 0.15  # у сопла
+		cm.height = h
+		cm.radial_segments = 10
+		cm.rings = 1
+		cm.cap_top = false
+		cm.cap_bottom = false
+		var mi := MeshInstance3D.new()
+		mi.mesh = cm
+		mi.material_override = _plume_mats[layer]
+		mi.rotation.x = PI / 2                          # ось вдоль +Z — назад от корпуса
+		mi.position = Vector3(0, 0, h * 0.5)
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		pivot.add_child(mi)
+	return pivot
+
+
+# след горячего газа в рывке: мягкие клубы остаются в мире, голубые у сопла, тают в серую дымку
+func _build_exhaust(at: Vector3) -> void:
+	var p := CPUParticles3D.new()
+	var qm := QuadMesh.new()
+	qm.size = Vector2(1.3, 1.3)
+	p.mesh = qm
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.vertex_color_use_as_albedo = true
+	mat.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	var tex := Art.fx_tex("smoke_07")
+	if tex != null:
+		mat.albedo_texture = tex
+	p.material_override = mat
+	var ramp := Gradient.new()
+	ramp.set_color(0, Color(0.65, 0.85, 1.0, 0.45))
+	ramp.set_color(1, Color(0.55, 0.56, 0.6, 0.0))
+	ramp.add_point(0.3, Color(0.6, 0.66, 0.75, 0.3))
+	p.color_ramp = ramp
+	var grow := Curve.new()
+	grow.add_point(Vector2(0, 0.5))
+	grow.add_point(Vector2(1, 1.6))
+	p.scale_amount_curve = grow
+	p.local_coords = false
+	p.amount = int(36 * Cfg.gfx(0.4, 0.7, 1.0))
+	p.lifetime = 0.6
+	p.emitting = false
+	p.direction = Vector3(0, 0, 1)
+	p.spread = 12.0
+	p.initial_velocity_min = 4.0
+	p.initial_velocity_max = 8.0
+	p.damping_min = 8.0
+	p.damping_max = 12.0
+	p.gravity = Vector3(0, 0.6, 0)
+	p.angle_max = 360.0
+	p.position = at
+	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	torso.add_child(p)
+	_exhaust = p
+
+
+# струя рывка: в рывке горит в полную силу, после — за 0,4 с укорачивается и тает.
+# Свет от струи на землю и соседей — только у видимого меха (иначе выдаст его в тумане)
+func _update_plume(delta: float, dashing: bool) -> void:
+	if _exhaust != null and _exhaust.emitting != dashing:
+		_exhaust.emitting = dashing
+	if dashing:
+		_thrust_k = 1.0
+	elif _thrust_k > 0.0:
+		_thrust_k = maxf(_thrust_k - delta / 0.4, 0.0)
+	else:
+		return
+	var on := _thrust_k > 0.0
+	var a := _thrust_k * _thrust_k
+	for th in thrusters:
+		th.visible = on
+		if on:
+			var w := lerpf(0.55, 1.0, _thrust_k)
+			th.scale = Vector3(w, w, (0.3 + 0.7 * _thrust_k) * randf_range(0.85, 1.15))
+	for m in _plume_mats:
+		m.set_shader_parameter("k", a)
+	if on and thrusters.size() == 2 and is_visible_in_tree():
+		Fx.light_flash((thrusters[0].global_position + thrusters[1].global_position) * 0.5, Color(0.45, 0.7, 1.0),
+			7.0, 2.4 * a, 0.08, "dash_%d" % get_instance_id())
 
 
 # тормозные двигатели под тазом: горят при высадке с неба
@@ -258,6 +379,9 @@ func set_charred() -> void:
 		f.visible = false
 	for t in thrusters:
 		t.visible = false
+	_thrust_k = 0.0
+	if _exhaust != null:
+		_exhaust.emitting = false
 	if m_light != null:
 		m_light.emission_enabled = false
 		m_light.albedo_color = Color(0.05, 0.05, 0.05)
@@ -325,9 +449,8 @@ func _build_torso(weapon_looks: Array, rockets: bool) -> void:
 	# двигатели рывка сзади
 	for j in jets:
 		_cyl(torso, 0.2, 0.35, j - Vector3(0, 0, 0.3), m_dark, Vector3(PI / 2, 0, 0))
-		var th := _box(torso, Vector3(0.26, 0.26, 1.3), j + Vector3(0, 0, 0.6), _unshaded(Color(0.55, 0.85, 1.0) * 2.0))
-		th.visible = false
-		thrusters.append(th)
+		thrusters.append(_dash_plume(torso, j))
+	_build_exhaust((jets[0] + jets[1]) * 0.5 + Vector3(0, 0, 0.4))
 	if model == "":
 		_build_style_parts()
 	for i in 2:
@@ -977,10 +1100,7 @@ func update_visual(delta: float, body_pos: Vector3, vel: Vector3, legs_yaw: floa
 	_brace_k = move_toward(_brace_k, 1.0 if braced else 0.0, delta * 3.0)
 	for st_i in _struts.size():
 		_struts[st_i].rotation.x = lerpf(-0.15, 0.55, _brace_k)
-	for th in thrusters:
-		th.visible = dashing and not airborne
-		if dashing:
-			th.scale = Vector3(1, 1, randf_range(0.7, 1.3))
+	_update_plume(delta, dashing and not airborne)
 
 	# ноги: от бедра до ступни
 	var right := legs_b.x.normalized()

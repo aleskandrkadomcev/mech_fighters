@@ -62,6 +62,8 @@ var braced := false             # упор включён: бьёт дальше
 var dash_stock := 1.0           # сколько рывков готово (у Осы до двух)
 var _rammed := {}               # кого уже ударил этим рывком
 var _snap_next := true          # мех телепортировался или модель новая: не сглаживать переход между тиками
+var _ghost := false             # только что появился и стоит в другом мехе или обломке: проходит сквозь них (см. _update_ghost)
+var _ghost_push := Vector3.ZERO
 
 var aim_point := Vector3(0, 0, -10)
 var aim_ground := Vector3(0, 0, -10)   # точка на земле под курсором: туда стреляет гранатомёт
@@ -133,8 +135,7 @@ var _look := {}
 
 
 func _ready() -> void:
-	collision_layer = 2
-	collision_mask = 1 | 2 | 16 | 32     # стены, другие мехи, обломки, постройки
+	_set_ghost(true)      # обычно: layer 2, mask 1 | 2 | 16 | 32 — стены, другие мехи, обломки, постройки
 	add_to_group("mechs")
 	add_to_group("damageable")
 	# капсула только для ходьбы: узкая, чтобы не цепляться боками за стены. Снаряды её не видят
@@ -464,6 +465,18 @@ func is_landing() -> bool:
 	return landing_left > 0.0
 
 
+# сколько секунд осталось до готовности (таймер у курсора, когда жмёшь на перезарядке):
+# index ≥ 0 — абилка модуля, -1 — рывок, -5 — телепорт на базу; 0 — ждать нечего (не по времени)
+func cooldown_left(index: int) -> float:
+	if index >= 0:
+		return ability_cd[index] if index < ability_cd.size() else 0.0
+	if index == -1:
+		return dash_cd if dash_stock < 1.0 else 0.0
+	if index == -5:
+		return tp_cd
+	return 0.0
+
+
 func is_channeling() -> bool:
 	return tp_left > 0.0
 
@@ -553,6 +566,8 @@ func _physics_process(delta: float) -> void:
 	if is_landing():
 		_update_landing(delta)
 		return
+	if _ghost:
+		_update_ghost()
 	stun_left = maxf(stun_left - delta, 0.0)
 	shield_left = maxf(shield_left - delta, 0.0)
 	slow_left = maxf(slow_left - delta, 0.0)
@@ -793,6 +808,7 @@ func respawn(pos: Vector3, drop := true) -> void:
 	visual.reset()
 	if brain != null:
 		brain.reset()
+	_set_ghost(true)
 	if drop:
 		start_landing()
 
@@ -840,6 +856,7 @@ func _finish_landing() -> void:
 	visual.reset()
 	_col.set_deferred("disabled", false)
 	hitbox.set_active(true)
+	_set_ghost(true)
 	shield_left = Cfg.spawn_shield
 	if _landing_marker != null and is_instance_valid(_landing_marker):
 		_landing_marker.queue_free()
@@ -848,6 +865,45 @@ func _finish_landing() -> void:
 		Fx.dust_ring(global_position, get_hit_radius() * 3.0)
 	Sfx.play_at("land", global_position, -4.0, 0.06)
 	landed.emit()
+
+
+# ------------------------------------------------------------------
+#  ПОЯВЛЕНИЕ В ДРУГОМ МЕХЕ: после высадки, возрождения или телепорта мех мог оказаться внутри
+#  другого меха или обломка (пока летел, туда зашли). Физика выталкивает такие тела друг из друга,
+#  при совпадении — вверх, и оба улетали в небо. Поэтому только что появившийся мех проходит сквозь
+#  мехов и обломки и мягко отходит в сторону, а как разошлись — столкновения возвращаются
+# ------------------------------------------------------------------
+
+func _set_ghost(on: bool) -> void:
+	_ghost = on
+	_ghost_push = Vector3.ZERO
+	collision_layer = 0 if on else 2
+	collision_mask = (1 | 32) if on else (1 | 2 | 16 | 32)
+
+
+func _update_ghost() -> void:
+	var me := Vector3(global_position.x, 0, global_position.z)
+	var push := Vector3.ZERO
+	var inside := false
+	var others: Array = []
+	for m in get_tree().get_nodes_in_group("mechs"):
+		if m != self and not m.dead and not m.is_landing():
+			others.append([m, 2.5])            # две капсулы ходьбы по 1,25
+	for w in get_tree().get_nodes_in_group("wrecks"):
+		others.append([w, 1.25 + float(w.get("radius") if w.get("radius") != null else 1.8)])
+	for o in others:
+		var d := me - Vector3(o[0].global_position.x, 0, o[0].global_position.z)
+		var gap: float = o[1] + 0.15
+		if d.length() >= gap:
+			continue
+		inside = true
+		if d.length() < 0.05:            # ровно в нём: отходим в свою сторону, у каждого меха своя
+			d = Vector3.RIGHT.rotated(Vector3.UP, float(get_instance_id() % 628) * 0.01)
+		push += d.normalized() * (gap - d.length())
+	if not inside:
+		_set_ghost(false)
+		return
+	_ghost_push = push.limit_length(1.0) * 6.0
 
 
 # ------------------------------------------------------------------
@@ -880,6 +936,7 @@ func _update_tp(delta: float) -> void:
 		velocity = Vector3.ZERO
 		visual.reset()
 		_snap_next = true
+		_set_ghost(true)
 		Fx.burst(global_position + Vector3.UP * 2.0, Color(0.5, 0.85, 1.0), 4.0)
 		Sfx.play_at("dash", global_position, -2.0, 0.05)
 		_cancel_tp()
@@ -993,9 +1050,10 @@ func _update_move(delta: float) -> void:
 		vy = -1.0
 	else:
 		vy -= 30.0 * delta
-	velocity = Vector3(hv.x, vy, hv.z)
+	velocity = Vector3(hv.x + _ghost_push.x, vy, hv.z + _ghost_push.z)
 	_push_wrecks(wish * max_speed if dash_left <= 0.0 else hv, delta)
 	move_and_slide()
+	velocity -= _ghost_push         # отход в сторону не копится в скорости
 
 	# упор: стоит на месте достаточно долго
 	var real := Vector3(velocity.x, 0, velocity.z)
@@ -1756,6 +1814,10 @@ func _update_ability_fx(delta: float) -> void:
 		_barrier_hit = maxf(_barrier_hit - delta * 4.0, 0.0)
 		_barrier_mat.set_shader_parameter("hit", _barrier_hit)
 		_barrier_mat.set_shader_parameter("fade", 1.0 - _fade)
+		# щит светит на землю и соседей своим цветом, при попадании ярче (только видимый — иначе выдаст меха)
+		if seen:
+			Fx.light_flash(global_position + Vector3.UP * 2.0, Color(0.35, 0.78, 1.0), 9.0, (1.5 + _barrier_hit * 3.0) * (1.0 - _fade),
+				0.08, "shield_%d" % get_instance_id())
 
 
 func _player_team() -> int:
@@ -1880,8 +1942,7 @@ func _cast_airstrike(index: int) -> void:
 	var target := global_position + to
 	target.y = 0.0
 	var delay: float = maxf(p["delay"], 0.05)
-	var col := Color(1.0, 0.45, 0.15) if team == 0 else Color(1.0, 0.12, 0.1)
-	var marker := Fx.ground_marker(target, p["radius"], col, team, delay + 1.0, true, true)
+	var marker := Fx.strike_marker(target, p["radius"], team, delay)      # видна своей команде, метки сходятся к падению
 	var fall := minf(0.45, delay)
 	p["fall"] = true
 	var start := target + Vector3(4.0, 34.0, 3.0)

@@ -47,6 +47,9 @@ var _radartest := false          # --radartest (с --map=arena --enemies=1 --all
 var _ruintest := false           # --ruintest: развалина сломанной турели — бьют обе команды, разбили — припасы и путь свободен
 var _slidetest := false          # --slidetest: мех убит в рывке — обломок проезжает немного и встаёт
 var _lobtest := false            # --lobtest: ЭМИ и осадное орудие турелей летят быстро и низко и попадают в меха
+var _spawntest := false         # --spawntest --drop --enemies=0 --allies=1: мех садится прямо на другого — никто не подпрыгивает
+var _proptest := false           # --proptest: кучка ящиков не мешает пройти, ломается от меха и от взрыва
+var _cdtest := false             # --cdtest: нажал рывок на перезарядке — у курсора таймер «2,35», тает за 1 с
 var _capbench := false           # --capbench (окно, с --targetshot=ground или =fight): кадры и видеокарта при разных пределах кадров
 var _coredmg := false            # --coredmg: по ядрам-Теслам проходит урон, когда турели 3 уровня сломаны (стреляем автопушкой)
 var _creeptest := false          # --creeptest: у крипа после склейки деталей есть корпус, гусеницы и башня
@@ -167,6 +170,12 @@ func setup(main_node: Node3D, args: PackedStringArray) -> void:
 			_lobtest = true
 		elif a == "--capbench":
 			_capbench = true
+		elif a == "--spawntest":
+			_spawntest = true
+		elif a == "--proptest":
+			_proptest = true
+		elif a == "--cdtest":
+			_cdtest = true
 		elif a == "--ruintest":
 			_ruintest = true
 		elif a == "--radartest":
@@ -255,6 +264,12 @@ func _process(_delta: float) -> void:
 		_run_slidetest()
 	if _lobtest:
 		_run_lobtest()
+	if _spawntest:
+		_run_spawntest()
+	if _proptest:
+		_run_proptest()
+	if _cdtest:
+		_run_cdtest()
 	if _ruintest:
 		_run_ruintest()
 	if _radartest:
@@ -334,7 +349,7 @@ func _process(_delta: float) -> void:
 		var img := get_viewport().get_texture().get_image()
 		img.save_png(("%s/%s_f%04d.png" % [_shot_dir, _target, shot_f]) if _fxreel else ("%s/f%04d.png" % [_shot_dir, shot_f]))
 		_shots_left.erase(shot_f)
-		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and not _linktest and _mechexport == "" and not _gfxbench and not _cpubench and not _fancheck and not _aimtest and not _creeptest and not _radartest and not _ruintest and not _coredmg and not _slidetest and not _lobtest:
+		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and not _linktest and _mechexport == "" and not _gfxbench and not _cpubench and not _fancheck and not _aimtest and not _creeptest and not _radartest and not _ruintest and not _coredmg and not _slidetest and not _lobtest and not _spawntest and not _proptest and not _cdtest:
 			get_tree().quit()
 
 
@@ -406,7 +421,7 @@ func _nearest_target() -> Node3D:
 	var best: Node3D = null
 	var best_d := 1e9
 	for n in get_tree().get_nodes_in_group("damageable"):
-		if n.is_in_group("mechs") or n.is_in_group("walls") or n.is_in_group("creeps") or n.is_in_group("structures") or n.is_in_group("wrecks"):
+		if n.is_in_group("mechs") or n.is_in_group("walls") or n.is_in_group("creeps") or n.is_in_group("structures") or n.is_in_group("wrecks") or n.is_in_group("props"):
 			continue      # нужны только мишени-манекены
 		var d: float = n.global_position.distance_to(main.mech.global_position)
 		if d < best_d:
@@ -1075,6 +1090,30 @@ func _run_minetest() -> void:
 			print("[MINE] bot at x=%.1f" % b2.global_position.x)
 			print("[MINE] enemy hp %.0f -> %.0f, slowed %.1f s, speed x%.2f, mines left on map %d" % [get_meta("hp0"), b2.hp, b2.slow_left,
 				b2.walk_speed() / maxf(b2.stats["walk_speed"], 0.01) / Cfg.bot_speed, get_tree().get_nodes_in_group("mines").size()])
+			# мина и вражеский крип: крип рядом с миной — она срабатывает
+			b2.global_position = Vector3(-60, 0.05, -60)
+			var mn3 = preload("res://scripts/mine.gd").new()
+			mn3.team = m.team
+			mn3.owner_mech = m
+			mn3.p = m.abilities[0]["params"].duplicate()      # числа минного укладчика игрока
+			mn3.p["arm_time"] = 0.0
+			get_tree().current_scene.add_child(mn3)
+			mn3.global_position = Vector3(-20, 0.0, -48)
+			var c = main.Creep.new()
+			c.team = 1 - m.team
+			c.lane = "mid"
+			c.path = PackedVector3Array([Vector3(-18, 0, -48), Vector3(-30, 0, -48)])
+			c.nav = main.nav
+			c.position = Vector3(-18, 0, -48)
+			main.add_child(c)
+			set_meta("creep", c)
+			set_meta("creep_hp0", c.hp)
+		330:
+			var c2 = get_meta("creep")
+			var gone := get_tree().get_nodes_in_group("mines").filter(func(x) -> bool: return x.global_position.distance_to(Vector3(-20, 0, -48)) < 1.0).is_empty()
+			print("[MINE] вражеский крип у мины: мина сработала %s, крип %s — %s" % [gone,
+				("здоровье %.0f -> %.0f" % [get_meta("creep_hp0"), c2.hp]) if is_instance_valid(c2) and not c2.dead else "уничтожен",
+				"ВЕРНО" if gone else "ОШИБКА"])
 			get_tree().quit()
 
 
@@ -1476,6 +1515,8 @@ func _run_targetshot() -> void:
 		_stage_calm(m)
 	elif _target == "ground":
 		_stage_ground(m)
+	elif _target == "list":
+		_stage_list(m)
 	# все стреляют в свои цели и не умирают, пока идёт съёмка
 	for a in _actors:
 		var b = a[0]
@@ -1491,7 +1532,7 @@ func _run_targetshot() -> void:
 					if not _shots_left.has(f):         # два меха под молнией в один кадр — не снимать дважды
 						_shots_left.append(f)
 		a[0].set_meta("was_stun", a[0].stun_left > 0.0)
-	var end_f: int = {"fight": 200, "base": 500, "calm": 220, "ground": 250}.get(_target, 300)
+	var end_f: int = {"fight": 200, "base": 500, "calm": 220, "ground": 250, "list": 530}.get(_target, 300)
 	if _frame >= end_f and _shots_left.is_empty():
 		if _capbench:
 			_run_capbench()
@@ -1690,6 +1731,55 @@ func _stage_ground(m) -> void:
 		m.demo = {"move": Vector2.ZERO, "fire": false, "aim": at + Vector3(0, 1.5, 0)}
 		Cfg.cam_distance = s[2]
 		main.cam._started = false
+
+
+# правки по списку Сани одной постановкой (--targetshot=list): ник над полоской (рядом союзник),
+# мех проходит сквозь кучку ящиков (снимки через 3, 10 и 40 кадров после поломки), рывок со струёй,
+# щит со светом (и попадание в него), метка авиаудара от вызова до падения ракеты.
+# Снимки 30, поломка+3/+10/+40, 184, 196, 205, 262, 274, 310, 400, 460, 478, 486
+func _stage_list(m) -> void:
+	var crates := Vector3(-62, 0, -16)
+	if _frame == 3:
+		Cfg.bot_allies = 1
+		Cfg.bot_enemies = 0
+		Cfg.cam_distance = 36.0
+		m.set_build({"mech": "mech_fortress", "core": "core_combat", "weapons": ["autocannon", "laser"], "modules": ["mod_shield", "mod_airstrike"]})
+		m.global_position = crates + Vector3(-8, 0.05, 0)
+		m.snap_interpolation(m)
+		main.cam._started = false
+		var ally = _stage_mech(main._spawn_bot(0), "mech_assault", ["autocannon", "heavy_cannon"], crates + Vector3(-6, 0.05, 7))
+		ally.demo = {"move": Vector2.ZERO, "fire": false, "aim": crates + Vector3(20, 1.5, 7)}
+		if _shot_dir != "":
+			for f in [30, 184, 196, 205, 262, 274, 310, 400, 460, 478, 486]:
+				if not _shots_left.has(f):
+					_shots_left.append(f)
+	if _frame < 4:
+		return
+	m.energy = m.energy_max()
+	m.hp = m.max_hp()
+	if not has_meta("crate_broke") and _pt_prop(crates).broken:
+		set_meta("crate_broke", _frame)
+		print("[LIST] кучка ящиков сломана на кадре %d" % _frame)
+		if _shot_dir != "":
+			for f in [_frame + 3, _frame + 10, _frame + 40]:
+				_shots_left.append(f)
+	var aim: Vector3 = m.global_position + Vector3(14, 1.5, -3)
+	if _frame < 31 or _frame >= 140:
+		m.demo = {"move": Vector2.ZERO, "fire": false, "aim": aim}
+	elif _frame < 140:
+		m.demo = {"move": Vector2(1, 0), "fire": false, "aim": aim}
+	if _frame == 180:
+		m.dash_stock = 2.0
+		m.demo = {"move": Vector2(1, 0), "fire": false, "dash": true, "aim": aim}
+	if _frame == 240:
+		m.press_ability(0)          # щит
+	if _frame == 272:
+		m.take_damage(15.0, m.global_position + Vector3(2, 2, 0), Vector3.LEFT, "", null)
+	if _frame == 300:
+		m.press_ability(0)          # щит выключить
+		m.ability_cd[1] = 0.0
+		m.press_ability(1)          # авиаудар
+		print("[LIST] авиаудар: задержка %.2f с" % m.abilities[1]["params"]["delay"])
 
 
 # ------------------------------------------------------------------
@@ -2914,3 +3004,135 @@ func _run_capbench() -> void:
 	for l in _cap_out:
 		print(l)
 	get_tree().quit()
+
+
+# ------------------------------------------------------------------
+#  Появление на другом мехе (--spawntest --drop --enemies=0 --allies=1): союзник стоит на месте, мех
+#  игрока сначала садится на него с неба, потом появляется на нём сразу (как телепорт на базу).
+#  Никто не должен подпрыгнуть (высота не выше 0,3), и мехи должны разойтись
+# ------------------------------------------------------------------
+
+var _sp_bot: Node3D
+var _sp_top := [0.0, 0.0]
+var _sp_fails := 0
+const SP_AT := Vector3(0, 0.05, -20)
+
+
+func _sp_report(what: String) -> void:
+	var m = main.mech
+	var d := Vector2(m.global_position.x - _sp_bot.global_position.x, m.global_position.z - _sp_bot.global_position.z).length()
+	var ok: bool = _sp_top[0] < 0.3 and _sp_top[1] < 0.3 and d > 2.4
+	print("[SPAWN] %s: наибольшая высота — мех %.2f, стоящий %.2f; разошлись на %.1f м — %s" % [
+		what, _sp_top[0], _sp_top[1], d * Cfg.METERS_PER_UNIT, "ВЕРНО" if ok else "ОШИБКА"])
+	if not ok:
+		_sp_fails += 1
+	_sp_top = [0.0, 0.0]
+
+
+func _run_spawntest() -> void:
+	var m = main.mech
+	if _frame == 3:
+		Cfg.creeps_enabled = 0
+		for b in main.bots:
+			_sp_bot = b
+	if _sp_bot == null or _frame < 4:
+		return
+	if _frame == 4 or _frame == 330:
+		_sp_bot.brain = null
+		_sp_bot.global_position = SP_AT
+		_sp_bot.snap_interpolation(_sp_bot)
+		_sp_bot.demo = {"move": Vector2.ZERO, "fire": false, "aim": SP_AT + Vector3(10, 1.5, 0)}
+	if _frame == 10:
+		m.respawn(SP_AT + Vector3(0.0, 0, 0.0))                 # с неба прямо на союзника
+	if _frame == 340:
+		m.respawn(SP_AT + Vector3(0.0, 0, 0.01), false)         # сразу в нём, как телепорт на базу
+	m.demo = {"move": Vector2.ZERO, "fire": false, "aim": SP_AT + Vector3(10, 1.5, 0)}
+	if _frame > 10:
+		if not m.is_landing():
+			_sp_top[0] = maxf(_sp_top[0], m.global_position.y)
+		_sp_top[1] = maxf(_sp_top[1], _sp_bot.global_position.y)
+	if _frame == 320:
+		_sp_report("сел с неба на стоящего меха")
+	if _frame == 520:
+		_sp_report("появился прямо в стоящем мехе")
+		print("[SPAWN] итог: %s" % ("ВСЁ ВЕРНО" if _sp_fails == 0 else "ошибок %d" % _sp_fails))
+		get_tree().quit()
+
+
+# ------------------------------------------------------------------
+#  Разрушаемая мелочь (--proptest, карта classic): мех идёт прямо на кучку ящиков и проходит сквозь неё,
+#  кучка ломается; для ботов на её месте проход свободен; вторую кучку ломает взрыв
+# ------------------------------------------------------------------
+
+var _pt_fails := 0
+
+
+func _pt_prop(at: Vector3) -> Node3D:
+	var best: Node3D = null
+	for p in get_tree().get_nodes_in_group("props"):
+		if best == null or p.global_position.distance_to(at) < best.global_position.distance_to(at):
+			best = p
+	return best
+
+
+func _pt_check(ok: bool, what: String) -> void:
+	print("[PROP] %s — %s" % [what, "ВЕРНО" if ok else "ОШИБКА"])
+	if not ok:
+		_pt_fails += 1
+
+
+func _run_proptest() -> void:
+	var m = main.mech
+	var a := Vector3(-62, 0, -16)
+	var b := Vector3(-62, 0, 16)
+	if _frame == 5:
+		Cfg.creeps_enabled = 0
+		print("[PROP] кучек ящиков на карте: %d" % get_tree().get_nodes_in_group("props").size())
+		_pt_check(main.nav.is_free(a), "на месте кучки ящиков боты проходят (карта проходимости)")
+		m.global_position = a + Vector3(-8, 0.05, 0)
+		m.snap_interpolation(m)
+	if _frame >= 5 and _frame < 150:
+		m.demo = {"move": Vector2(1, 0), "fire": false, "aim": a + Vector3(20, 1.5, 0)}
+	if _frame == 150:
+		m.demo = {"move": Vector2.ZERO, "fire": false, "aim": a + Vector3(20, 1.5, 0)}
+		_pt_check(m.global_position.x > a.x + 4.0, "мех прошёл сквозь кучку (x %.1f, кучка на %.0f)" % [m.global_position.x, a.x])
+		_pt_check(_pt_prop(a).broken, "кучка, через которую прошёл мех, сломана")
+		_pt_check(not _pt_prop(b).broken, "другая кучка цела")
+		Fx.blast(b + Vector3(2.5, 0.5, 0), 3.0, 10.0, 0.5, 1, null)
+	if _frame == 152:
+		_pt_check(_pt_prop(b).broken, "взрыв рядом ломает кучку")
+	if _frame == 600:
+		var left := 0
+		for n in get_tree().current_scene.get_children():
+			if n is MeshInstance3D and n.physics_interpolation_mode == Node.PHYSICS_INTERPOLATION_MODE_OFF and n.material_override == _pt_prop(a)._mat:
+				left += 1
+		_pt_check(left == 0, "куски ушли в землю через несколько секунд (осталось %d)" % left)
+		print("[PROP] итог: %s" % ("ВСЁ ВЕРНО" if _pt_fails == 0 else "ошибок %d" % _pt_fails))
+		get_tree().quit()
+
+
+# ------------------------------------------------------------------
+#  Таймер у курсора (--cdtest): рывок на перезарядке — рядом с курсором оставшееся время «2,35»,
+#  оно идёт вниз и тает за секунду
+# ------------------------------------------------------------------
+
+func _run_cdtest() -> void:
+	var m = main.mech
+	var hud = main.hud
+	if _frame == 5:
+		m.demo = {"move": Vector2.ZERO, "fire": false, "aim": m.global_position + Vector3(10, 1.5, 0)}
+		m.dash_stock = 0.0
+		m.dash_cd = 2.35
+	if _frame == 6:
+		m.demo["dash"] = true
+	if _frame == 10:
+		set_meta("t0", hud._cd_tip.text if hud._cd_tip != null else "")
+		set_meta("vis0", hud._cd_tip != null and hud._cd_tip.visible)
+	if _frame == 40:
+		set_meta("t1", hud._cd_tip.text if hud._cd_tip != null else "")
+		set_meta("a1", hud._cd_tip.modulate.a if hud._cd_tip != null else -1.0)
+	if _frame == 80:
+		var ok: bool = get_meta("vis0") and str(get_meta("t0")).begins_with("2,") and str(get_meta("t1")) < str(get_meta("t0")) 			and float(get_meta("a1")) < 0.8 and hud._cd_tip != null and not hud._cd_tip.visible
+		print("[CD] у курсора «%s», через полсекунды «%s» (прозрачность %.2f), через секунду скрыт: %s — %s" % [get_meta("t0"), get_meta("t1"),
+			float(get_meta("a1")), not hud._cd_tip.visible if hud._cd_tip != null else false, "ВЕРНО" if ok else "ОШИБКА"])
+		get_tree().quit()

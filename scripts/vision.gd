@@ -161,6 +161,11 @@ func invalidate_static() -> void:
 	_fan_epoch += 1      # старые веера рисуются, пока их не пересчитают (доли секунды), без чёрной вспышки
 
 
+# видит ли команда точку обычным обзором (мелочь, сломанная в тумане, показывается сломанной только так)
+func point_visible(team: int, pos: Vector3, radius: float) -> bool:
+	return _seen_by(_viewers(team), pos, radius, false)
+
+
 func _los(a: Vector3, b: Vector3) -> bool:
 	var q := PhysicsRayQueryParameters3D.create(Vector3(a.x, EYE, a.z), Vector3(b.x, EYE, b.z), 1)
 	return get_viewport().get_world_3d().direct_space_state.intersect_ray(q).is_empty()

@@ -422,6 +422,66 @@ func ground_marker(pos: Vector3, radius: float, color: Color, team := 0, life :=
 	return ring
 
 
+# метка авиаудара (как ульт Гирокоптера в доте): красноватый круг по радиусу взрыва с рисками, как прицел,
+# перекрестье в центре и четыре метки, которые сходятся от края к центру ровно к падению ракеты
+# (delay — секунд до падения). Видна только своей команде; ракета убирает её при взрыве
+var _strike_shader: Shader
+var _strike_quad: PlaneMesh
+
+
+func strike_marker(pos: Vector3, radius: float, team: int, delay: float) -> Node3D:
+	if _strike_shader == null:
+		_strike_shader = Shader.new()
+		_strike_shader.code = """shader_type spatial;
+render_mode unshaded, cull_disabled, depth_draw_never, depth_test_disabled, shadows_disabled;
+uniform vec4 col : source_color = vec4(1.0, 0.3, 0.16, 1.0);
+uniform float t = 0.0;          // 0 — вызвали, 1 — ракета упала
+varying vec2 lp;                // 1.0 = граница взрыва
+void vertex() { lp = VERTEX.xz; }
+float band(float x, float c, float w, float aa) { return 1.0 - smoothstep(w - aa, w + aa, abs(x - c)); }
+void fragment() {
+	float r = length(lp);
+	float a = atan(lp.y, lp.x);
+	float aa = max(fwidth(r), 0.002) * 1.2;
+	float blink = 0.5 + 0.5 * sin(TIME * mix(6.0, 26.0, t * t));
+	// граница взрыва: чёткое кольцо, мягкое свечение и слабая заливка
+	float al = band(r, 1.0, 0.022, aa) * 0.95 + band(r, 1.0, 0.09, 0.06) * 0.22;
+	al += (1.0 - smoothstep(1.0 - aa, 1.0 + aa, r)) * (0.07 + 0.06 * t + 0.05 * blink * t);
+	// риски по краю, как у прицела
+	float step_a = 6.2831853 / 16.0;
+	float da = abs(fract(a / step_a + 0.5) - 0.5) * step_a * r;
+	al += (1.0 - smoothstep(0.012 - aa, 0.012 + aa, da)) * step(0.88, r) * step(r, 1.0) * 0.8;
+	// перекрестье в центре
+	float crs = (1.0 - smoothstep(0.012, 0.012 + aa, min(abs(lp.x), abs(lp.y)))) * step(0.06, r) * step(r, 0.2);
+	al += crs * 0.9 + (1.0 - smoothstep(0.025, 0.025 + aa, r)) * 0.9;
+	// сходящиеся метки: дуги-уголки на радиусе 1 - t, к падению ракеты — в центре
+	float rr = max(1.0 - t, 0.0);
+	float k = (a - 0.7853982) / 1.5707963;
+	float dk = abs(k - round(k)) * 1.5707963;
+	float arc = band(r, rr, 0.03, aa) * (1.0 - smoothstep(0.24 - 0.02, 0.24, dk)) * step(0.02, rr);
+	al += arc * 1.0 + band(r, rr, 0.008, aa) * 0.35;
+	ALBEDO = mix(col.rgb, vec3(1.0, 0.9, 0.8), arc * 0.5 + crs * 0.3);
+	ALPHA = clamp(al * (0.75 + 0.25 * blink), 0.0, 1.0);
+}
+"""
+		_strike_quad = PlaneMesh.new()
+		_strike_quad.size = Vector2(2.4, 2.4)
+	var mat := ShaderMaterial.new()
+	mat.shader = _strike_shader
+	mat.render_priority = 5
+	var node := _mesh_node(_strike_quad, mat, Vector3(pos.x, 0.1, pos.z))
+	node.scale = Vector3(radius, 1, radius)
+	var tw := node.create_tween()
+	tw.tween_method(func(v: float) -> void: mat.set_shader_parameter("t", v), 0.0, 1.0, maxf(delay, 0.05))
+	tw.tween_interval(1.0)       # страховка: если ракета куда-то делась, метка уберётся сама
+	tw.tween_callback(node.queue_free)
+	if team >= 0 and team != player_team:
+		node.visible = false      # врагам не видна
+	danger_zones.append({"pos": Vector3(pos.x, 0, pos.z), "radius": radius, "team": team, "node": node,
+		"born": Time.get_ticks_msec(), "secret": true})
+	return node
+
+
 # хитбоксы команды (мехи, турели, штаб): свои снаряды сквозь них пролетают
 func team_rids(team: int) -> Array[RID]:
 	var out: Array[RID] = []

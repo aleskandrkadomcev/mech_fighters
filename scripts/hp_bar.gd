@@ -2,6 +2,7 @@ extends Node3D
 ## Полоска здоровья над мехом, над ней ник. Повёрнута лицом к камере. Цвет: свой мех, союзник или враг.
 
 const W := 3.2
+const NICK_GAP := 0.16     # зазор между полоской и ником (в плоскости полоски): пара пикселей на экране
 
 var color := Color(0.95, 0.25, 0.2)
 var title := ""
@@ -42,8 +43,12 @@ func _ready() -> void:
 	_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	_label.no_depth_test = true
 	_label.render_priority = 2
-	_label.position = Vector3(0, 0.62, 0)
-	add_child(_label)
+	# ник стоит в плоскости полоски (она наклонена к камере), иначе на экране он садится на полоску.
+	# Нижний край букв — по размерам шрифта: от середины подписи до строки плюс обводка
+	var f: Font = ThemeDB.fallback_font
+	var below := ((f.get_ascent(44) + f.get_descent(44)) * 0.5 - f.get_descent(44) + _label.outline_size * 0.5) * _label.pixel_size
+	_label.position = Vector3(0, 0.2 + NICK_GAP + below, 0.03)
+	_back.add_child(_label)
 
 
 func _process(_delta: float) -> void:

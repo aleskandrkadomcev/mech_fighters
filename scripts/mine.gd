@@ -1,7 +1,7 @@
 extends Node3D
 ## Мина. Ставится под себя. Своим видна всегда, врагам не видна,
 ## пока её не засечёт омни-сенсор или пока она не сработала.
-## Враг подходит ближе радиуса срабатывания: мина пищит и мигает, через задержку взрывается.
+## Враг (мех или крип) подходит ближе радиуса срабатывания: мина пищит и мигает, через задержку взрывается.
 ## Взрыв бьёт врагов (с замедлением) и обломки в радиусе.
 ## Свои и вражеские мины выглядят по-разному: своя — гладкая шайба с зелёным огоньком,
 ## вражеская — ржавая, с четырьмя штырями-взрывателями и красным огоньком. Огонёк есть и на антенне над травой.
@@ -103,13 +103,17 @@ func _physics_process(delta: float) -> void:
 		return
 	# медленно мигает, пока ждёт
 	_light_mat.albedo_color = _on if fmod(_t, 1.2) < 0.15 else _off
+	# срабатывает от вражеских мехов и крипов (общий список тика main.units; падающих с неба там нет)
 	var tr: float = p.get("trigger_radius", 3.5)
-	for m in get_tree().get_nodes_in_group("mechs"):
-		if m.dead or m.team == team:
+	var g = get_tree().current_scene
+	if g == null or not g.has_method("units"):
+		return
+	for u in g.units():
+		if u[2] == team:
 			continue
-		var d: Vector3 = m.global_position - global_position
+		var d: Vector3 = u[1] - global_position
 		d.y = 0
-		if d.length() <= tr + m.get_hit_radius() * 0.5:
+		if d.length() <= tr + float(u[3]) * 0.5:
 			_trigger()
 			return
 

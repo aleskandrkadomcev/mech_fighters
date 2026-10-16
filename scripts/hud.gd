@@ -19,6 +19,9 @@ var _slots: Array = []
 var _slot_row: HBoxContainer
 var _deny_t := 0.0
 var _deny_slot := -1
+var _cd_tip: Label               # таймер у курсора: нажал абилку на перезарядке — сколько ей осталось («2,35»), тает за 1 с
+var _cd_tip_t := 0.0
+var _cd_tip_i := 0
 var _hp: ProgressBar
 var _hp_fill: StyleBoxFlat
 var _hp_label: Label
@@ -400,6 +403,26 @@ func _on_denied(index: int, reason: String) -> void:
 		return
 	_deny_t = 0.3
 	_deny_slot = index if (reason == "cooldown" or reason == "charges") else -2    # -2 = не хватило энергии
+	if reason == "cooldown" and mech != null and mech.cooldown_left(index) > 0.01:
+		if _cd_tip == null:
+			_cd_tip = _label("", 18)
+			_root.add_child(_cd_tip)
+		_cd_tip_i = index
+		_cd_tip_t = 1.0
+		_update_cd_tip(0.0)
+
+
+# таймер у курсора идёт вместе с перезарядкой и тает за секунду
+func _update_cd_tip(delta: float) -> void:
+	if _cd_tip == null:
+		return
+	_cd_tip_t = maxf(_cd_tip_t - delta, 0.0)
+	_cd_tip.visible = _cd_tip_t > 0.0
+	if not _cd_tip.visible:
+		return
+	_txt(_cd_tip, ("%.2f" % mech.cooldown_left(_cd_tip_i)).replace(".", ","))
+	_cd_tip.position = get_viewport().get_mouse_position() + Vector2(18, -30)
+	_cd_tip.modulate.a = _cd_tip_t
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -426,6 +449,8 @@ func _process(delta: float) -> void:
 		return
 	_deny_t = maxf(_deny_t - delta, 0.0)
 	_ammo_deny = maxf(_ammo_deny - delta, 0.0)
+	if _cd_tip_t > 0.0:
+		_update_cd_tip(delta)
 
 	# патроны: ЛКМ и ПКМ (две одинаковые пушки при настройке «на ЛКМ» обе подписаны ЛКМ)
 	var parts: Array = []
