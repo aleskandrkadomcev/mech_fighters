@@ -43,7 +43,7 @@ func setup_wreck(visual: Node3D, vel: Vector3, mech_weight: float, r: float, h :
 	hp = Cfg.wreck_hp
 	weight = maxf(mech_weight, 5.0)
 	radius = r * 0.85
-	_vel = Vector3(vel.x, 0, vel.z)
+	_vel = Vector3(vel.x, 0, vel.z).limit_length(Cfg.wreck_slide_max)
 	_visual = visual
 
 

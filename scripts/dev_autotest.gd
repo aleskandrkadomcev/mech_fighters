@@ -45,6 +45,8 @@ var _perf := false               # с mobatest: каждые 20 с скольк�
 var _fxreel := false             # --fxreel: эффекты одним запуском — драка со взрывами, штурм базы, своя база
 var _radartest := false          # --radartest (с --map=arena --enemies=1 --allies=0): круг обзора радара и F2 на паузе
 var _ruintest := false           # --ruintest: развалина сломанной турели — бьют обе команды, разбили — припасы и путь свободен
+var _slidetest := false          # --slidetest: мех убит в рывке — обломок проезжает немного и встаёт
+var _coredmg := false            # --coredmg: по ядрам-Теслам проходит урон, когда турели 3 уровня сломаны (стреляем автопушкой)
 var _creeptest := false          # --creeptest: у крипа после склейки деталей есть корпус, гусеницы и башня
 var _aimtest := false            # --aimtest: прицел (земля / середина хитбокса), пределы стволов, гранатомёт
 var _fancheck := false           # --fancheck: веер обзора с пропуском лучей совпадает с полным (все лучи)
@@ -155,6 +157,10 @@ func setup(main_node: Node3D, args: PackedStringArray) -> void:
 			_aimtest = true
 		elif a == "--creeptest":
 			_creeptest = true
+		elif a == "--coredmg":
+			_coredmg = true
+		elif a == "--slidetest":
+			_slidetest = true
 		elif a == "--ruintest":
 			_ruintest = true
 		elif a == "--radartest":
@@ -237,6 +243,10 @@ func _process(_delta: float) -> void:
 		_run_aimtest()
 	if _creeptest and _frame == 5:
 		_run_creeptest()
+	if _coredmg:
+		_run_coredmg()
+	if _slidetest:
+		_run_slidetest()
 	if _ruintest:
 		_run_ruintest()
 	if _radartest:
@@ -316,7 +326,7 @@ func _process(_delta: float) -> void:
 		var img := get_viewport().get_texture().get_image()
 		img.save_png(("%s/%s_f%04d.png" % [_shot_dir, _target, shot_f]) if _fxreel else ("%s/f%04d.png" % [_shot_dir, shot_f]))
 		_shots_left.erase(shot_f)
-		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and not _linktest and _mechexport == "" and not _gfxbench and not _cpubench and not _fancheck and not _aimtest and not _creeptest and not _radartest and not _ruintest:
+		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and not _linktest and _mechexport == "" and not _gfxbench and not _cpubench and not _fancheck and not _aimtest and not _creeptest and not _radartest and not _ruintest and not _coredmg and not _slidetest:
 			get_tree().quit()
 
 
@@ -2620,4 +2630,98 @@ func _run_ruintest() -> void:
 		_ru_check(loot >= Cfg.ruin_loot, "выпали припасы: %d" % loot)
 		_ru_check(main.nav.is_free(_ru.global_position), "путь через это место свободен")
 		print("[RUIN] итог: %s" % ("ВСЁ ВЕРНО" if _ru_fails == 0 else "ошибок %d" % _ru_fails))
+		get_tree().quit()
+
+
+# ------------------------------------------------------------------
+#  Ядра-Теслы (--coredmg): пока стоят турели 3 уровня — неуязвимы; сломали турели 3 уровня — мех
+#  стреляет в ядро автопушкой с 20 м и должен снимать здоровье. В лог — куда попадают пули
+# ------------------------------------------------------------------
+
+var _cd_core: Node3D
+var _cd_fails := 0
+
+
+func _cd_check(ok: bool, text: String) -> void:
+	print("[CORE] %s — %s" % [text, "ВЕРНО" if ok else "ОШИБКА"])
+	if not ok:
+		_cd_fails += 1
+
+
+func _run_coredmg() -> void:
+	var m = main.mech
+	if _frame == 5:
+		Cfg.creeps_enabled = 0
+		for st in get_tree().get_nodes_in_group("structures"):
+			if st.team != m.team and st.id == "core" and _cd_core == null:
+				_cd_core = st
+		_cd_check(_cd_core.protected(), "пока стоят турели 3 уровня, ядро неуязвимо")
+		for st in get_tree().get_nodes_in_group("structures"):
+			if st.team != m.team and st.tier == 3:
+				st.take_damage(1e6, st.global_position, Vector3.FORWARD, "", m)
+	if _frame == 8:
+		_cd_check(not _cd_core.protected(), "турели 3 уровня сломаны — ядро не защищено")
+		m.set_build({"mech": "mech_fortress", "core": "core_combat", "weapons": ["autocannon", "autocannon"], "modules": []})
+		var cp: Vector3 = _cd_core.global_position
+		var away := Vector3(-cp.x, 0, -cp.z).normalized()      # от ядра к середине карты, откуда идёт атака
+		m.global_position = cp + away * 14.0 + Vector3(0, 0.05, 0)
+		m.snap_interpolation(m)
+		m.shield_left = 0.0
+		m.demo = {"move": Vector2.ZERO, "fire": false, "aim": Vector3(cp.x, _cd_core.get_hit_height() * 0.5, cp.z)}
+		_cd_core.set_meta("hp0", _cd_core.hp)
+		print("[CORE] ядро в %s, мех в %s, расстояние %.1f, здоровье %.0f" % [cp, m.global_position, m.global_position.distance_to(cp), _cd_core.hp])
+	if _frame >= 30 and _frame < 150:
+		m.ammo[0] = 99.0
+		m.ammo[1] = 99.0
+		m.demo["fire"] = true
+		var cp2: Vector3 = _cd_core.global_position
+		m.demo["aim"] = Vector3(cp2.x, _cd_core.get_hit_height() * 0.5, cp2.z)
+	if _frame >= 30 and _frame < 150 and _frame % 20 == 0:
+		# куда летит выстрел: луч от ствола к прицелу
+		var o: Vector3 = m.visual.get_muzzle(0)
+		var q := PhysicsRayQueryParameters3D.create(o, o + (m.aim_point - o).normalized() * 40.0, 1 | 4 | 16)
+		q.collide_with_areas = true
+		q.exclude = Fx.team_rids(m.team)
+		var hit: Dictionary = m.get_world_3d().direct_space_state.intersect_ray(q)
+		var what := "ничего"
+		if not hit.is_empty():
+			var c = hit["collider"]
+			what = "%s (%s) в %s" % [c.name, c.get_parent().get("id") if c.get_parent() != null else "", hit["position"]]
+		print("[CORE] кадр %d: ствол %s, прицел %s, первым на пути: %s" % [_frame, o, m.aim_point, what])
+	if _frame == 160:
+		_cd_check(_cd_core.hp < float(_cd_core.get_meta("hp0")), "автопушка снимает здоровье ядра: %.0f → %.0f" % [float(_cd_core.get_meta("hp0")), _cd_core.hp])
+		print("[CORE] итог: %s" % ("ВСЁ ВЕРНО" if _cd_fails == 0 else "ошибок %d" % _cd_fails))
+		get_tree().quit()
+
+
+# ------------------------------------------------------------------
+#  Обломок после смерти в рывке (--slidetest): вражеский бот на открытом месте делает рывок и сразу
+#  погибает; обломок должен проехать не дальше нескольких метров
+# ------------------------------------------------------------------
+
+var _sl_bot: Node3D
+var _sl_from := Vector3.ZERO
+
+
+func _run_slidetest() -> void:
+	if _frame == 5:
+		Cfg.creeps_enabled = 0
+		for mm in get_tree().get_nodes_in_group("mechs"):
+			if mm.team != main.mech.team and _sl_bot == null:
+				_sl_bot = mm
+		_sl_bot.global_position = Vector3(0, 0.05, -20)
+		_sl_bot.snap_interpolation(_sl_bot)
+		_sl_bot.velocity = Vector3(50.0, 0, 0)        # скорость рывка
+		_sl_bot.shield_left = 0.0
+	if _frame == 6:
+		_sl_bot.velocity = Vector3(50.0, 0, 0)
+		_sl_from = _sl_bot.global_position
+		_sl_bot.take_damage(1e6, _sl_bot.global_position, Vector3.RIGHT, "", main.mech)
+	if _frame == 200:
+		var far := 0.0
+		for w in get_tree().get_nodes_in_group("wrecks"):
+			var d: float = Vector2(w.global_position.x - _sl_from.x, w.global_position.z - _sl_from.z).length()
+			far = maxf(far, d)
+		var m := far * Cfg.METERS_PER_UNIT
+		print("[SLIDE] убит в рывке (50 ед/с): обломок проехал %.1f м — %s" % [m, "ВЕРНО" if m < 6.0 else "ОШИБКА"])
 		get_tree().quit()
