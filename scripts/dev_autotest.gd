@@ -49,6 +49,7 @@ var _slidetest := false          # --slidetest: убит в рывке и на �
 var _lobtest := false            # --lobtest: ЭМИ и осадное орудие турелей летят быстро и низко и попадают в меха
 var _spawntest := false         # --spawntest --drop --enemies=0 --allies=1: мех садится прямо на другого — никто не подпрыгивает
 var _proptest := false           # --proptest: кучка ящиков не мешает пройти, ломается от меха и от взрыва
+var _dashtest := false           # --dashtest: рывок разгоняется за «Разгон рывка», а не мгновенно; дальность как без разгона
 var _statustest := false         # --statustest: шкала контроля над полоской (оглушение → ЭМИ → замедление) и статусы своего меха
 var _cdtest := false             # --cdtest: нажал рывок на перезарядке — у курсора таймер «2,35», тает за 1 с
 var _capbench := false           # --capbench (окно, с --targetshot=ground или =fight): кадры и видеокарта при разных пределах кадров
@@ -179,6 +180,8 @@ func setup(main_node: Node3D, args: PackedStringArray) -> void:
 			_cdtest = true
 		elif a == "--statustest":
 			_statustest = true
+		elif a == "--dashtest":
+			_dashtest = true
 		elif a == "--ruintest":
 			_ruintest = true
 		elif a == "--radartest":
@@ -275,6 +278,8 @@ func _process(_delta: float) -> void:
 		_run_cdtest()
 	if _statustest:
 		_run_statustest()
+	if _dashtest:
+		_run_dashtest()
 	if _ruintest:
 		_run_ruintest()
 	if _radartest:
@@ -354,7 +359,7 @@ func _process(_delta: float) -> void:
 		var img := get_viewport().get_texture().get_image()
 		img.save_png(("%s/%s_f%04d.png" % [_shot_dir, _target, shot_f]) if _fxreel else ("%s/f%04d.png" % [_shot_dir, shot_f]))
 		_shots_left.erase(shot_f)
-		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and not _linktest and _mechexport == "" and not _gfxbench and not _cpubench and not _fancheck and not _aimtest and not _creeptest and not _radartest and not _ruintest and not _coredmg and not _slidetest and not _lobtest and not _spawntest and not _proptest and not _cdtest and not _statustest:
+		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and not _linktest and _mechexport == "" and not _gfxbench and not _cpubench and not _fancheck and not _aimtest and not _creeptest and not _radartest and not _ruintest and not _coredmg and not _slidetest and not _lobtest and not _spawntest and not _proptest and not _cdtest and not _statustest and not _dashtest:
 			get_tree().quit()
 
 
@@ -3523,4 +3528,54 @@ func _run_statustest() -> void:
 		print("[STATUS] f=%d над полоской «%s» (шкала %.2f), статусы: %s — %s" % [_frame, bar._ctl_name, bar._ctl_k, ", ".join(chips), "ВЕРНО" if ok else "ОШИБКА"])
 	if _frame >= 330 and _shots_left.is_empty():
 		print("[STATUS] итог: %s" % ("ВСЁ ВЕРНО" if fails == 0 else "ошибок %d" % fails))
+		get_tree().quit()
+
+
+# ------------------------------------------------------------------
+#  Рывок с разгоном (--dashtest --enemies=0 --allies=0): мех стоит и делает рывок дважды — с «Разгоном рывка»
+#  и без него (как было). Печатает, за сколько набрана скорость, наибольшее ускорение в g и дальность
+# ------------------------------------------------------------------
+
+func _run_dashtest() -> void:
+	var m = main.mech
+	var start := Vector3(-46, 0.05, -30)
+	var runs := [[10, -1.0], [110, 0.0]]     # [кадр начала, разгон: -1 — как у меха, 0 — мгновенно]
+	for r in runs:
+		var f0: int = r[0]
+		if _frame == f0:
+			if not has_meta("ramp0"):
+				set_meta("ramp0", m.stats.get("dash_ramp", 0.0))
+			m.stats["dash_ramp"] = get_meta("ramp0") if r[1] < 0.0 else r[1]
+			m.shield_left = 0.0
+			m.global_position = start
+			m.velocity = Vector3.ZERO
+			m.snap_interpolation(m)
+			m.dash_stock = 2.0
+			m.dash_cd = 0.0
+			m.demo = {"move": Vector2.ZERO, "fire": false, "aim": start + Vector3(0, 1.5, -20)}
+			set_meta("v", [])
+		if _frame == f0 + 4:
+			m.demo["dash"] = true
+		if _frame >= f0 + 4 and _frame < f0 + 90:
+			get_meta("v").append(Vector2(m.velocity.x, m.velocity.z).length())
+		if _frame == f0 + 90:
+			var vs: Array = get_meta("v")
+			var top: float = vs.max()
+			var t90 := -1.0
+			var acc := 0.0
+			for i in vs.size():
+				if t90 < 0.0 and vs[i] >= top * 0.9:
+					t90 = i / 60.0
+				if i > 0:
+					acc = maxf(acc, (vs[i] - vs[i - 1]) * 60.0)
+			var mpu: float = Cfg.METERS_PER_UNIT
+			var dist: float = (m.global_position - start).length() * mpu
+			set_meta("dist_%d" % f0, dist)
+			print("[DASH] разгон %.2f с: скорость %.0f м/с набрана (90%%) за %.2f с, наибольшее ускорение %.0f g, дальность %.1f м" % [
+				m.stats["dash_ramp"], top * mpu, t90, acc * mpu / 9.81 / 2.0, dist])
+	if _frame == 205:
+		var d1: float = get_meta("dist_10")
+		var d0: float = get_meta("dist_110")
+		var ok: bool = absf(d1 - d0) < d0 * 0.12 and float(get_meta("ramp0")) > 0.0
+		print("[DASH] дальность с разгоном %.1f м, без разгона %.1f м — %s" % [d1, d0, "ВЕРНО" if ok else "ОШИБКА"])
 		get_tree().quit()

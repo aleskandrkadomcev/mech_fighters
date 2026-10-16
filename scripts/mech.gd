@@ -1076,7 +1076,8 @@ func _update_move(delta: float) -> void:
 		if dash_stock >= 1.0 and dash_left <= 0.0:
 			if spend_energy(Cfg.dash_energy_cost):
 				dash_dir = wish.normalized() if has_wish else torso_forward()
-				dash_left = stats["dash_time"]
+				# двигатели работают дольше на половину разгона: дальность рывка та же, что без разгона
+				dash_left = stats["dash_time"] + stats.get("dash_ramp", 0.0) * 0.5
 				if dash_stock >= charges_max:
 					dash_cd = stats["dash_cooldown"]
 				dash_stock -= 1.0
@@ -1090,7 +1091,11 @@ func _update_move(delta: float) -> void:
 	var hv := Vector3(velocity.x, 0, velocity.z)
 	if dash_left > 0.0:
 		dash_left -= delta
-		hv = dash_dir * stats["dash_speed"]
+		# рывок — мощный, но не мгновенный разгон: двигатели доводят скорость до рывковой за «Разгон рывка»
+		# (тяжёлый разгоняется дольше), заодно гасят скорость вбок
+		var top: Vector3 = dash_dir * stats["dash_speed"]
+		var ramp: float = stats.get("dash_ramp", 0.0)
+		hv = top if ramp <= 0.001 else hv.move_toward(top, stats["dash_speed"] / ramp * delta)
 		if stats.get("ram_damage", 0.0) > 0.0:
 			_ram()
 	else:
