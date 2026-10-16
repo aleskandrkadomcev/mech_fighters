@@ -383,7 +383,7 @@ func blast(pos: Vector3, radius: float, dmg: float, edge: float, team: int, src:
 	for n in get_tree().get_nodes_in_group("damageable"):
 		if not (n is Node3D) or not n.has_method("take_damage"):
 			continue
-		if n.get("team") == team:     # своих (и себя) взрыв не задевает
+		if n.get("team") == team and not (n.has_method("is_ruin") and n.is_ruin()):     # своих (и себя) взрыв не задевает; развалины задевает
 			continue
 		var dist: float
 		if n.has_method("blast_distance"):

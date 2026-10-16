@@ -44,6 +44,7 @@ var _moba_secs := 60
 var _perf := false               # с mobatest: каждые 20 с сколько узлов, объектов, ресурсов и время кадра
 var _fxreel := false             # --fxreel: эффекты одним запуском — драка со взрывами, штурм базы, своя база
 var _radartest := false          # --radartest (с --map=arena --enemies=1 --allies=0): круг обзора радара и F2 на паузе
+var _ruintest := false           # --ruintest: развалина сломанной турели — бьют обе команды, разбили — припасы и путь свободен
 var _creeptest := false          # --creeptest: у крипа после склейки деталей есть корпус, гусеницы и башня
 var _aimtest := false            # --aimtest: прицел (земля / середина хитбокса), пределы стволов, гранатомёт
 var _fancheck := false           # --fancheck: веер обзора с пропуском лучей совпадает с полным (все лучи)
@@ -154,6 +155,8 @@ func setup(main_node: Node3D, args: PackedStringArray) -> void:
 			_aimtest = true
 		elif a == "--creeptest":
 			_creeptest = true
+		elif a == "--ruintest":
+			_ruintest = true
 		elif a == "--radartest":
 			_radartest = true
 		elif a == "--fxreel" or a.begins_with("--fxreel="):
@@ -234,6 +237,8 @@ func _process(_delta: float) -> void:
 		_run_aimtest()
 	if _creeptest and _frame == 5:
 		_run_creeptest()
+	if _ruintest:
+		_run_ruintest()
 	if _radartest:
 		_run_radartest()
 	if _demo:
@@ -309,7 +314,7 @@ func _process(_delta: float) -> void:
 		var img := get_viewport().get_texture().get_image()
 		img.save_png(("%s/%s_f%04d.png" % [_shot_dir, _target, shot_f]) if _fxreel else ("%s/f%04d.png" % [_shot_dir, shot_f]))
 		_shots_left.erase(shot_f)
-		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and not _linktest and _mechexport == "" and not _gfxbench and not _cpubench and not _fancheck and not _aimtest and not _creeptest and not _radartest:
+		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and not _linktest and _mechexport == "" and not _gfxbench and not _cpubench and not _fancheck and not _aimtest and not _creeptest and not _radartest and not _ruintest:
 			get_tree().quit()
 
 
@@ -2542,4 +2547,56 @@ func _run_radartest() -> void:
 		Cfg.panel.toggle()
 		get_tree().paused = false
 		print("[RADAR] итог: %s" % ("ВСЁ ВЕРНО" if _rt_fails == 0 else "ошибок %d" % _rt_fails))
+		get_tree().quit()
+
+
+# ------------------------------------------------------------------
+#  Развалина турели (--ruintest): ломаем вражескую турель 1-го уровня, по развалине бьют обе команды,
+#  разбили — выпали припасы, тела нет, путь для ботов свободен
+# ------------------------------------------------------------------
+
+var _ru: Node3D
+var _ru_fails := 0
+
+
+func _ru_check(ok: bool, text: String) -> void:
+	print("[RUIN] %s — %s" % [text, "ВЕРНО" if ok else "ОШИБКА"])
+	if not ok:
+		_ru_fails += 1
+
+
+func _run_ruintest() -> void:
+	if _frame == 5:
+		Cfg.creeps_enabled = 0
+		var best_d := 1e9
+		for st in get_tree().get_nodes_in_group("structures"):
+			if st.team != main.mech.team and st.tier == 1 and st.id != "hq" and st.id != "core":
+				var d: float = st.global_position.distance_to(main.mech.global_position)
+				if d < best_d:
+					best_d = d
+					_ru = st
+		if _ru == null:
+			print("[RUIN] нет вражеской турели 1-го уровня — ОШИБКА")
+			get_tree().quit()
+			return
+		_ru.take_damage(1e6, _ru.global_position, Vector3.FORWARD, "", main.mech)
+	if _frame == 10:
+		_ru_check(_ru.dead and _ru.is_ruin() and absf(_ru.ruin_hp - Cfg.ruin_hp) < 0.1,
+			"турель сломана, осталась развалина: прочность %.0f (у обломка меха %.0f)" % [_ru.ruin_hp, Cfg.wreck_hp])
+		_ru_check(not Fx.team_rids(_ru.team).has(_ru.hitbox.get_rid()), "снаряды команды-хозяина по развалине не пролетают")
+		_ru_check(not main.nav.is_free(_ru.global_position), "пока развалина стоит, боты её обходят")
+		var h0: float = _ru.ruin_hp
+		Fx.blast(_ru.global_position, 6.0, 100.0, 1.0, _ru.team)
+		_ru_check(_ru.ruin_hp < h0, "взрыв команды-хозяина её задевает (%.0f → %.0f)" % [h0, _ru.ruin_hp])
+		var h1: float = _ru.ruin_hp
+		_ru.hitbox.take_damage(100.0, _ru.global_position, Vector3.FORWARD, "", main.mech)
+		_ru_check(_ru.ruin_hp < h1, "попадание в хитбокс развалины (%.0f → %.0f)" % [h1, _ru.ruin_hp])
+		_ru.set_meta("loot0", get_tree().get_nodes_in_group("pickups").size())
+		_ru.take_damage(1e6, _ru.global_position, Vector3.FORWARD, "", main.mech)
+	if _frame == 20:
+		var loot: int = get_tree().get_nodes_in_group("pickups").size() - int(_ru.get_meta("loot0"))
+		_ru_check(_ru.cleared and not _ru.visible and _ru._body == null, "развалину разбили: тела и вида нет")
+		_ru_check(loot >= Cfg.ruin_loot, "выпали припасы: %d" % loot)
+		_ru_check(main.nav.is_free(_ru.global_position), "путь через это место свободен")
+		print("[RUIN] итог: %s" % ("ВСЁ ВЕРНО" if _ru_fails == 0 else "ошибок %d" % _ru_fails))
 		get_tree().quit()

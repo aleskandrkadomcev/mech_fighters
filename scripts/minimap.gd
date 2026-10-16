@@ -139,6 +139,8 @@ func _draw_icons() -> void:
 	var tree := get_tree()
 	# базы
 	for s in tree.get_nodes_in_group("structures"):
+		if s.cleared:          # развалину разбили — на карте её больше нет
+			continue
 		var c := _team_col(s.team)
 		if s.dead:
 			c = Color(0.25, 0.25, 0.25)

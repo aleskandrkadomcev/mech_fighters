@@ -648,6 +648,7 @@ func _build_structures() -> void:
 		# смотрит в сторону врага
 		st.rotation.y = _face_yaw(team)
 		st.destroyed.connect(_on_structure_destroyed)
+		st.ruin_cleared.connect(_on_ruin_cleared)
 		if s[0] == "hq":
 			_hq[team] = st
 			_build_cores(st)
@@ -671,6 +672,7 @@ func _build_cores(hq: Node3D) -> void:
 		add_child(c)
 		c.rotation.y = _face_yaw(team)
 		c.destroyed.connect(_on_structure_destroyed)
+		c.ruin_cleared.connect(_on_ruin_cleared)
 
 
 # место для ядра: сбоку от штаба, но не на линии (иначе крипы упираются в ядро и копятся у базы).
@@ -718,6 +720,8 @@ func _lane_clearance(p: Vector3) -> float:
 func _structure_boxes() -> Array:
 	var out: Array = []
 	for s in get_tree().get_nodes_in_group("structures"):
+		if s.cleared:
+			continue
 		var size := 8.0 if s.id == "hq" else 3.2
 		out.append([s.position.x, s.position.z, size, 6.0, size])
 	return out
@@ -743,6 +747,14 @@ func structures_left(team: int) -> int:
 		if s.team == team and not s.dead and s.id != "hq" and s.id != "core":
 			n += 1
 	return n
+
+
+# развалину турели разбили: убрать её из препятствий для ботов
+func _on_ruin_cleared(s: Node3D) -> void:
+	_static_boxes = _structure_boxes() + art.decor_boxes
+	nav.refresh(Rect2(s.position.x - 3.0, s.position.z - 3.0, 6.0, 6.0), _nav_boxes())
+	if minimap != null:
+		minimap.redraw(self)
 
 
 func _on_structure_destroyed(s: Node3D) -> void:

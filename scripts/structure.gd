@@ -14,12 +14,16 @@ const Art := preload("res://scripts/art.gd")
 const Lob := preload("res://scripts/lob.gd")
 
 signal destroyed(who: Node3D)
+signal ruin_cleared(who: Node3D)     # развалину сломанной турели разбили: путь свободен
 
 var id := "turret_t1"
 var team := 0
 var tier := 1                    # 1-3 у турелей, 0 у штаба
 var hp := 1000.0
 var dead := false
+var ruin_hp := 0.0              # прочность развалины после смерти (у штаба развалины нет — его смерть конец боя)
+var cleared := false            # развалину разбили: постройки больше нет
+var _body: StaticBody3D         # тело, в которое упираются мехи
 var velocity := Vector3.ZERO     # для упреждения ботов: постройки не двигаются
 var seen := true
 var hitbox: Area3D
@@ -63,6 +67,7 @@ func _ready() -> void:
 	body.collision_layer = 32
 	body.collision_mask = 0
 	add_child(body)
+	_body = body
 	var cs := CollisionShape3D.new()
 	var bs := BoxShape3D.new()
 	var size := 8.0 if is_hq else 3.2
@@ -413,6 +418,9 @@ func protected() -> bool:
 
 
 func take_damage(amount: float, pos: Vector3, _dir: Vector3, _kind := "", src: Node = null) -> void:
+	if dead and ruin_hp > 0.0 and amount > 0.0:
+		_ruin_damage(amount)
+		return
 	if dead or amount <= 0.0:
 		return
 	if protected():
@@ -454,7 +462,12 @@ func block_regen(_s: float) -> void:
 func _die() -> void:
 	dead = true
 	hp = 0.0
-	hitbox.set_active(false)
+	if id == "hq":
+		hitbox.set_active(false)
+	else:
+		# остаётся развалина: по ней стреляют обе команды (хитбокс больше не «свой»), разбить — реклейм
+		ruin_hp = Cfg.ruin_hp
+		hitbox.remove_from_group("team_hitbox")
 	var big := id == "hq"
 	for i in (5 if big else 2):
 		var off := Vector3(randf_range(-3, 3), randf_range(0.5, 4), randf_range(-3, 3)) * (1.5 if big else 0.6)
@@ -474,6 +487,36 @@ func _die() -> void:
 		Fx.pulse(_orb.global_position, 6.0)
 	Battle.on_kill(last_attacker, self)
 	destroyed.emit(self)
+
+
+# развалина сломанной турели: в неё стреляют обе команды
+func is_ruin() -> bool:
+	return dead and ruin_hp > 0.0
+
+
+func _ruin_damage(amount: float) -> void:
+	ruin_hp -= amount
+	if ruin_hp <= 0.0:
+		_ruin_break()
+
+
+# развалину разбили: взрыв, припасы, тело и вид исчезают, путь свободен (main пересчитывает проходимость)
+func _ruin_break() -> void:
+	ruin_hp = 0.0
+	cleared = true
+	for i in 2:
+		Fx.explosion(global_position + Vector3(randf_range(-1.5, 1.5), randf_range(0.8, 2.5), randf_range(-1.5, 1.5)), 4.0)
+	Sfx.play_at("wallbreak", global_position, 0.0, 0.05)
+	var g = get_tree().current_scene
+	if g != null and g.has_method("spawn_loot") and Cfg.ruin_loot > 0:
+		g.spawn_loot(global_position, Cfg.ruin_loot)
+	hitbox.set_active(false)
+	if _body != null:
+		_body.queue_free()
+		_body = null
+	remove_from_group("damageable")
+	visible = false
+	ruin_cleared.emit(self)
 
 
 func _physics_process(delta: float) -> void:
