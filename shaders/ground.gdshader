@@ -3,17 +3,17 @@ shader_type spatial;
 // одной пачкой слоёв (Art.ground_arrays) и смешиваются по маскам, которые рисует main.gd:
 //   ground_tex: красный = дорога по линии, зелёный = площадка базы, синий = площадка точки интереса;
 //   biome_tex:  красный = сухая грязь, зелёный = грунт, синий = камни (остальное трава);
-//   ruts_tex:   красный = колеи вдоль линий, зелёный = лужи.
+//   ruts_tex:   колеи вдоль линий (8 пикселей на единицу карты, гладкая: по ней считается рельеф колей);
+//   puddle_tex: лужи.
 // Бегущие тени облаков считаются здесь же. Цвета подогнаны под цель (docs/targets).
 // Если текстур нет (проверки без окна), земля рисуется формулами. В тумане войны темнеет.
 //
 // Графика (Cfg.graphics): main.gd при старте боя вставляет после первой строки
-//   GFX_MID — средние: один масштаб текстур, лужи без ряби и бликов, рельеф только крупный;
+//   GFX_MID — средние: один масштаб текстур, рельеф только крупный;
 //   GFX_LOW — низкие: то же, плюс без рельефа (и карт нормалей), без теней облаков, небо в лужах не плывёт.
 // Без них (высокие) всё как задумано.
 #if defined(GFX_MID) || defined(GFX_LOW)
 #define GFX_ONE_SCALE
-#define GFX_NO_RIPPLE
 #endif
 
 uniform sampler2D fog_tex : filter_linear, repeat_disable;
@@ -23,6 +23,7 @@ uniform float fog_dark = 0.0;
 uniform sampler2D ground_tex : filter_linear, repeat_disable;
 uniform sampler2D biome_tex : filter_linear, repeat_disable;
 uniform sampler2D ruts_tex : filter_linear, repeat_disable;
+uniform sampler2D puddle_tex : filter_linear, repeat_disable;
 uniform sampler2DArray tex_albedo : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2DArray tex_normal : filter_linear_mipmap_anisotropic, repeat_enable;
 uniform float use_tex = 0.0;
@@ -40,11 +41,9 @@ uniform float normal_depth = 1.5;          // рельеф фото-тексту
 uniform float relief = 1.0;                // крупный рельеф: бугры, кочки, колеи-жёлоба
 uniform float puddles = 1.0;
 uniform float cloud_shadow = 0.28;
-uniform vec3 sky_reflect : source_color = vec3(0.62, 0.6, 0.56);   // небо в лужах (тёплое вечернее)
+uniform vec3 sky_reflect : source_color = vec3(0.55, 0.63, 0.74);   // небо в лужах: вечернее, голубоватое
+uniform vec3 cloud_reflect : source_color = vec3(0.78, 0.72, 0.58); // облака в лужах: светлые, желтоватые
 uniform float sky_reflect_power = 0.42;
-uniform vec3 sun_dir = vec3(0.41, 0.56, -0.72);        // откуда светит солнце (main.gd)
-uniform vec3 glint_col : source_color = vec3(1.0, 0.86, 0.62);
-uniform float glint = 1.6;                              // блик солнца на ряби луж
 
 // цвета для рисования формулами (если текстур нет)
 uniform vec3 grass_a : source_color = vec3(0.13, 0.20, 0.07);
@@ -152,9 +151,8 @@ void fragment() {
 
 	if (use_tex > 0.5) {
 		vec3 bio = texture(biome_tex, muv).rgb;
-		vec2 wet = texture(ruts_tex, muv).rg;
-		float rut = wet.r;
-		float pm = wet.g;
+		float rut = texture(ruts_tex, muv).r;
+		float pm = texture(puddle_tex, muv).r;
 		vec2 dx = dFdx(p);
 		vec2 dy = dFdy(p);
 		float k = smoothstep(0.35, 0.65, vnoise(p * 0.045));
@@ -194,7 +192,7 @@ void fragment() {
 			rough = mix(rough, 0.6, rr);
 		}
 		// лужи — по карте луж (main.gd), край неровный от шума, ничем не обрезан; вокруг мокрая тёмная кайма.
-		// Вода серая (в ней отражается небо), гладкая с лёгкой рябью: ловит блик солнца
+		// Вода гладкая, без ряби: в ней отражается голубоватое вечернее небо с желтоватыми облаками
 		float pe = (fbm3(p * 0.9 + 17.0) - 0.5) * 0.35;
 		float damp = smoothstep(0.1, 0.45, pm + pe) * (1.0 - pad) * (1.0 - ppad);
 		float puddle = smoothstep(0.45, 0.53, pm + pe) * (1.0 - pad) * (1.0 - ppad) * puddles;
@@ -208,7 +206,8 @@ void fragment() {
 #else
 		float clouds_in_water = fbm3(p * 0.25 + TIME * 0.015);
 #endif
-		sky = sky_reflect * sky_reflect_power * puddle * (0.45 + 0.8 * clouds_in_water) * (0.55 + 0.45 * core);
+		vec3 sky_col = mix(sky_reflect, cloud_reflect, smoothstep(0.35, 0.75, clouds_in_water));
+		sky = sky_col * sky_reflect_power * puddle * (0.45 + 0.8 * clouds_in_water) * (0.55 + 0.45 * core);
 		nmap = mix(nmap, vec3(0.5, 0.5, 1.0), puddle);
 		rough = mix(rough, 0.5, damp * 0.7);
 		rough = mix(rough, 0.08, puddle);
@@ -234,30 +233,22 @@ void fragment() {
 			nmap = mix(nmap, NORMAL_TEX(4.5, 5.0), pad);
 			rough = mix(rough, mix(0.78, 0.3, oil), pad);
 		}
-		// наклон земли: рельеф по шуму (кроме площадок) и колеи-жёлоба на дороге,
-		// плюс рельеф фото-текстур. Лужи гладкие
+		// наклон земли: рельеф по шуму и колеи-жёлоба на дороге, плюс рельеф фото-текстур.
+		// Площадки баз и точек ровные (бетон и металл, колей на них нет), лужи гладкие
 #ifndef GFX_LOW
 		float flat_k = max(pad, ppad);
 		float h0 = relief_h(p);
-		vec2 grad = vec2(relief_h(p + vec2(0.15, 0.0)) - h0, relief_h(p + vec2(0.0, 0.15)) - h0) / 0.15 * (1.0 - flat_k);
-		vec2 rpx = vec2(0.25, 0.0) / fog_rect.zw;
-		vec2 rpz = vec2(0.0, 0.25) / fog_rect.zw;
-		grad -= vec2(texture(ruts_tex, muv + rpx).r - rut, texture(ruts_tex, muv + rpz).r - rut) / 0.25 * 0.14 * road_k;
-		grad *= relief;
+		vec2 grad = vec2(relief_h(p + vec2(0.15, 0.0)) - h0, relief_h(p + vec2(0.0, 0.15)) - h0) / 0.15;
+		// колеи: наклон по соседнему пикселю маски колей (она гладкая, поэтому без ступенек)
+		vec2 rt = 1.0 / vec2(textureSize(ruts_tex, 0));
+		vec2 rh = rt * fog_rect.zw;
+		grad -= vec2((texture(ruts_tex, muv + vec2(rt.x, 0.0)).r - rut) / rh.x,
+			(texture(ruts_tex, muv + vec2(0.0, rt.y)).r - rut) / rh.y) * 0.14 * road_k;
+		grad *= relief * (1.0 - flat_k);
 		vec3 tn = nmap * 2.0 - 1.0;
 		nw = normalize(vec3(-grad.x + tn.x * normal_depth, 1.0, -grad.y - tn.y * normal_depth));
 #endif
-#ifdef GFX_NO_RIPPLE
 		nw = normalize(mix(nw, vec3(0.0, 1.0, 0.0), puddle));       // вода ровная
-#else
-		vec2 rip = vec2(vnoise(p * 7.0 + TIME * 0.4) - 0.5, vnoise(p * 7.0 + 31.0 - TIME * 0.3) - 0.5) * 0.12
-			+ vec2(vnoise(p * 23.0 - TIME * 0.9) - 0.5, vnoise(p * 23.0 + 7.0 + TIME * 0.7) - 0.5) * 0.1;
-		nw = normalize(mix(nw, vec3(rip.x, 1.0, rip.y), puddle));     // вода ровная, только рябь
-		// блик солнца: где рябь отражает солнце в камеру, вода искрит (на мокрой земле слабее)
-		vec3 vw = normalize((INV_VIEW_MATRIX * vec4(VIEW, 0.0)).xyz);
-		float g = pow(max(dot(reflect(-vw, nw), normalize(sun_dir)), 0.0), 48.0);
-		sky += glint_col * glint * g * (puddle + damp * 0.15);
-#endif
 		col *= gain;
 	} else {
 		float big = fbm(p * 0.035);

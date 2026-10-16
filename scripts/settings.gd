@@ -182,6 +182,11 @@ const GFX_NAMES := ["Низкие", "Средние", "Высокие"]
 const GFX_PATH := "user://graphics.cfg"
 var graphics := 2
 
+# ограничение кадров в секунду (меню «Настройки», хранится там же, в graphics.cfg; 0 — без ограничения):
+# меньше кадров — меньше работы и нагрева видеокарты. Применяется сразу
+const FPS_LIMITS := [60, 90, 120, 144, 0]
+var fps_limit := 0
+
 
 # ============================================================
 #  Дальше служебный код: он собирает список чисел для панели F2
@@ -210,6 +215,7 @@ func _ready() -> void:
 	if _persist:
 		_load_tuning()
 		_load_graphics()
+	apply_fps_limit()
 	# проверки и замеры: --gfx=low|mid|high
 	for a in args:
 		if a.begins_with("--gfx="):
@@ -296,10 +302,32 @@ func gfx(low, mid, high):
 
 func set_graphics(q: int) -> void:
 	graphics = clampi(q, 0, 2)
+	_save_graphics()
+
+
+func set_fps_limit(fps: int) -> void:
+	fps_limit = maxi(fps, 0)
+	apply_fps_limit()
+	_save_graphics()
+
+
+# с синхронизацией кадров (она включена) выше частоты монитора игра и так не выдаёт: такой предел
+# не ставим, иначе два ограничителя спорят и кадры могут дёргаться
+func apply_fps_limit() -> void:
+	var hz := DisplayServer.screen_get_refresh_rate()
+	var vsync := DisplayServer.window_get_vsync_mode() != DisplayServer.VSYNC_DISABLED
+	if fps_limit <= 0 or (vsync and hz > 0.0 and fps_limit >= roundi(hz) - 1):
+		Engine.max_fps = 0
+	else:
+		Engine.max_fps = fps_limit
+
+
+func _save_graphics() -> void:
 	if not _persist:
 		return
 	var cf := ConfigFile.new()
 	cf.set_value("graphics", "preset", graphics)
+	cf.set_value("graphics", "fps_limit", fps_limit)
 	cf.save(GFX_PATH)
 
 
@@ -307,6 +335,7 @@ func _load_graphics() -> void:
 	var cf := ConfigFile.new()
 	if cf.load(GFX_PATH) == OK:
 		graphics = clampi(int(cf.get_value("graphics", "preset", 2)), 0, 2)
+		fps_limit = maxi(int(cf.get_value("graphics", "fps_limit", 0)), 0)
 
 
 func _collect_items() -> void:

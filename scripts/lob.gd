@@ -1,10 +1,11 @@
 extends Node3D
 ## Снаряд навесом: граната гранатомёта, ЭМИ-граната турели 2 уровня, снаряд осадного орудия турели 3 уровня.
-## Турели (setup): летит по дуге над укрытиями и срабатывает в точке падения, ни обо что не цепляется.
-## Гранатомёт меха (setup_ballistic): вылетает с постоянной скоростью и рвётся о то, во что врежется:
+## setup_ballistic (гранатомёт и турели): вылетает с постоянной скоростью и рвётся о то, во что врежется:
 ## стену (по её настоящей высоте — низкую может перелететь), меха, крипа, обломок или землю.
+## Турели целятся по низкой дуге (aim_velocity): чем быстрее снаряд, тем прямее летит.
+## setup (сейчас не используется): летит по дуге заданной высоты в точку, ни обо что не цепляется.
 ## Баллистика настоящая: гравитация Cfg.gravity() (земная при масштабе Cfg.METERS_PER_UNIT),
-## время полёта считается из высоты дуги, поэтому граната и снаряд падают как настоящие.
+## поэтому граната и снаряд падают как настоящие.
 ## payload: kind "explosive" (урон по площади) или "emp" (урон + оглушение + энергия не растёт).
 
 var team := 0
@@ -45,6 +46,21 @@ func setup(from: Vector3, to: Vector3, arc: float, who: Node, payload: Dictionar
 	_p = payload
 	if who != null and "team" in who:
 		team = who.team
+
+
+# скорость вылета, чтобы снаряд со скоростью speed упал в точку to по низкой (прямой) дуге.
+# Не долетает — под 45°, как можно дальше
+static func aim_velocity(from: Vector3, to: Vector3, speed: float) -> Vector3:
+	var v := maxf(speed, 1.0)
+	var g: float = Cfg.gravity()
+	var flat := Vector3(to.x - from.x, 0.0, to.z - from.z)
+	var x := flat.length()
+	var y := to.y - from.y
+	var ang := PI * 0.25
+	var disc := v * v * v * v - g * (g * x * x + 2.0 * y * v * v)
+	if disc >= 0.0 and x > 0.01:
+		ang = atan((v * v - sqrt(disc)) / (g * x))
+	return flat / maxf(x, 0.001) * cos(ang) * v + Vector3.UP * sin(ang) * v
 
 
 func setup_ballistic(from: Vector3, vel: Vector3, who: Node, payload: Dictionary) -> void:

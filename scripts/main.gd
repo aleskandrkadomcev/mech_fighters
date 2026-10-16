@@ -45,7 +45,6 @@ var menu: CanvasLayer
 var nav: RefCounted
 var vision: Node
 var art: Node3D
-var sun_dir := Vector3.UP         # откуда светит солнце (для бликов в лужах)
 var puddles: Array = []          # лужи на земле: Vector3(x, радиус, z); трава в них не растёт
 var minimap: Control
 var bots: Array = []
@@ -936,7 +935,6 @@ func _build_environment() -> void:
 		sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
 		sun.directional_shadow_max_distance = 100.0
 	add_child(sun)
-	sun_dir = sun.global_transform.basis.z.normalized()
 	# слабая подсветка с противоположной стороны, чтобы тени не были чёрными
 	var fill := DirectionalLight3D.new()
 	fill.rotation_degrees = Vector3(-35, -30, 0)
@@ -1041,16 +1039,14 @@ func _ground_biome() -> Image:
 	return img
 
 
-# колеи и лужи (4 пикселя на метр): красный — колеи вдоль линий (пара полос от колёс посередине
-# и пара слабее по краям, чуть виляют), зелёный — лужи. Лужи раскладываются здесь же: вдоль дорог
-# через 9–18 м и немного на сухой грязи; каждая из 2–4 кругов. Список луж [x, z, радиус] — в
-# puddles: по нему трава в лужах не растёт
+# лужи (4 пикселя на единицу карты): раскладываются вдоль дорог через 9–18 м и немного на сухой
+# грязи; каждая из 2–4 кругов. Список луж [x, z, радиус] — в puddles: по нему трава в лужах не растёт
 func _ground_wet(mask: Image, biome: Image) -> Image:
 	var r := map_rect()
 	var k := 4.0
 	var w := int(r.size.x * k)
 	var h := int(r.size.y * k)
-	var img := Image.create(w, h, false, Image.FORMAT_RG8)
+	var img := Image.create(w, h, false, Image.FORMAT_R8)
 	var put := func(x: int, y: int, ch: int, v: float) -> void:
 		if x < 0 or y < 0 or x >= w or y >= h:
 			return
@@ -1077,14 +1073,6 @@ func _ground_wet(mask: Image, biome: Image) -> Image:
 			for s in n:
 				var d := dist + seg * s / n
 				var c0 := a.lerp(b, float(s) / n)
-				for t in [[-1.3, 0.0, 1.0], [1.3, 0.0, 1.0], [-2.7, 1.7, 0.55], [2.7, 1.7, 0.55]]:
-					var off: float = t[0] + sin(d * 0.12 + t[1]) * 0.35
-					var p: Vector3 = c0 + side * off
-					var px := int((p.x - r.position.x) * k)
-					var pz := int((p.z - r.position.y) * k)
-					for oy in range(-1, 2):
-						for ox in range(-1, 2):
-							put.call(px + ox, pz + oy, 0, t[2] * (1.0 if ox == 0 and oy == 0 else 0.55))
 				if d >= next_puddle:
 					next_puddle = d + rng.randf_range(9.0, 18.0)
 					var at: Vector3 = c0 + side * rng.randf_range(-2.2, 2.2)
@@ -1111,7 +1099,50 @@ func _ground_wet(mask: Image, biome: Image) -> Image:
 				for x in range(int(cx - rp) - 1, int(cx + rp) + 2):
 					var dd := Vector2(x + 0.5 - cx, y + 0.5 - cz).length() / rp
 					if dd < 1.0:
-						put.call(x, y, 1, 1.0 - smoothstep(0.45, 1.0, dd))
+						put.call(x, y, 0, 1.0 - smoothstep(0.45, 1.0, dd))
+	return img
+
+
+# колеи вдоль линий (пара полос от колёс посередине и пара слабее по краям, чуть виляют).
+# По ним шейдер земли считает рельеф, поэтому маска гладкая: полосы рисуются вдвое мельче
+# (16 пикселей на единицу карты), потом уменьшаются с усреднением и размываются; итог — 8 пикселей
+# на единицу. Квадрат-штамп подбирается под направление линии, чтобы косая полоса была не шире прямой
+func _ground_ruts() -> Image:
+	var r := map_rect()
+	var k := 8.0
+	while r.size.x * r.size.y * k * k * 4.0 > 4.0e7 and k > 2.0:      # огромная карта — маска грубее
+		k *= 0.5
+	var kk := k * 2.0
+	var w := int(r.size.x * kk)
+	var h := int(r.size.y * kk)
+	var img := Image.create(w, h, false, Image.FORMAT_R8)
+	# сначала слабые крайние полосы всех линий, потом сильные средние: где линии сходятся, средние главнее
+	for pass_i in 2:
+		var ruts: Array = [[-2.7, 1.7, 0.55], [2.7, 1.7, 0.55]] if pass_i == 0 else [[-1.3, 0.0, 1.0], [1.3, 0.0, 1.0]]
+		for lane in lanes:
+			var path: PackedVector3Array = lanes[lane]
+			var dist := 0.0
+			for i in path.size() - 1:
+				var a := path[i]
+				var b := path[i + 1]
+				var seg := a.distance_to(b)
+				var dir := (b - a) / maxf(seg, 0.001)
+				var side := Vector3(-dir.z, 0, dir.x)
+				var px_side := 0.42 * kk / (absf(side.x) + absf(side.z))      # ширина полосы 0,42 единицы
+				var n := int(seg / 0.08) + 1
+				for s in n:
+					var d := dist + seg * s / n
+					var c0 := a.lerp(b, float(s) / n)
+					for t in ruts:
+						var p: Vector3 = c0 + side * (float(t[0]) + sin(d * 0.12 + float(t[1])) * 0.35)
+						var cx := (p.x - r.position.x) * kk
+						var cz := (p.z - r.position.y) * kk
+						img.fill_rect(Rect2i(roundi(cx - px_side * 0.5), roundi(cz - px_side * 0.5), roundi(px_side), roundi(px_side)), Color(t[2], 0, 0))
+				dist += seg
+	# вдвое меньше с усреднением (сглаживает ступеньки), ещё вдвое меньше и обратно — мягкий край полосы
+	img.resize(w / 2, h / 2, Image.INTERPOLATE_TRILINEAR)
+	img.resize(w / 4, h / 4, Image.INTERPOLATE_TRILINEAR)
+	img.resize(w / 2, h / 2, Image.INTERPOLATE_CUBIC)
 	return img
 
 
@@ -1141,8 +1172,8 @@ func _build_ground() -> void:
 	var biome := _ground_biome()
 	set_meta("ground_biome", biome)
 	sm.set_shader_parameter("biome_tex", ImageTexture.create_from_image(biome))
-	sm.set_shader_parameter("sun_dir", sun_dir)
-	sm.set_shader_parameter("ruts_tex", ImageTexture.create_from_image(_ground_wet(mask, biome)))
+	sm.set_shader_parameter("ruts_tex", ImageTexture.create_from_image(_ground_ruts()))
+	sm.set_shader_parameter("puddle_tex", ImageTexture.create_from_image(_ground_wet(mask, biome)))
 	var layers := Art.ground_arrays()
 	if not layers.is_empty():
 		sm.set_shader_parameter("tex_albedo", layers[0])

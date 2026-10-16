@@ -623,15 +623,16 @@ func _fire() -> void:
 	Fx.light_flash(origin, Color(1.0, 0.7, 0.35), 9.0, 3.5, 0.09)
 
 
-# снаряд навесом в точку, куда цель придёт (с лёгким упреждением). Меток на земле нет:
+# снаряд в точку, куда цель придёт (с лёгким упреждением): вылетает с постоянной скоростью по низкой,
+# почти прямой дуге и рвётся о то, во что врежется (стена, мех, крип, земля). Меток на земле нет:
 # подсказок в игре нет, снаряд видно только в полёте
-func _lob_at(m: Node3D, arc: float, payload: Dictionary) -> void:
+func _lob_at(m: Node3D, speed: float, payload: Dictionary) -> void:
 	var from := global_position + Vector3.UP * 6.0
 	var to: Vector3 = m.global_position
 	to.y = 0.0
-	to += m.velocity * Lob.flight_time(from, to, arc) * 0.5
+	to += m.velocity * (from.distance_to(to) / maxf(speed, 1.0)) * 0.5
 	var lob := Lob.new()
-	lob.setup(from, to, arc, self, payload)
+	lob.setup_ballistic(from, Lob.aim_velocity(from, to, speed), self, payload)
 	get_tree().current_scene.add_child(lob)
 
 
@@ -641,7 +642,7 @@ func _try_emp() -> void:
 		return
 	_emp_cd = Parts.v(id, "emp_cooldown")
 	var r := Parts.v(id, "emp_radius")
-	_lob_at(m, Parts.v(id, "emp_arc"), {"kind": "emp", "radius": r, "stun": Parts.v(id, "emp_stun"),
+	_lob_at(m, Parts.v(id, "emp_speed"), {"kind": "emp", "radius": r, "stun": Parts.v(id, "emp_stun"),
 		"no_regen": 2.0, "damage": Parts.v(id, "emp_damage")})
 	Sfx.play_at("launch", global_position, -4.0, 0.05)
 
@@ -652,7 +653,7 @@ func _try_mortar() -> void:
 		return
 	_mortar_cd = Parts.v(id, "mortar_cooldown")
 	var r := Parts.v(id, "mortar_radius")
-	_lob_at(m, Parts.v(id, "mortar_arc"), {"kind": "explosive", "radius": r,
+	_lob_at(m, Parts.v(id, "mortar_speed"), {"kind": "explosive", "radius": r,
 		"damage": Parts.v(id, "mortar_damage"), "edge_damage": 0.3})
 	Sfx.play_at("mortar", global_position, 0.0, 0.05)
 	Fx.shake_at.emit(global_position, Cfg.shake_explosion * 0.3)

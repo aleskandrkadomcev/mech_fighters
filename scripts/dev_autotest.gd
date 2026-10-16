@@ -46,6 +46,8 @@ var _fxreel := false             # --fxreel: эффекты одним запу�
 var _radartest := false          # --radartest (с --map=arena --enemies=1 --allies=0): круг обзора радара и F2 на паузе
 var _ruintest := false           # --ruintest: развалина сломанной турели — бьют обе команды, разбили — припасы и путь свободен
 var _slidetest := false          # --slidetest: мех убит в рывке — обломок проезжает немного и встаёт
+var _lobtest := false            # --lobtest: ЭМИ и осадное орудие турелей летят быстро и низко и попадают в меха
+var _capbench := false           # --capbench (окно, с --targetshot=ground или =fight): кадры и видеокарта при разных пределах кадров
 var _coredmg := false            # --coredmg: по ядрам-Теслам проходит урон, когда турели 3 уровня сломаны (стреляем автопушкой)
 var _creeptest := false          # --creeptest: у крипа после склейки деталей есть корпус, гусеницы и башня
 var _aimtest := false            # --aimtest: прицел (земля / середина хитбокса), пределы стволов, гранатомёт
@@ -161,6 +163,10 @@ func setup(main_node: Node3D, args: PackedStringArray) -> void:
 			_coredmg = true
 		elif a == "--slidetest":
 			_slidetest = true
+		elif a == "--lobtest":
+			_lobtest = true
+		elif a == "--capbench":
+			_capbench = true
 		elif a == "--ruintest":
 			_ruintest = true
 		elif a == "--radartest":
@@ -247,6 +253,8 @@ func _process(_delta: float) -> void:
 		_run_coredmg()
 	if _slidetest:
 		_run_slidetest()
+	if _lobtest:
+		_run_lobtest()
 	if _ruintest:
 		_run_ruintest()
 	if _radartest:
@@ -326,7 +334,7 @@ func _process(_delta: float) -> void:
 		var img := get_viewport().get_texture().get_image()
 		img.save_png(("%s/%s_f%04d.png" % [_shot_dir, _target, shot_f]) if _fxreel else ("%s/f%04d.png" % [_shot_dir, shot_f]))
 		_shots_left.erase(shot_f)
-		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and not _linktest and _mechexport == "" and not _gfxbench and not _cpubench and not _fancheck and not _aimtest and not _creeptest and not _radartest and not _ruintest and not _coredmg and not _slidetest:
+		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and not _linktest and _mechexport == "" and not _gfxbench and not _cpubench and not _fancheck and not _aimtest and not _creeptest and not _radartest and not _ruintest and not _coredmg and not _slidetest and not _lobtest:
 			get_tree().quit()
 
 
@@ -1466,6 +1474,8 @@ func _run_targetshot() -> void:
 			_stage_mines(m)
 	if _target == "calm":
 		_stage_calm(m)
+	elif _target == "ground":
+		_stage_ground(m)
 	# все стреляют в свои цели и не умирают, пока идёт съёмка
 	for a in _actors:
 		var b = a[0]
@@ -1476,14 +1486,16 @@ func _run_targetshot() -> void:
 	for a in _actors:
 		if a[0].stun_left > 0.0 and not a[0].get_meta("was_stun", false):
 			print("[TARGET] f=%d молния в %s" % [_frame, Parts.pname(a[0].build["mech"])])
-			if _shot_dir != "":
+			if _shot_dir != "" and _cap_i < 0:      # во время замера кадров не снимаем
 				for f in [_frame + 2, _frame + 6]:     # молния видна доли секунды: снимаем сразу
 					if not _shots_left.has(f):         # два меха под молнией в один кадр — не снимать дважды
 						_shots_left.append(f)
 		a[0].set_meta("was_stun", a[0].stun_left > 0.0)
-	var end_f: int = {"fight": 200, "base": 500, "calm": 220}.get(_target, 300)
+	var end_f: int = {"fight": 200, "base": 500, "calm": 220, "ground": 250}.get(_target, 300)
 	if _frame >= end_f and _shots_left.is_empty():
-		if _fxreel:
+		if _capbench:
+			_run_capbench()
+		elif _fxreel:
 			_reel_next()
 		else:
 			get_tree().quit()
@@ -1638,6 +1650,46 @@ func _stage_calm(m) -> void:
 	m.snap_interpolation(m)
 	m.demo = {"move": Vector2.ZERO, "fire": false, "aim": s[1]}
 	main.cam._started = false
+
+
+# земля крупно (--targetshot=ground): площадка своей базы (камера 90 и 40), колеи на линии,
+# самая большая группа луж (камера 32 и 90). Снимки на кадрах 45, 95, 145, 195, 245
+var _ground_spots: Array = []
+
+
+func _stage_ground(m) -> void:
+	if _frame == 3:
+		Cfg.bot_allies = 0
+		Cfg.bot_enemies = 0
+		var hq: Vector3 = main.base_center(0)
+		var mid: PackedVector3Array = main.lane_path(0, "mid")
+		var out: Vector3 = (mid[mini(2, mid.size() - 1)] - hq).normalized()
+		var rut: Vector3 = mid[mid.size() / 4] if mid.size() > 4 else hq + out * 40.0
+		var pud := hq
+		var best := -1
+		for a in main.puddles:
+			var n := 0
+			for b in main.puddles:
+				if Vector2(a.x - b.x, a.z - b.z).length() < 8.0:
+					n += 1
+			if n > best:
+				best = n
+				pud = Vector3(a.x, 0, a.z)
+		_ground_spots = [[3, hq + out * 14.0, 90.0], [55, hq + out * 14.0, 40.0], [105, rut, 40.0],
+			[155, pud, 32.0], [205, pud, 90.0]]
+		print("[GROUND] база %s, колеи %s, лужи %s (кругов рядом %d)" % [hq + out * 14.0, rut, pud, best])
+		for f in [45, 95, 145, 195, 245]:
+			if _shot_dir != "" and not _shots_left.has(f):
+				_shots_left.append(f)
+	for s in _ground_spots:
+		if s[0] != _frame:
+			continue
+		var at: Vector3 = s[1]
+		m.global_position = at + Vector3(-5.0, 0.05, 3.0)       # мех сбоку, чтобы не закрывал место
+		m.snap_interpolation(m)
+		m.demo = {"move": Vector2.ZERO, "fire": false, "aim": at + Vector3(0, 1.5, 0)}
+		Cfg.cam_distance = s[2]
+		main.cam._started = false
 
 
 # ------------------------------------------------------------------
@@ -2725,3 +2777,140 @@ func _run_slidetest() -> void:
 		var m := far * Cfg.METERS_PER_UNIT
 		print("[SLIDE] убит в рывке (50 ед/с): обломок проехал %.1f м — %s" % [m, "ВЕРНО" if m < 6.0 else "ОШИБКА"])
 		get_tree().quit()
+
+
+# ------------------------------------------------------------------
+#  Снаряды турелей (--lobtest): ЭМИ-граната турели 2 уровня, потом снаряд осадного орудия турели 3 уровня
+#  в стоящего на открытом месте меха. В лог: сколько летел (и сколько летел бы по старой высокой дуге),
+#  на сколько поднялся над точкой вылета, где взорвался и что стало с мехом
+# ------------------------------------------------------------------
+
+var _lt_lobs := {}       # снаряд -> что о нём известно
+var _lt_stage := 0
+var _lt_hp := 0.0
+var _lt_fails := 0
+
+
+func _lt_turret(id: String) -> Node3D:
+	for s in get_tree().get_nodes_in_group("structures"):
+		if s.team != main.mech.team and s.id == id and s.get_meta("lane", "") in ["mid", "base"]:
+			return s
+	return null
+
+
+func _run_lobtest() -> void:
+	var m = main.mech
+	if _frame == 5:
+		Cfg.creeps_enabled = 0
+		m.shield_left = 0.0
+		var t2 := _lt_turret("turret_t2")
+		m.global_position = t2.global_position + Vector3(-30, 0.05, 3)
+		m.snap_interpolation(m)
+		m.demo = {"move": Vector2.ZERO, "fire": false, "aim": t2.global_position}
+		t2._emp_cd = 0.0
+		_lt_stage = 1
+	if _lt_stage == 2:
+		_lt_stage = 3
+		var t3 := _lt_turret("turret_t3")
+		_lt_turret("turret_t2")._emp_cd = 99.0
+		m.global_position = t3.global_position + Vector3(-40, 0.05, 3)
+		m.snap_interpolation(m)
+		m.demo = {"move": Vector2.ZERO, "fire": false, "aim": t3.global_position}
+		m.hp = m.max_hp()
+		t3._mortar_cd = 0.0
+	for l in get_tree().get_nodes_in_group("lobs"):
+		var k: int = l.get_instance_id()
+		if not _lt_lobs.has(k):
+			var to: Vector3 = m.global_position
+			to.y = 0.0
+			var arc := 3.0 if l._p.get("kind", "") == "emp" else 12.0
+			_lt_lobs[k] = {"f": _frame, "from": l.global_position, "top": l.global_position.y, "kind": l._p.get("kind", ""),
+				"old": main.mech.Lob.flight_time(l.global_position, to, arc), "pos": l.global_position}
+		_lt_lobs[k]["top"] = maxf(_lt_lobs[k]["top"], l.global_position.y)
+		_lt_lobs[k]["pos"] = l.global_position
+	for k in _lt_lobs.keys():
+		if is_instance_id_valid(k) or _lt_lobs[k].get("done", false):
+			continue
+		var e: Dictionary = _lt_lobs[k]
+		e["done"] = true
+		var secs: float = (_frame - int(e["f"])) / 60.0
+		var dist: float = Vector2(e["pos"].x - e["from"].x, e["pos"].z - e["from"].z).length() * Cfg.METERS_PER_UNIT
+		var miss: float = Vector2(e["pos"].x - m.global_position.x, e["pos"].z - m.global_position.z).length() * Cfg.METERS_PER_UNIT
+		var rise: float = (float(e["top"]) - e["from"].y) * Cfg.METERS_PER_UNIT
+		var emp: bool = e["kind"] == "emp"
+		var hit: bool = m.stun_left > 0.0 if emp else m.hp < _lt_hp - 20.0
+		print("[LOB] %s: летел %.2f с (по старой дуге было бы %.2f с), %.0f м, поднялся над вылетом на %.1f м, взрыв в %.1f м от меха; %s — %s" % [
+			"ЭМИ-граната" if emp else "осадное орудие", secs, e["old"], dist, rise, miss,
+			("оглушение %.1f с" % m.stun_left) if emp else ("урон %.0f" % (_lt_hp - m.hp)), "ВЕРНО" if hit and secs < e["old"] else "ОШИБКА"])
+		if not (hit and secs < e["old"]):
+			_lt_fails += 1
+		_lt_stage += 1
+	if _frame > 5:
+		m.hp = maxf(m.hp, m.max_hp() * 0.5)      # обычные пушки турелей не должны убить меха
+	_lt_hp = m.hp
+	if _lt_stage >= 4 or _frame > 900:
+		print("[LOB] итог: %s" % ("ВСЁ ВЕРНО" if _lt_fails == 0 and _lt_stage >= 4 else "ошибок %d, этап %d" % [_lt_fails, _lt_stage]))
+		get_tree().quit()
+
+
+# ------------------------------------------------------------------
+#  Ограничение кадров (--capbench, окно, синхронизация включена, БЕЗ --fixed-fps: с ним Godot предел
+#  кадров не применяет; после постановки --targetshot=fight или =ground): драка у турели на той же высоте камеры, предел кадров по очереди — без ограничения,
+#  144, 120, 90, 60 (как в «Настройках», через Cfg.set_fps_limit). На каждом 3 с на установку, потом 8 с
+#  замер: кадры, время видеокарты на кадр и доля времени, когда она занята. Строки [CAP] со временем
+#  часов — по ним сверяется журнал nvidia-smi (мощность и нагрев видеокарты)
+# ------------------------------------------------------------------
+
+const CAPS := [0, 144, 120, 90, 60]
+var _cap_i := -1
+var _cap_t0 := 0
+var _cap_last := 0
+var _cap_ms: Array = []
+var _cap_gpu := 0.0
+var _cap_out: Array = []
+
+
+func _cap_set(i: int) -> void:
+	_cap_i = i
+	Cfg.set_fps_limit(CAPS[i])
+	_cap_t0 = Time.get_ticks_usec()
+	_cap_last = _cap_t0
+	_cap_ms.clear()
+	_cap_gpu = 0.0
+
+
+func _run_capbench() -> void:
+	var vp_rid := get_viewport().get_viewport_rid()
+	if _cap_i < 0:
+		if _actors.is_empty():
+			_stage_fight(main.mech)
+			main.cam._started = false
+		RenderingServer.viewport_set_measure_render_time(vp_rid, true)
+		_cap_set(0)
+		return
+	var now := Time.get_ticks_usec()
+	var secs := (now - _cap_t0) / 1e6
+	if secs >= 3.0 and secs < 11.0:
+		if _cap_ms.is_empty():
+			print("[CAP] %s начало: предел %s (Engine.max_fps=%d, монитор %.0f Гц)" % [Time.get_time_string_from_system(),
+				str(CAPS[_cap_i]) if CAPS[_cap_i] > 0 else "нет", Engine.max_fps, DisplayServer.screen_get_refresh_rate()])
+		_cap_ms.append((now - _cap_last) / 1000.0)
+		_cap_gpu += RenderingServer.viewport_get_measured_render_time_gpu(vp_rid)
+	_cap_last = now
+	if secs < 11.0 or _cap_ms.is_empty():
+		return
+	var n := _cap_ms.size()
+	var total: float = _cap_ms.reduce(func(acc, x): return acc + x, 0.0)
+	var line := "[CAP] %s конец: предел %-4s → %4d кадр/с, видеокарта %.2f мс на кадр, занята %d%% времени" % [
+		Time.get_time_string_from_system(), str(CAPS[_cap_i]) if CAPS[_cap_i] > 0 else "нет",
+		int(n * 1000.0 / total), _cap_gpu / n, int(_cap_gpu / total * 100.0)]
+	print(line)
+	_cap_out.append(line)
+	if _cap_i + 1 < CAPS.size():
+		_cap_set(_cap_i + 1)
+		return
+	Cfg.set_fps_limit(0)
+	print("[CAP] ---- итог (%s, графика %s) ----" % [str(DisplayServer.window_get_size()), Cfg.GFX_NAMES[Cfg.graphics]])
+	for l in _cap_out:
+		print(l)
+	get_tree().quit()

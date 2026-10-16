@@ -273,6 +273,7 @@ func _build_settings() -> void:
 	_settings = col.get_parent()
 	_title(col, "НАСТРОЙКИ")
 	_graphics_row(col)
+	_fps_row(col)
 	_slider_row(col, "Громкость", "sound_volume", 0, 1)
 	_slider_row(col, "Тряска камеры", "shake", 0, 3)
 	_slider_row(col, "Темнота тумана", "fog_darkness", 0, 1)
@@ -313,6 +314,36 @@ func _graphics_row(parent: Control) -> void:
 		row.add_child(b)
 	var note := Label.new()
 	note.text = "Низкие — для слабых видеокарт: меньше травы, проще земля, тени и свет. Меняется со следующего боя."
+	note.add_theme_font_size_override("font_size", 15)
+	note.add_theme_color_override("font_color", Color(1, 1, 1, 0.5))
+	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	parent.add_child(note)
+
+
+# ограничение кадров: пять кнопок, нажата одна. Сохраняется и применяется сразу
+func _fps_row(parent: Control) -> void:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 12)
+	parent.add_child(row)
+	var l := Label.new()
+	l.text = "Ограничение кадров"
+	l.custom_minimum_size = Vector2(240, 0)
+	l.add_theme_font_size_override("font_size", 19)
+	row.add_child(l)
+	var group := ButtonGroup.new()
+	for fps in Cfg.FPS_LIMITS:
+		var b := Button.new()
+		b.text = str(fps) if fps > 0 else "Нет"
+		b.toggle_mode = true
+		b.button_group = group
+		b.button_pressed = Cfg.fps_limit == fps
+		b.focus_mode = Control.FOCUS_NONE
+		b.custom_minimum_size = Vector2(76, 44)
+		b.add_theme_font_size_override("font_size", 19)
+		b.pressed.connect(func() -> void: Cfg.set_fps_limit(fps))
+		row.add_child(b)
+	var note := Label.new()
+	note.text = "Меньше кадров — меньше греется видеокарта. Выше частоты монитора игра всё равно не покажет."
 	note.add_theme_font_size_override("font_size", 15)
 	note.add_theme_color_override("font_color", Color(1, 1, 1, 0.5))
 	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
