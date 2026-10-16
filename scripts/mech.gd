@@ -1538,10 +1538,11 @@ func _start_salvo(index: int) -> void:
 	_salvo_left = int(_salvo_params["count"])
 	_salvo_timer = 0.0
 	_salvo_index = 0
-	# метка на земле: куда прилетит. Свои ракеты оранжевые, вражеские красные
+	# куда прилетит: метку на земле не рисуем (решение Сани, 16.10.2026), но опасная зона остаётся —
+	# по ней боты уходят из-под залпа
 	var mark_r: float = _salvo_params["radius"] + (_salvo_params["scatter"] if _salvo_left > 1 else 0.0)
-	var col := Color(1.0, 0.45, 0.15) if team == 0 else Color(1.0, 0.12, 0.1)
-	_salvo_marker = Fx.ground_marker(_salvo_target, mark_r, col, team, 6.0, true, true)
+	_salvo_marker = Fx.ground_marker(_salvo_target, mark_r, Color.WHITE, team, 6.0, true, true)
+	_salvo_marker.visible = false
 
 
 func _launch_rocket() -> void:

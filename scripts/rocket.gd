@@ -17,12 +17,13 @@ var _trail: CPUParticles3D
 var _p := {}
 var born := 0
 
-static var _body_mesh: BoxMesh
+static var _body_mesh: CylinderMesh
+static var _nose_mesh: CylinderMesh
 static var _body_mat: StandardMaterial3D
-static var _flame_mat: StandardMaterial3D
-static var _smoke_mesh: SphereMesh
-static var _smoke_mat: StandardMaterial3D
+static var _core_mat: Material       # выхлоп: яркая сердцевина
+static var _glow_mat: Material       # выхлоп: оранжевое свечение
 static var _smoke_ramp: Gradient
+static var _smoke_grow: Curve
 
 
 # p: числа ракетной установки (скорость, урон, радиус, урон на краю)
@@ -43,54 +44,68 @@ func _ready() -> void:
 	add_to_group("rockets")
 	born = Time.get_ticks_msec()
 	if _body_mesh == null:
-		_body_mesh = BoxMesh.new()
-		_body_mesh.size = Vector3(0.26, 0.26, 1.1)
+		# корпус — тонкий цилиндр с носовым конусом
+		_body_mesh = CylinderMesh.new()
+		_body_mesh.top_radius = 0.11
+		_body_mesh.bottom_radius = 0.11
+		_body_mesh.height = 0.95
+		_body_mesh.radial_segments = 8
+		_body_mesh.rings = 1
+		_nose_mesh = CylinderMesh.new()
+		_nose_mesh.top_radius = 0.0
+		_nose_mesh.bottom_radius = 0.11
+		_nose_mesh.height = 0.3
+		_nose_mesh.radial_segments = 8
+		_nose_mesh.rings = 1
 		_body_mat = StandardMaterial3D.new()
-		_body_mat.albedo_color = Color(0.75, 0.76, 0.78)
-		_flame_mat = StandardMaterial3D.new()
-		_flame_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		_flame_mat.albedo_color = Color(1.0, 0.7, 0.25)
-		_smoke_mesh = SphereMesh.new()
-		_smoke_mesh.radius = 0.3
-		_smoke_mesh.height = 0.6
-		_smoke_mesh.radial_segments = 6
-		_smoke_mesh.rings = 3
-		_smoke_mat = StandardMaterial3D.new()
-		_smoke_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		_smoke_mat.vertex_color_use_as_albedo = true
-		_smoke_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		_smoke_ramp = Gradient.new()
-		_smoke_ramp.set_color(0, Color(0.85, 0.82, 0.78, 0.55))
-		_smoke_ramp.set_color(1, Color(0.45, 0.45, 0.47, 0.0))
+		_body_mat.albedo_color = Color(0.5, 0.51, 0.53)
+		_body_mat.metallic = 0.4
+		_body_mat.roughness = 0.5
+		# выхлоп — мягкие светящиеся чёрточки, повёрнутые к камере (как у трассеров)
+		_core_mat = Fx.beam_material(Color(1.0, 0.86, 0.6), 2.4, 1.0, 0.5, true, 0.35)
+		_glow_mat = Fx.beam_material(Color(1.0, 0.5, 0.15), 1.8, 1.6, 0.0, true, 0.4)
+		# дым: светлый у сопла, темнеет, растёт и тает
+		_smoke_ramp = Fx._ramp("rocket_smoke", [[0.0, Color(1.0, 0.82, 0.6, 0.0)], [0.08, Color(0.9, 0.87, 0.82, 0.5)],
+			[0.5, Color(0.62, 0.6, 0.58, 0.28)], [1.0, Color(0.48, 0.48, 0.5, 0.0)]])
+		_smoke_grow = Curve.new()
+		_smoke_grow.max_value = 4.0
+		_smoke_grow.add_point(Vector2(0.0, 0.45))
+		_smoke_grow.add_point(Vector2(1.0, 1.9))
 
 	var body := MeshInstance3D.new()
 	body.mesh = _body_mesh
 	body.material_override = _body_mat
+	body.rotation.x = PI / 2
 	add_child(body)
-	var flame := MeshInstance3D.new()
-	var fm := BoxMesh.new()
-	fm.size = Vector3(0.2, 0.2, 0.9)
-	flame.mesh = fm
-	flame.material_override = _flame_mat
-	flame.position = Vector3(0, 0, 0.95)
-	flame.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(flame)
+	var nose := MeshInstance3D.new()
+	nose.mesh = _nose_mesh
+	nose.material_override = _body_mat
+	nose.rotation.x = -PI / 2         # остриё вперёд (-Z)
+	nose.position = Vector3(0, 0, -0.62)
+	add_child(nose)
+	_exhaust(_glow_mat, 0.9, 2.2, 1.45)
+	_exhaust(_core_mat, 0.32, 0.9, 0.85)
 
 	_trail = CPUParticles3D.new()
-	_trail.mesh = _smoke_mesh
-	_trail.material_override = _smoke_mat
+	_trail.mesh = Fx._quad()
+	_trail.material_override = Fx._sprite_mat("smoke_07")
 	_trail.local_coords = false
-	_trail.amount = 28
-	_trail.lifetime = 0.7
+	_trail.amount = maxi(int(round(36 * Fx._gfx_k())), 12)
+	_trail.lifetime = 1.1
 	_trail.direction = Vector3(0, 0, 1)
-	_trail.spread = 12.0
-	_trail.initial_velocity_min = 0.5
-	_trail.initial_velocity_max = 2.0
-	_trail.gravity = Vector3(0, 0.8, 0)
-	_trail.scale_amount_min = 0.7
-	_trail.scale_amount_max = 1.5
+	_trail.spread = 10.0
+	_trail.initial_velocity_min = 0.3
+	_trail.initial_velocity_max = 1.2
+	_trail.gravity = Vector3(0, 0.5, 0)
+	_trail.scale_amount_min = 0.55
+	_trail.scale_amount_max = 0.9
+	_trail.scale_amount_curve = _smoke_grow
+	_trail.angle_min = 0.0
+	_trail.angle_max = 360.0
+	_trail.angular_velocity_min = -40.0
+	_trail.angular_velocity_max = 40.0
 	_trail.color_ramp = _smoke_ramp
-	_trail.position = Vector3(0, 0, 0.8)
+	_trail.position = Vector3(0, 0, 1.0)
 	_trail.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(_trail)
 
@@ -148,8 +163,18 @@ func _explode(pos: Vector3) -> void:
 		scene.add_child(_trail)
 		_trail.global_position = gp
 		_trail.emitting = false
-		get_tree().create_timer(1.0).timeout.connect(_trail.queue_free)
+		get_tree().create_timer(1.4).timeout.connect(_trail.queue_free)
 	queue_free()
+
+
+# светящаяся чёрточка выхлопа за соплом: ширина w, длина len, середина сдвинута назад на back
+func _exhaust(mat: Material, w: float, len: float, back: float) -> void:
+	var q := MeshInstance3D.new()
+	q.mesh = Fx._unit_quad()
+	q.material_override = mat
+	q.transform = Transform3D(Basis(Vector3(w, 0, 0), Vector3(0, 0, len), Vector3(0, -1, 0)), Vector3(0, 0, back))
+	q.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(q)
 
 
 # куда летит и с каким радиусом (боты видят летящую ракету и уходят с её пути)

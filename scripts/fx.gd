@@ -164,15 +164,7 @@ func explosion(pos: Vector3, radius: float) -> void:
 	# искры и угли
 	_streaks(pos + Vector3.UP * 0.6, Vector3.UP, 18, Color(1.0, 0.55, 0.15), 9.0, 20.0, 0.7, 80.0, 0.9)
 
-	# ударная волна по земле: показывает реальный радиус урона
-	var ring_mat := _unshaded(Color(1.0, 0.6, 0.25, 0.5), true)
-	var ground := Vector3(pos.x, 0.12, pos.z)
-	var ring := _mesh_node(_ring_mesh, ring_mat, ground)
-	ring.scale = Vector3(r * 0.2, 1, r * 0.2)
-	var tw2 := ring.create_tween()
-	tw2.tween_property(ring, "scale", Vector3(r, 1, r), 0.22).set_ease(Tween.EASE_OUT)
-	tw2.parallel().tween_property(ring_mat, "albedo_color:a", 0.0, 0.4)
-	tw2.tween_callback(ring.queue_free)
+	# кольца ударной волны по земле нет (решение Сани, 16.10.2026): круги смотрелись жирно и некрасиво
 
 	_flash_light(pos + Vector3.UP * 1.5, Color(1.0, 0.6, 0.25), r * 3.0, 0.35)
 	shake_at.emit(pos, Cfg.shake_explosion)

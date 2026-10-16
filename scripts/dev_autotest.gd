@@ -165,6 +165,7 @@ func setup(main_node: Node3D, args: PackedStringArray) -> void:
 				for k in FX_REEL.size():
 					if a == "--fxreel=" + FX_REEL[k][0]:
 						_reel_i = k
+						_reel_only = true
 			_target = FX_REEL[_reel_i][0]
 			for f in FX_REEL[_reel_i][1]:
 				_shots_left.append(f)
@@ -291,6 +292,8 @@ func _process(_delta: float) -> void:
 		_run_gfxbench()
 	if _fxreel and _target == "fight" and (_frame == 30 or _frame == 95):
 		Fx.explosion(Vector3(58, 1.8, 0) if _frame == 30 else Vector3(61, 1.8, 8), 4.5)
+	if _fxreel and _target == "fight" and _frame >= 14 and _frame <= 23 and (_frame - 14) % 3 == 0:
+		_reel_rocket(_frame - 14)
 	if _fxreel and _target == "base" and (_frame == 200 or _frame == 212):
 		_reel_dome_hit(0.0 if _frame == 200 else 0.5)
 	if _boom and _frame == 5:
@@ -1481,13 +1484,28 @@ func _reel_dome_hit(side: float) -> void:
 			st.take_damage(1.0, st.global_position + dir * 12.0, -dir, "", main.mech)
 static var _reel_i := 0
 static var _reel_from_set := false
+static var _reel_only := false      # --fxreel=<этап>: снять только этот этап
 var _reel_done := false
+
+
+# ракета из меха игрока в сторону драки (снимки 33/38/45 — полёт и дым, 60 — взрыв без колец)
+func _reel_rocket(k: int) -> void:
+	var m = main.mech
+	var rk = load("res://scripts/rocket.gd").new()
+	var from: Vector3 = m.global_position + Vector3(0.6 if k % 2 == 0 else -0.6, 3.2, 0)
+	var p := {"speed": Parts.v("mod_rockets", "speed"), "radius": Parts.v("mod_rockets", "radius"),
+		"damage": Parts.v("mod_rockets", "damage"), "edge_damage": 0.4}
+	rk.setup(from, Vector3(60.0 + k * 0.4, 0.0, 4.0 - k * 0.5), m, null, p)
+	get_tree().current_scene.add_child(rk)
 
 
 func _reel_next() -> void:
 	if _reel_done:
 		return
 	_reel_done = true
+	if _reel_only:
+		get_tree().quit()
+		return
 	_reel_i += 1
 	if _reel_i < FX_REEL.size():
 		get_tree().reload_current_scene()
