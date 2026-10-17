@@ -54,6 +54,7 @@ var _camtest := false           # --camtest (окно, без --fixed-fps): пл
 var _abil3test := false         # --abil3test: вторая пачка абилок и правки (баррикада-стена, толчок по дистанции, крипы)
 var _abil2test := false         # --abil2test: абилки 17.10.2026 по очереди (связка, дротик, ЭМИ, напалм, зонд, баррикада, дрон, оборона, якорь, волна, прыжок)
 var _dashtest := false           # --dashtest: рывок разгоняется за «Разгон рывка», а не мгновенно; дальность как без разгона
+var _hudshot := false            # --hudshot: интерфейс как в доте — абилки, полоски, статусы, подсказки на Alt (снимки 40/60/80)
 var _statustest := false         # --statustest: шкала контроля над полоской (оглушение → ЭМИ → замедление) и статусы своего меха
 var _cdtest := false             # --cdtest: нажал рывок на перезарядке — у курсора таймер «2,35», тает за 1 с
 var _capbench := false           # --capbench (окно, с --targetshot=ground или =fight): кадры и видеокарта при разных пределах кадров
@@ -182,6 +183,8 @@ func setup(main_node: Node3D, args: PackedStringArray) -> void:
 			_proptest = true
 		elif a == "--cdtest":
 			_cdtest = true
+		elif a == "--hudshot":
+			_hudshot = true
 		elif a == "--statustest":
 			_statustest = true
 		elif a == "--dashtest":
@@ -290,6 +293,8 @@ func _process(_delta: float) -> void:
 		_run_cdtest()
 	if _statustest:
 		_run_statustest()
+	if _hudshot:
+		_run_hudshot()
 	if _dashtest:
 		_run_dashtest()
 	if _abil2test:
@@ -379,7 +384,7 @@ func _process(_delta: float) -> void:
 		var img := get_viewport().get_texture().get_image()
 		img.save_png(("%s/%s_f%04d.png" % [_shot_dir, _target, shot_f]) if _fxreel else ("%s/f%04d.png" % [_shot_dir, shot_f]))
 		_shots_left.erase(shot_f)
-		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and not _linktest and _mechexport == "" and not _gfxbench and not _cpubench and not _fancheck and not _aimtest and not _creeptest and not _radartest and not _ruintest and not _coredmg and not _slidetest and not _lobtest and not _spawntest and not _proptest and not _cdtest and not _statustest and not _dashtest and not _pingtest and not _abil2test and not _abil3test and not _camtest:
+		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and not _linktest and _mechexport == "" and not _gfxbench and not _cpubench and not _fancheck and not _aimtest and not _creeptest and not _radartest and not _ruintest and not _coredmg and not _slidetest and not _lobtest and not _spawntest and not _proptest and not _cdtest and not _statustest and not _hudshot and not _dashtest and not _pingtest and not _abil2test and not _abil3test and not _camtest:
 			get_tree().quit()
 
 
@@ -3490,6 +3495,55 @@ func _run_cdtest() -> void:
 #  контроль, шкала сжимается; снизу — статусы. Снимки (--shot-dir, --shots=40,100,170,260): контроль по очереди
 # ------------------------------------------------------------------
 
+#  Интерфейс боя (--hudshot --enemies=0 --allies=0, в окне со --shot-dir): 6 абилок разных видов, одна на перезарядке,
+#  статусы вредные и полезные; f40 — общий вид, f60 — Alt и мышь на абилке, f80 — Alt и мышь на статусе
+func _run_hudshot() -> void:
+	var m = main.mech
+	var hud = main.hud
+	var spot := Vector3(-46, 0.05, -30)
+	if _frame == 5:
+		Cfg.creeps_enabled = 0
+		Cfg.cam_distance = 30.0
+		m.set_build({"mech": "mech_fortress", "core": "core_battery", "weapons": ["autocannon", "autocannon"],
+			"modules": ["mod_rockets", "mod_bolas", "mod_napalm", "mod_dome", "mod_matrix", "mod_overdrive"]})
+		m.respawn(spot)
+		m.shield_left = 0.0
+		m.demo = {"move": Vector2.ZERO, "fire": false, "aim": spot + Vector3(10, 1.5, 0)}
+		main.cam._started = false
+	if _frame == 20:
+		Cfg.control_mass = m.stats["weight"]
+		m.shield_left = 0.0
+		m.stun(8.0)
+		m.apply_slow(0.3, 9.0)
+		m.hp = m.max_hp() * 0.6
+		m.dock_left = 20.0
+		m.matrix_left = 7.0
+		m._matrix_k = 0.4
+		m.overdrive_left = 6.5
+		m._overdrive_k = 0.35
+		m.ability_cd[0] = 4.2
+	if _frame >= 45 and _frame <= 90:
+		var target: Control = hud._slots[2]["panel"] if _frame < 65 else hud._status_chips[1]["panel"]
+		get_viewport().warp_mouse(target.get_global_rect().get_center())
+		if _frame == 45:
+			var k := InputEventKey.new()
+			k.keycode = KEY_ALT
+			k.physical_keycode = KEY_ALT
+			k.pressed = true
+			Input.parse_input_event(k)
+		if _frame == 59 or _frame == 79:
+			print("[HUD] f=%d подсказка видна %s: «%s» — %s" % [_frame, hud._tip.visible, hud._tip_title.text, hud._tip_body.text.replace("
+", " / ")])
+	if _frame == 91:
+		var k := InputEventKey.new()
+		k.keycode = KEY_ALT
+		k.physical_keycode = KEY_ALT
+		k.pressed = false
+		Input.parse_input_event(k)
+	if _frame >= 95 and _shots_left.is_empty():
+		get_tree().quit()
+
+
 func _run_statustest() -> void:
 	var m = main.mech
 	var hud = main.hud
@@ -3527,7 +3581,7 @@ func _run_statustest() -> void:
 	var chips: Array = []
 	for c in hud._status_chips:
 		if c["panel"].visible:
-			chips.append(c["label"].text)
+			chips.append(c["name"])
 	var fails: int = get_meta("fails", 0)
 	var checks := {30: "Оглушён", 80: "Оглушён", 130: "ЭМИ", 230: "Замедлен", 320: ""}
 	if checks.has(_frame):
@@ -3542,6 +3596,23 @@ func _run_statustest() -> void:
 			ok = ok and e._bar._ctl_name == "Оглушён"
 			for c in get_tree().get_nodes_in_group("creeps"):
 				ok = ok and c._bar._ctl_name == "Оглушён"
+		if _frame == 30:
+			# значки и подсказка на Alt (как будто навели мышь): у каждой абилки игры есть значок, у статусов и слотов — тоже
+			for id in Parts.DATA:
+				if Parts.DATA[id].has("ability") and hud._icon(Parts.DATA[id]["ability"]) == null:
+					print("[STATUS] нет значка абилки ", Parts.DATA[id]["ability"])
+					ok = false
+			for c in hud._status_chips:
+				if c["panel"].visible:
+					var h: Dictionary = hud._hover_item(c["panel"].get_global_rect().get_center())
+					ok = ok and c["icon"].texture != null and h.get("title", "") == c["name"] and str(h.get("body", "")) != ""
+			var tips: Array = []
+			for sl in [hud._dash_slot] + hud._slots:
+				var h: Dictionary = hud._hover_item(sl["panel"].get_global_rect().get_center())
+				ok = ok and hud._icon(sl["icon"]) != null and str(h.get("title", "")) != "" and str(h.get("body", "")) != ""
+				tips.append("%s [%s]" % [h.get("title", "?"), str(h.get("body", "")).replace("
+", " / ")])
+			print("[STATUS] подсказки слотов: ", "; ".join(tips))
 		if _frame == 320:
 			ok = ok and chips == ["Чинится"]
 		if not ok:

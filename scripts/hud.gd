@@ -7,6 +7,16 @@ const COL_ACTIVE := Color(0.45, 0.85, 1.0)
 const COL_DENY := Color(1.0, 0.3, 0.25)
 const COL_BAD := Color(1.0, 0.38, 0.32)     # статус вредный (оглушён, ЭМИ, замедлен)
 const COL_GOOD := Color(0.5, 0.95, 0.55)    # статус полезный (чинится, щит, невидим)
+const SLOT := 62.0                # слот абилки, px
+const SLOT_SMALL := 48.0          # слоты рывка и телепорта
+const SLOT_SEP := 6
+const STATUS_SIZE := 36.0         # значок статуса
+const BAR_W := 420.0              # полоски здоровья и энергии не уже этого (иначе — по ширине ряда абилок)
+# вид абилки — цвет подложки слота: 0 урон (оранжевый), 1 контроль (фиолетовый), 2 защита (синий), 3 прочее (зелёный)
+const KIND_COL := [Color(1.0, 0.55, 0.2), Color(0.75, 0.45, 1.0), Color(0.35, 0.65, 1.0), Color(0.4, 0.9, 0.5)]
+const AB_KIND := {"rockets": 0, "airstrike": 0, "mine": 0, "napalm": 0, "jump": 0, "turret": 0, "roller": 0, "slug": 0, "rapid": 0,
+	"emp": 1, "bolas": 1, "jammer": 1, "emp_shell": 1, "gravity": 1, "repulse": 1, "marker": 1,
+	"shield": 2, "repair": 2, "barricade": 2, "drone": 2, "stance": 2, "dome": 2, "matrix": 2, "purge": 2}
 
 var mech: Node3D
 var main: Node3D
@@ -19,8 +29,15 @@ var _energy_label: Label
 var _energy_tick: ColorRect
 var _slots: Array = []
 var _slot_row: HBoxContainer
-var _status_row: HBoxContainer    # статусы своего меха над абилками
-var _status_chips: Array = []     # [{panel, style, label}], заводятся по мере надобности и прячутся
+var _status_row: HBoxContainer    # статусы своего меха над полосками здоровья и энергии
+var _status_chips: Array = []     # [{panel, style, icon, label, name, desc, icon_name}], заводятся по мере надобности и прячутся
+var _icons := {}                  # значки assets/ui/hud по имени (null — файла нет)
+var _tip: PanelContainer          # подсказка на Alt
+var _tip_title: Label
+var _tip_sub: Label
+var _tip_body: Label
+var _tip_key := ""                # что сейчас в подсказке: текст пересобирается, только когда навели на другое
+var _alt := false                 # Alt зажат: курсор-стрелка, наведение показывает подсказки
 var _deny_t := 0.0
 var _deny_slot := -1
 var _cd_tip: Label               # таймер у курсора: нажал абилку на перезарядке — сколько ей осталось («2,35»), тает за 1 с
@@ -170,63 +187,53 @@ void fragment() {
 	root.add_child(_announce)
 	Battle.poi_captured.connect(_on_poi_captured)
 
-	# нижняя панель: сверху слоты абилок (сколько модулей с абилками, столько слотов), под ними полоски
+	# нижняя панель как в доте: снизу абилки, над ними здоровье и энергия, над ними статусы; под абилками патроны
 	var bottom := VBoxContainer.new()
 	bottom.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
 	bottom.offset_left = -460
 	bottom.offset_right = 460
-	bottom.offset_top = -320
-	bottom.offset_bottom = -30
+	bottom.offset_top = -260
+	bottom.offset_bottom = -12
 	bottom.alignment = BoxContainer.ALIGNMENT_END
-	bottom.add_theme_constant_override("separation", 10)
+	bottom.add_theme_constant_override("separation", 5)
 	bottom.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(bottom)
 
 	_status_row = HBoxContainer.new()
 	_status_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	_status_row.add_theme_constant_override("separation", 8)
+	_status_row.add_theme_constant_override("separation", 5)
+	_status_row.custom_minimum_size = Vector2(0, STATUS_SIZE)   # место под статусы есть всегда: полоски не прыгают
 	_status_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_status_row.visible = false
 	bottom.add_child(_status_row)
+
+	_hp_fill = StyleBoxFlat.new()
+	_hp_fill.bg_color = Color(0.4, 0.9, 0.4)
+	_hp = _bar(Vector2(BAR_W, 22), _hp_fill)
+	_hp.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	bottom.add_child(_hp)
+	_hp_label = _bar_label(_hp, 16)
+
+	_energy_fill = StyleBoxFlat.new()
+	_energy_fill.bg_color = COL_ENERGY
+	_energy = _bar(Vector2(BAR_W, 16), _energy_fill)
+	_energy.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	bottom.add_child(_energy)
+	_energy_tick = ColorRect.new()
+	_energy_tick.color = Color(0, 0, 0, 0.75)
+	_energy_tick.size = Vector2(2, 16)
+	_energy_tick.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_energy.add_child(_energy_tick)
+	_energy_label = _bar_label(_energy, 13)
 
 	_slot_row = HBoxContainer.new()
 	_slot_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	_slot_row.add_theme_constant_override("separation", 12)
+	_slot_row.add_theme_constant_override("separation", SLOT_SEP)
 	_slot_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	bottom.add_child(_slot_row)
 
-	var mid := VBoxContainer.new()
-	mid.alignment = BoxContainer.ALIGNMENT_END
-	mid.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	mid.add_theme_constant_override("separation", 4)
-	mid.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	bottom.add_child(mid)
-
-	_hp_label = _label("ЗДОРОВЬЕ", 18)
-	_hp_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	mid.add_child(_hp_label)
-	_hp_fill = StyleBoxFlat.new()
-	_hp_fill.bg_color = Color(0.4, 0.9, 0.4)
-	_hp = _bar(Vector2(380, 18), _hp_fill)
-	mid.add_child(_hp)
-
-	_energy_label = _label("ЭНЕРГИЯ", 18)
-	_energy_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	mid.add_child(_energy_label)
-	_energy_fill = StyleBoxFlat.new()
-	_energy_fill.bg_color = COL_ENERGY
-	_energy = _bar(Vector2(380, 18), _energy_fill)
-	mid.add_child(_energy)
-	_energy_tick = ColorRect.new()
-	_energy_tick.color = Color(0, 0, 0, 0.75)
-	_energy_tick.size = Vector2(2, 18)
-	_energy_tick.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_energy.add_child(_energy_tick)
-
-
-	_ammo = _label("", 18)
+	_ammo = _label("", 15)
 	_ammo.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	mid.add_child(_ammo)
+	bottom.add_child(_ammo)
 
 	_over = _label("", 72)
 	_over.set_anchors_preset(Control.PRESET_CENTER)
@@ -238,6 +245,35 @@ void fragment() {
 	_over.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_over.visible = false
 	root.add_child(_over)
+
+	# подсказка на Alt: навёл на абилку или статус — окно с описанием, как в доте
+	_tip = PanelContainer.new()
+	_tip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_tip.visible = false
+	var tsb := StyleBoxFlat.new()
+	tsb.bg_color = Color(0.05, 0.06, 0.08, 0.94)
+	tsb.border_color = Color(0.6, 0.65, 0.72, 0.8)
+	tsb.set_border_width_all(2)
+	tsb.set_corner_radius_all(4)
+	tsb.content_margin_left = 12
+	tsb.content_margin_right = 12
+	tsb.content_margin_top = 8
+	tsb.content_margin_bottom = 10
+	_tip.add_theme_stylebox_override("panel", tsb)
+	var tv := VBoxContainer.new()
+	tv.add_theme_constant_override("separation", 4)
+	tv.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_tip.add_child(tv)
+	_tip_title = _label("", 20)
+	tv.add_child(_tip_title)
+	_tip_sub = _label("", 14)
+	_tip_sub.add_theme_color_override("font_color", Color(0.7, 0.76, 0.85))
+	tv.add_child(_tip_sub)
+	_tip_body = _label("", 15)
+	_tip_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_tip_body.custom_minimum_size = Vector2(330, 0)
+	tv.add_child(_tip_body)
+	root.add_child(_tip)
 
 
 func add_minimap(mm: Control) -> void:
@@ -272,21 +308,28 @@ func _rebuild_slots() -> void:
 	if _slot_row == null or mech == null:
 		return
 	for c in _slot_row.get_children():
+		_slot_row.remove_child(c)
 		c.queue_free()
 	_slots.clear()
 	# рывок и телепорт есть у всех: отдельные слоты слева (в PvP базы нет — и телепорта нет)
-	_dash_slot = _make_slot(_slot_row, -1, "Пробел", "Рывок")
-	_tp_slot = {} if Battle.pvp else _make_slot(_slot_row, -1, "T", "На базу")
+	_dash_slot = _make_slot(_slot_row, -1, "Пробел", "dash")
+	_tp_slot = {} if Battle.pvp else _make_slot(_slot_row, -1, "T", "teleport")
 	var gap := Control.new()
-	gap.custom_minimum_size = Vector2(14, 0)
+	gap.custom_minimum_size = Vector2(10, 0)
 	_slot_row.add_child(gap)
 	for i in mech.abilities.size():
 		_slots.append(_make_slot(_slot_row, i))
+	# полоски здоровья и энергии — по ширине ряда абилок
+	var small := 1 if _tp_slot.is_empty() else 2
+	var w: float = small * SLOT_SMALL + mech.abilities.size() * SLOT + 10.0 + SLOT_SEP * (_slot_row.get_child_count() - 1)
+	var bw := maxf(BAR_W, w)
+	_hp.custom_minimum_size.x = bw
+	_energy.custom_minimum_size.x = bw
 
 
 func _set_hint() -> void:
 	if _hint_full:
-		_hint.text = "WASD ходьба   Shift бег   Пробел рывок" + ("" if Battle.pvp else "   T на базу") + "\nЛКМ / ПКМ пушки   Q E R F C V G X абилки   B ангар\nF2 настройки   F3 хитбоксы   F1 цифры   Колесо зум\nAlt+клик метка (держать — меню меток)   H скрыть подсказку   Esc меню"
+		_hint.text = "WASD ходьба   Shift бег   Пробел рывок" + ("" if Battle.pvp else "   T на базу") + "\nЛКМ / ПКМ пушки   Q E R F C V G X абилки   B ангар\nF2 настройки   F3 хитбоксы   F1 цифры   Колесо зум\nAlt+клик метка (держать — меню меток)   Alt + навести — описание абилки или статуса\nH скрыть подсказку   Esc меню"
 	else:
 		_hint.text = "H  подсказка"
 
@@ -437,6 +480,17 @@ func _label(text: String, size: int) -> Label:
 	return l
 
 
+# подпись по центру полоски («850 / 1200»)
+func _bar_label(bar: Control, size: int) -> Label:
+	var l := _label("", size)
+	l.set_anchors_preset(Control.PRESET_FULL_RECT)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	l.add_theme_constant_override("outline_size", 5)
+	bar.add_child(l)
+	return l
+
+
 func _bar(min_size: Vector2, fill: StyleBoxFlat) -> ProgressBar:
 	var b := ProgressBar.new()
 	b.custom_minimum_size = min_size
@@ -452,49 +506,82 @@ func _bar(min_size: Vector2, fill: StyleBoxFlat) -> ProgressBar:
 	return b
 
 
-# слот абилки: клавиша, название, цена, затемнение пока перезаряжается
-func _make_slot(parent: Control, index: int, key_text := "", title_text := "") -> Dictionary:
+# значок интерфейса по имени (assets/ui/hud, рисует tools/make_hud_icons.py); null — файла нет
+func _icon(n: String) -> Texture2D:
+	if not _icons.has(n):
+		var path := "res://assets/ui/hud/%s.png" % n
+		_icons[n] = load(path) if ResourceLoader.exists(path) else null
+	return _icons[n]
+
+
+func _icon_rect(tex: Texture2D, pos: Vector2, side: float) -> TextureRect:
+	var ic := TextureRect.new()
+	ic.texture = tex
+	ic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	ic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	ic.position = pos
+	ic.size = Vector2(side, side)
+	ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return ic
+
+
+# слот абилки: значок, клавиша, цена, затемнение пока перезаряжается
+func _make_slot(parent: Control, index: int, key_text := "", icon_name := "") -> Dictionary:
 	var small := index < 0
+	var side := SLOT_SMALL if small else SLOT
+	if not small:
+		icon_name = mech.abilities[index]["type"]
 	var panel := Panel.new()
-	panel.custom_minimum_size = Vector2(104 if small else 138, 88)
+	panel.custom_minimum_size = Vector2(side, side)
+	panel.size_flags_vertical = Control.SIZE_SHRINK_END     # маленькие слоты стоят по низу ряда
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	panel.clip_contents = true
 	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.08, 0.09, 0.11, 0.8)
+	var kc: Color = KIND_COL[AB_KIND.get(icon_name, 3)]
+	sb.bg_color = Color(kc.r * 0.28, kc.g * 0.28, kc.b * 0.28, 0.9)
 	sb.set_border_width_all(2)
 	sb.border_color = Color(1, 1, 1, 0.5)
 	sb.set_corner_radius_all(4)
 	panel.add_theme_stylebox_override("panel", sb)
 	parent.add_child(panel)
 
-	var key := _label(key_text if small else Parts.ABILITY_KEY_NAMES[index], 18 if key_text.length() > 2 else 34)
-	key.position = Vector2(10, 2)
+	var tex := _icon(icon_name)
+	if tex != null:
+		var m := side * 0.15
+		panel.add_child(_icon_rect(tex, Vector2(m, m), side - m * 2.0))
+	else:     # значка нет — название словом
+		var title := _label(mech.abilities[index]["short"] if not small else icon_name, 12)
+		title.set_anchors_preset(Control.PRESET_FULL_RECT)
+		title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		panel.add_child(title)
+
+	var key := _label(key_text if small else Parts.ABILITY_KEY_NAMES[index], 11 if key_text.length() > 2 else 15)
+	key.position = Vector2(4, 0)
+	key.add_theme_constant_override("outline_size", 5)
 	panel.add_child(key)
 
-	var title := _label(title_text if small else mech.abilities[index]["short"], 16)
-	title.position = Vector2(10, 30) if key_text.length() > 2 else Vector2(42, 8)
-	title.size = Vector2(90, 46)
-	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	panel.add_child(title)
-
-	var cost := _label("", 16)
-	cost.position = Vector2(10, 58)
+	var cost := _label("", 12)
+	cost.position = Vector2(0, side - 19)
+	cost.size = Vector2(side - 4, 18)
+	cost.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	cost.add_theme_color_override("font_color", COL_ENERGY)
 	panel.add_child(cost)
 
 	var shade := ColorRect.new()
 	shade.color = Color(0, 0, 0, 0.62)
 	shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	shade.size = Vector2(panel.custom_minimum_size.x, 0)
+	shade.size = Vector2(side, 0)
 	panel.add_child(shade)
 
-	var cd := _label("", 30)
+	var cd := _label("", 18 if small else 22)
 	cd.set_anchors_preset(Control.PRESET_FULL_RECT)
 	cd.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	cd.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	panel.add_child(cd)
 
-	return {"panel": panel, "style": sb, "cost": cost, "shade": shade, "cd": cd}
+	return {"panel": panel, "style": sb, "cost": cost, "shade": shade, "cd": cd, "index": index, "icon": icon_name}
 
 
 func _on_hit(amount: float) -> void:
@@ -538,6 +625,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	# Alt+ЛКМ: метка для своей команды (по миникарте или по месту прицела). Ставится, когда ЛКМ отпустили:
 	# быстрый клик — обычная метка, зажал — круговое меню
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and mech != null:
+		if event.pressed and event.alt_pressed and _tip.visible:
+			get_viewport().set_input_as_handled()     # клик по значку под подсказкой — не метка
+			return
 		if event.pressed and event.alt_pressed:
 			var pos = _minimap.world_at(event.position) if _minimap != null else null
 			if pos == null:
@@ -600,7 +690,7 @@ func _process(delta: float) -> void:
 	var hk := clampf(hp / hp_max, 0.0, 1.0)
 	_hp.value = hk
 	_bg(_hp_fill, Color(0.9, 0.25, 0.2).lerp(Color(0.4, 0.9, 0.4), hk))
-	_txt(_hp_label, "ЗДОРОВЬЕ  %d" % int(ceil(maxf(hp, 0.0))))
+	_txt(_hp_label, "%d / %d" % [int(ceil(maxf(hp, 0.0))), int(hp_max)])
 	_update_statuses()
 	_hit_t = maxf(_hit_t - delta * 2.5, 0.0)
 	var low := clampf((0.3 - hk) / 0.3, 0.0, 1.0) * 0.22 if not mech.dead else 0.0
@@ -666,7 +756,7 @@ func _process(delta: float) -> void:
 	elif locked:
 		col = Color(0.95, 0.5, 0.2)
 	_bg(_energy_fill, col)
-	_txt(_energy_label, "ЭНЕРГИЯ  %d" % int(en) if not locked else "ЭНЕРГИЯ  %d   бег недоступен" % int(en))
+	_txt(_energy_label, "%d / %d" % [int(en), int(en_max)] if not locked else "%d / %d   бег недоступен" % [int(en), int(en_max)])
 	_energy_tick.visible = Cfg.run_energy_cost > 0.0
 	var tick_pos := Vector2(_energy.size.x * clampf(Cfg.run_min_energy / en_max, 0.0, 1.0) - 1.0, 0)
 	if _energy_tick.position != tick_pos:
@@ -693,18 +783,16 @@ func _process(delta: float) -> void:
 		var act: float = mech.ability_active(i)
 		var is_shield: bool = mech.abilities[i]["type"] == "shield"
 		if act > 0.0:
-			cd_text = "ВКЛ" if is_shield else "%.1f" % act
+			cd_text = "ВКЛ" if is_shield or mech.abilities[i]["type"] == "stance" else "%.1f" % act
 			cd_col = COL_ACTIVE
 			shade_size = Vector2.ZERO
 		_shade(shade, shade_size, Vector2(0, panel.size.y * (1.0 - k)))
 		_txt(s["cd"], cd_text)
 		_font_col(s["cd"], cd_col)
-		var cost_text := "%d эн." % int(cost)
+		var cost_text := "%d" % int(cost)
 		var chm: float = mech.ability_charges_max(i)
 		if chm > 0.0:
-			cost_text += "   ×%d" % int(mech.ability_charges[i])
-		if is_shield:
-			cost_text = "%d эн. +%s/с" % [int(cost), str(snappedf(mech.ability_param(i, "upkeep"), 0.1))]
+			cost_text = "×%d  %s" % [int(mech.ability_charges[i]), cost_text]
 		_txt(s["cost"], cost_text)
 		_font_col(s["cost"], COL_ENERGY if enough else COL_DENY)
 		var border := Color(1, 1, 1, 0.75)
@@ -718,12 +806,14 @@ func _process(delta: float) -> void:
 			border = COL_DENY
 		_border(s["style"], border)
 
+	_update_tip()
+
 	if _dbg.visible:
 		var speed := Vector2(mech.velocity.x, mech.velocity.z).length()
 		_txt(_dbg, "скорость  %.1f м/с\nразброс  %.1f°\nэнергия  %d\nкадров  %d" % [speed, mech.get_spread_deg(), int(en), Engine.get_frames_per_second()])
 
 
-# статусы своего меха над абилками: вредные красным, полезные зелёным, у временных — сколько осталось
+# статусы своего меха над полосками: значки, вредные красным, полезные зелёным, у временных — сколько осталось
 func _update_statuses() -> void:
 	var list: Array = mech.status_list()
 	while _status_chips.size() < list.size():
@@ -736,35 +826,112 @@ func _update_statuses() -> void:
 		if not on:
 			continue
 		var st: Array = list[i]
-		var t: String = st[0]
+		c["name"] = st[0]
+		c["desc"] = st[4] if st.size() > 4 else ""
+		var ic: String = st[3] if st.size() > 3 else ""
+		if c["icon_name"] != ic:
+			c["icon_name"] = ic
+			c["icon"].texture = _icon(ic)
+		var t := ""
 		if st[1] >= 0.0:
-			t += "  " + ("%.1f" % st[1]).replace(".", ",")
+			t = ("%.1f" % st[1]).replace(".", ",") if st[1] < 10.0 else "%d" % int(st[1])
 		_txt(c["label"], t)
 		var col: Color = COL_GOOD if st[2] else COL_BAD
-		_font_col(c["label"], col)
+		if c["icon"].modulate != col:
+			c["icon"].modulate = col
 		_border(c["style"], col)
-	var any := not list.is_empty()
-	if _status_row.visible != any:
-		_status_row.visible = any
 
 
 func _make_status_chip() -> Dictionary:
-	var panel := PanelContainer.new()
+	var panel := Panel.new()
+	panel.custom_minimum_size = Vector2(STATUS_SIZE, STATUS_SIZE)
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var st := StyleBoxFlat.new()
 	st.bg_color = Color(0, 0, 0, 0.6)
 	st.border_color = COL_BAD
 	st.set_border_width_all(2)
 	st.set_corner_radius_all(4)
-	st.content_margin_left = 10
-	st.content_margin_right = 10
-	st.content_margin_top = 2
-	st.content_margin_bottom = 2
 	panel.add_theme_stylebox_override("panel", st)
-	var l := _label("", 17)
+	var ic := _icon_rect(null, Vector2(4, 3), STATUS_SIZE - 8.0)
+	panel.add_child(ic)
+	var l := _label("", 12)
+	l.add_theme_constant_override("outline_size", 5)
+	l.position = Vector2(0, STATUS_SIZE - 17)
+	l.size = Vector2(STATUS_SIZE, 16)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	panel.add_child(l)
 	_status_row.add_child(panel)
-	return {"panel": panel, "style": st, "label": l}
+	return {"panel": panel, "style": st, "icon": ic, "label": l, "name": "", "desc": "", "icon_name": ""}
+
+
+# Alt зажат: курсор-стрелка, навёл на абилку или статус — подсказка над ним (мех в это время не стреляет — mech.gd)
+func _update_tip() -> void:
+	var alt := Input.is_key_pressed(KEY_ALT) and not _ping_hold and not get_tree().paused
+	if alt != _alt:
+		_alt = alt
+		Input.set_default_cursor_shape(Input.CURSOR_ARROW if alt else Input.CURSOR_CROSS)
+	var hit := _hover_item(get_viewport().get_mouse_position()) if alt else {}
+	if hit.is_empty():
+		if _tip.visible:
+			_tip.visible = false
+		_tip_key = ""
+		return
+	if hit["key"] != _tip_key:
+		_tip_key = hit["key"]
+		_tip_title.text = hit["title"]
+		_tip_title.add_theme_color_override("font_color", hit["col"])
+		_tip_sub.text = hit["sub"]
+		_tip_sub.visible = hit["sub"] != ""
+		_tip_body.text = hit["body"]
+		_tip.visible = true
+		_tip.reset_size()
+	var r: Rect2 = hit["rect"]
+	var vs := get_viewport().get_visible_rect().size
+	var sz := _tip.get_combined_minimum_size()
+	var pos := Vector2(r.get_center().x - sz.x * 0.5, r.position.y - sz.y - 10.0)
+	pos = Vector2(clampf(pos.x, 8.0, maxf(vs.x - sz.x - 8.0, 8.0)), maxf(pos.y, 8.0))
+	if _tip.position != pos:
+		_tip.position = pos
+
+
+# что под курсором: слот (абилка, рывок, телепорт) или статус; {} — ничего
+func _hover_item(p: Vector2) -> Dictionary:
+	var m := Cfg.METERS_PER_UNIT
+	for sl in [_dash_slot, _tp_slot] + _slots:
+		if sl.is_empty() or not sl["panel"].get_global_rect().has_point(p):
+			continue
+		var r: Rect2 = sl["panel"].get_global_rect()
+		var i: int = sl["index"]
+		if sl["icon"] == "dash":
+			var ch := int(mech.stats.get("dash_charges", 1.0))
+			var dist: float = mech.stats.get("dash_speed", 0.0) * mech.stats.get("dash_time", 0.0) * m
+			return {"key": "dash", "rect": r, "col": KIND_COL[3], "title": "Рывок", "sub": "Пробел",
+				"body": "Резкий бросок двигателями в сторону движения.\nДальность %d м, перезарядка %s с%s" % [roundi(dist),
+					str(snappedf(mech.stats.get("dash_cooldown", 0.0), 0.1)), (", зарядов %d" % ch) if ch > 1 else ""]}
+		if sl["icon"] == "teleport":
+			return {"key": "tp", "rect": r, "col": KIND_COL[3], "title": "Телепорт на базу", "sub": "T",
+				"body": "Постой %s с — и мех на своей базе. Движение и выстрел сбивают.\nПерезарядка %d с" % [str(snappedf(Cfg.tp_channel, 0.1)), int(Cfg.tp_cooldown)]}
+		var ab: Dictionary = mech.abilities[i]
+		var sub := "%s · %d эн. · перезарядка %s с" % [Parts.ABILITY_KEY_NAMES[i], int(mech.ability_cost(i)), str(snappedf(mech.ability_cooldown_max(i), 0.1))]
+		if mech.ability_charges_max(i) > 0.0:
+			sub += " · зарядов %d" % int(mech.ability_charges_max(i))
+		var body := PackedStringArray()
+		for ln in Parts.describe(ab["id"]).split(" · "):     # цену и перезарядку уже написали строкой выше
+			if not (ln.contains(" эн., кд ") or ln.begins_with("зарядов")):
+				body.append(ln.left(1).to_upper() + ln.substr(1))
+		return {"key": "ab%d" % i, "rect": r, "col": KIND_COL[AB_KIND.get(ab["type"], 3)], "title": ab["name"], "sub": sub, "body": "\n".join(body)}
+	for c in _status_chips:
+		if not c["panel"].visible or not c["panel"].get_global_rect().has_point(p):
+			continue
+		var good: bool = c["icon"].modulate == COL_GOOD
+		return {"key": "st_%s_%s" % [c["name"], c["desc"]], "rect": c["panel"].get_global_rect(), "col": COL_GOOD if good else COL_BAD,
+			"title": c["name"], "sub": "полезный" if good else "вредный", "body": c["desc"]}
+	return {}
+
+
+func _exit_tree() -> void:
+	if _alt:
+		Input.set_default_cursor_shape(Input.CURSOR_CROSS)
 
 
 # состояние маленького слота (рывок, телепорт): затемнение, цифра перезарядки, подпись, активность

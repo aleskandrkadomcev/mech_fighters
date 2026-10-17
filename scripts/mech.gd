@@ -481,54 +481,55 @@ func control_info() -> Array:
 	return ["", 0.0]
 
 
-# статусы своего меха для интерфейса: [название, сколько осталось секунд (-1 — без срока), полезный ли].
+# статусы своего меха для интерфейса: [название, сколько осталось секунд (-1 — без срока), полезный ли,
+# значок (assets/ui/hud), описание для подсказки на Alt].
 # Сначала вредные, потом полезные
 func status_list() -> Array:
 	var out: Array = []
 	if dead:
 		return out
 	if stun_left > 0.0:
-		out.append(["Оглушён", stun_left, false])
+		out.append(["Оглушён", stun_left, false, "stun", "Не ходит, не стреляет и не жмёт абилки."])
 	if disarm_left > 0.0:
-		out.append(["Обезоружен: не стреляет", disarm_left, false])
+		out.append(["Обезоружен", disarm_left, false, "jammer", "Глушащий дротик: пушки не стреляют. Ходить и жать абилки можно."])
 	if marked_left > 0.0:
-		out.append(["Метка: +%d%% урона по тебе" % roundi(_mark_k * 100.0), marked_left, false])
+		out.append(["Метка", marked_left, false, "marker", "Дротик-целеуказатель: по тебе проходит на %d%% больше урона." % roundi(_mark_k * 100.0)])
 	if root_left > 0.0:
-		out.append(["Обездвижен: не ходит", root_left, false])
+		out.append(["Обездвижен", root_left, false, "bolas", "Связка держит ноги: не ходит и не делает рывок. Корпус и пушки работают."])
 	if no_regen_left > 0.0:
-		out.append(["ЭМИ: энергия не растёт", no_regen_left, false])
+		out.append(["ЭМИ", no_regen_left, false, "noregen", "Энергия не восстанавливается."])
 	if slow_left > 0.0:
-		out.append(["Замедлен −%d%%" % roundi(_slow_k * 100.0), slow_left, false])
+		out.append(["Замедлен", slow_left, false, "slow", "Скорость меньше на %d%%." % roundi(_slow_k * 100.0)])
 	if run_locked:
-		out.append(["Выдохся: нет бега", -1.0, false])
+		out.append(["Выдохся", -1.0, false, "tired", "Энергия кончилась на бегу: бег вернётся, когда энергия поднимется до отметки на полоске."])
 	if shield_left > 0.0:
-		out.append(["Неуязвим", shield_left, true])
+		out.append(["Неуязвим", shield_left, true, "invuln", "Урон не проходит."])
 	if repair_left > 0.0:
-		out.append(["Чинится", repair_left, true])
+		out.append(["Чинится", repair_left, true, "repair", "Наноремонт: здоровье растёт."])
 	elif hp < max_hp() - 0.5 and (dock_left > 0.0 or (stats.get("regen_hp", 0.0) > 0.0 and _since_damage >= stats.get("regen_delay", 4.0))):
-		out.append(["Чинится", -1.0, true])
+		out.append(["Чинится", -1.0, true, "repair", "Ремонтный док или самопочинка шасси: здоровье растёт, пока не получаешь урон."])
 	if barrier_on:
-		out.append(["Щит", -1.0, true])
+		out.append(["Щит", -1.0, true, "shield", "Генератор щита включён: урон уходит в щит и ест энергию."])
 	if cloak_left > 0.0:
-		out.append(["Невидим", cloak_left, true])
+		out.append(["Невидим", cloak_left, true, "cloak", "Враги не видят тебя, кроме омни-сенсора вблизи. Выстрел снимает маскировку."])
 	if braced:
-		out.append(["Упор", -1.0, true])
+		out.append(["Упор", -1.0, true, "brace", "Мех стоит на упорах: точнее стреляет."])
 	if purge_left > 0.0:
-		out.append(["Контроль не берёт", purge_left, true])
+		out.append(["Перезапуск", purge_left, true, "purge", "Аварийный перезапуск: оглушение, ЭМИ, замедление и прочий контроль не действуют."])
 	if matrix_left > 0.0:
-		out.append(["Матрица −%d%% урона" % roundi(_matrix_k * 100.0), matrix_left, true])
+		out.append(["Матрица брони", matrix_left, true, "matrix", "Входящий урон меньше на %d%%." % roundi(_matrix_k * 100.0)])
 	if overdrive_left > 0.0:
-		out.append(["Форсаж +%d%% скорости" % roundi(_overdrive_k * 100.0), overdrive_left, true])
+		out.append(["Форсаж", overdrive_left, true, "overdrive", "Скорость больше на %d%%." % roundi(_overdrive_k * 100.0)])
 	if rapid_left > 0.0:
-		out.append(["Подача +%d%% стрельбы" % roundi(_rapid_k * 100.0), rapid_left, true])
+		out.append(["Форсированная подача", rapid_left, true, "rapid", "Пушки стреляют на %d%% чаще." % roundi(_rapid_k * 100.0)])
 	if periscope_left > 0.0:
-		out.append(["Перископ: дальше обзор", periscope_left, true])
+		out.append(["Перископ", periscope_left, true, "periscope", "Обзор и омни-сенсор дальше."])
 	if stance_on:
-		out.append(["Оборона −%d%% урона" % roundi(ability_param(_stance_i, "reduce") * 100.0), -1.0, true])
+		out.append(["Оборона", -1.0, true, "stance", "Стоит на месте и стреляет, входящий урон меньше на %d%%." % roundi(ability_param(_stance_i, "reduce") * 100.0)])
 	if _game_mult("damage") > 1.0:
-		out.append(["Арсенал: +урон", -1.0, true])
+		out.append(["Арсенал", -1.0, true, "arsenal", "Точка «Арсенал» у твоей команды: урон больше."])
 	if _game_mult("regen") > 1.0:
-		out.append(["Реактор: +энергия", -1.0, true])
+		out.append(["Реактор", -1.0, true, "reactor", "Точка «Реактор» у твоей команды: энергия растёт быстрее."])
 	return out
 
 
@@ -835,7 +836,7 @@ func _read_player() -> void:
 	_move = m.normalized() if m.length() > 1.0 else m
 	_run = Input.is_physical_key_pressed(KEY_SHIFT)
 	_fire = Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and not Cfg.ui_hover and not Input.is_key_pressed(KEY_ALT) and not Cfg.ping_hold
-	_fire2 = Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) and not Cfg.ui_hover
+	_fire2 = Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) and not Cfg.ui_hover and not Input.is_key_pressed(KEY_ALT) and not Cfg.ping_hold
 
 	if camera != null and not Cfg.ui_hover:
 		var mp := get_viewport().get_mouse_position()
