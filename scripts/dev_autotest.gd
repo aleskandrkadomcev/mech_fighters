@@ -50,6 +50,7 @@ var _lobtest := false            # --lobtest: ЭМИ и осадное оруд�
 var _spawntest := false         # --spawntest --drop --enemies=0 --allies=1: мех садится прямо на другого — никто не подпрыгивает
 var _proptest := false           # --proptest: кучка ящиков не мешает пройти, ломается от меха и от взрыва
 var _pingtest := false           # --pingtest: Alt+клик — обычная метка, Alt + зажатая ЛКМ — круговое меню, выбор по направлению мыши
+var _camtest := false           # --camtest (окно, без --fixed-fps): плавность камеры, когда двигаешь мышью (сдвиг к прицелу)
 var _abil3test := false         # --abil3test: вторая пачка абилок и правки (баррикада-стена, толчок по дистанции, крипы)
 var _abil2test := false         # --abil2test: абилки 17.10.2026 по очереди (связка, дротик, ЭМИ, напалм, зонд, баррикада, дрон, оборона, якорь, волна, прыжок)
 var _dashtest := false           # --dashtest: рывок разгоняется за «Разгон рывка», а не мгновенно; дальность как без разгона
@@ -189,6 +190,8 @@ func setup(main_node: Node3D, args: PackedStringArray) -> void:
 			_abil2test = true
 		elif a == "--abil3test":
 			_abil3test = true
+		elif a == "--camtest":
+			_camtest = true
 		elif a == "--pingtest":
 			_pingtest = true
 		elif a == "--ruintest":
@@ -293,6 +296,8 @@ func _process(_delta: float) -> void:
 		_run_abil2test()
 	if _abil3test:
 		_run_abil3test()
+	if _camtest:
+		_run_camtest()
 	if _pingtest:
 		_run_pingtest()
 	if _ruintest:
@@ -374,7 +379,7 @@ func _process(_delta: float) -> void:
 		var img := get_viewport().get_texture().get_image()
 		img.save_png(("%s/%s_f%04d.png" % [_shot_dir, _target, shot_f]) if _fxreel else ("%s/f%04d.png" % [_shot_dir, shot_f]))
 		_shots_left.erase(shot_f)
-		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and not _linktest and _mechexport == "" and not _gfxbench and not _cpubench and not _fancheck and not _aimtest and not _creeptest and not _radartest and not _ruintest and not _coredmg and not _slidetest and not _lobtest and not _spawntest and not _proptest and not _cdtest and not _statustest and not _dashtest and not _pingtest and not _abil2test and not _abil3test:
+		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and not _linktest and _mechexport == "" and not _gfxbench and not _cpubench and not _fancheck and not _aimtest and not _creeptest and not _radartest and not _ruintest and not _coredmg and not _slidetest and not _lobtest and not _spawntest and not _proptest and not _cdtest and not _statustest and not _dashtest and not _pingtest and not _abil2test and not _abil3test and not _camtest:
 			get_tree().quit()
 
 
@@ -3978,3 +3983,59 @@ func _creeps_hp() -> float:
 	for c in get_tree().get_nodes_in_group("creeps"):
 		t += c.hp
 	return t
+
+
+# ------------------------------------------------------------------
+#  Плавность камеры при движении мыши (окно, настоящее время, без --fixed-fps):
+#  godot --path . --audio-driver Dummy -- --camtest --enemies=0 --allies=0
+#  Мех стоит, курсор плавно ездит влево-вправо (камера сдвигается к прицелу). Два прохода: как было
+#  (сдвиг по точке прицела меха, она считается на тиках) и сейчас (по точке под курсором в каждом кадре).
+#  Рывки = насколько скорость камеры скачет от кадра к кадру (вторая разность / первая, меньше — плавнее)
+# ------------------------------------------------------------------
+
+const CAM_PASS_TIME := 4.0
+const CAM_PASSES := [[true, "как было"], [false, "сейчас"]]
+
+
+func _run_camtest() -> void:
+	var m = main.mech
+	var cam = main.cam
+	var dt := get_process_delta_time()
+	if _frame == 5:
+		Cfg.creeps_enabled = 0
+		Cfg.bot_enemies = 0
+		for st in get_tree().get_nodes_in_group("structures"):
+			st.set_physics_process(false)
+		m.demo = null
+		m.shield_left = 0.0
+		set_meta("t", -0.5)
+		set_meta("pass", 0)
+		set_meta("xs", [])
+	if _frame < 30:
+		return
+	var pi: int = get_meta("pass")
+	if pi >= CAM_PASSES.size():
+		return
+	cam.tick_aim = CAM_PASSES[pi][0]
+	var t: float = get_meta("t") + dt
+	set_meta("t", t)
+	var vp := get_viewport()
+	var size := vp.get_visible_rect().size
+	vp.warp_mouse(size * 0.5 + Vector2(sin(maxf(t, 0.0) * TAU / 2.0) * size.x * 0.3, -60.0))
+	if t >= 0.3:
+		var xs: Array = get_meta("xs")
+		xs.append(cam.global_position.x)
+	if t >= CAM_PASS_TIME:
+		var xs2: Array = get_meta("xs")
+		var d1 := 0.0
+		var d2 := 0.0
+		for k in range(1, xs2.size() - 1):
+			d1 += absf(xs2[k + 1] - xs2[k])
+			d2 += absf(xs2[k + 1] - 2.0 * xs2[k] + xs2[k - 1])
+		print("[CAM] %s: кадров %d, рывки %.1f%%" % [CAM_PASSES[pi][1], xs2.size(), d2 / maxf(d1, 0.0001) * 100.0])
+		set_meta("xs", [])
+		set_meta("t", -0.5)
+		set_meta("pass", pi + 1)
+		if pi + 1 >= CAM_PASSES.size():
+			print("[CAM] done, кадров/с ~%d" % Engine.get_frames_per_second())
+			get_tree().quit()

@@ -8,6 +8,7 @@ var debug_yaw := 0.0   # только для автопроверки
 var _focus := Vector3.ZERO
 var _shake := 0.0
 var _started := false
+var tick_aim := false  # только для автопроверки: сдвиг к прицелу по точке прицела меха (как было до 17.10.2026)
 
 
 func _ready() -> void:
@@ -35,8 +36,17 @@ func _process(delta: float) -> void:
 		return
 	# игра считается тиками (30 в секунду), а камера рисуется каждый кадр: берём сглаженное положение меха
 	var want: Vector3 = target.get_global_transform_interpolated().origin
-	if "aim_point" in target:
-		var off: Vector3 = (target.aim_point - want) * Cfg.cam_lookahead
+	# сдвиг к прицелу: у игрока — по точке земли под курсором в этом кадре. Точка прицела меха
+	# считается на тиках (30 в секунду) и подскакивает на высоту врага под курсором, поэтому камера
+	# от неё сдвигалась ступеньками — двигалась рывками, как в 30 кадров
+	var aim = null
+	if target.get("is_player") and target.get("demo") == null and not tick_aim:
+		var mp := get_viewport().get_mouse_position()
+		aim = Plane(Vector3.UP, 0.0).intersects_ray(project_ray_origin(mp), project_ray_normal(mp))
+	elif "aim_point" in target:
+		aim = target.aim_point
+	if aim != null:
+		var off: Vector3 = (aim - want) * Cfg.cam_lookahead
 		off.y = 0
 		want += off.limit_length(Cfg.cam_lookahead_max)
 	want.y = 0
