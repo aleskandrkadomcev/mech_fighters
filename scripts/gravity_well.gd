@@ -2,7 +2,7 @@ class_name GravityWell
 extends Node3D
 ## Гравитационный якорь: снаряд вбился в землю, раскрыл лапы и «Длительность» секунд медленно тянет
 ## вражеских мехов к себе. Тяжёлого тянет слабее (F2 → «Контроль», базовая масса). Стены держат:
-## сквозь стену не протащит. Крипов не тянет.
+## сквозь стену не протащит. Крипов тянет как меха базовой массы.
 
 var team := 0
 var shooter: Node
@@ -80,7 +80,7 @@ func _physics_process(delta: float) -> void:
 	if g == null or not g.has_method("units"):
 		return
 	for u in g.units():
-		if u[2] == team or not u[4]:
+		if u[2] == team:
 			continue
 		var d: Vector3 = global_position - u[1]
 		d.y = 0

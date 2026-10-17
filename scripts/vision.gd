@@ -137,7 +137,7 @@ func _viewers(team: int) -> Array:
 	for m in get_tree().get_nodes_in_group("mechs"):
 		if m.dead or m.team != team:
 			continue
-		out.append({"node": m, "pos": m.global_position, "r": m.stats.get("vision", 35.0), "omni": m.stats.get("omni", 0.0)})
+		out.append({"node": m, "pos": m.global_position, "r": m.vision_r(), "omni": m.omni_r()})
 	for s in get_tree().get_nodes_in_group("structures"):
 		if s.dead or s.team != team:
 			continue
@@ -208,6 +208,10 @@ func _update() -> void:
 				continue
 			if mn.triggered or _seen_by(viewers, mn.global_position, 0.5, true):
 				vis[mn.get_instance_id()] = true
+		# турели, шары, купола врага видны обычным обзором
+		for gd in get_tree().get_nodes_in_group("gadgets"):
+			if gd.team != team and not gd.dead and _seen_by(viewers, gd.global_position, gd.get_hit_radius(), false):
+				vis[gd.get_instance_id()] = true
 		# вражеский зонд, как мина, виден только омни-сенсором (вблизи)
 		for pr in get_tree().get_nodes_in_group("probes"):
 			if pr.team != team and not pr.dead and _seen_by(viewers, pr.global_position, 0.5, true):
@@ -227,6 +231,8 @@ func _update() -> void:
 		mn.seen = is_visible_to(player_team, mn)
 	for pr in get_tree().get_nodes_in_group("probes"):
 		pr.seen = is_visible_to(player_team, pr)
+	for gd in get_tree().get_nodes_in_group("gadgets"):
+		gd.seen = is_visible_to(player_team, gd)
 	for pk in get_tree().get_nodes_in_group("pickups"):
 		pk.seen = _vis[player_team].has(pk.get_instance_id())
 

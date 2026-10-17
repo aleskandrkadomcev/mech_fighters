@@ -38,6 +38,7 @@ var _muzzle: Node3D
 var _bar: Node3D
 var _mats: Array = []
 var _knock := Vector3.ZERO
+var _pull := Vector3.ZERO       # притяжение гравитационного якоря за этот тик
 var _yaw := 0.0
 
 static var _shared := {}
@@ -113,6 +114,17 @@ func knock(v: Vector3) -> void:
 	_knock += v * 0.8
 
 
+# гравитационный якорь тянет (крип — как мех базовой массы)
+func pull(v: Vector3) -> void:
+	_pull += v
+
+
+# ударная волна: отлетает на dist (толчок гаснет 30 ед/с за секунду)
+func shove(dir: Vector3, dist: float) -> void:
+	dir.y = 0.0
+	_knock = dir.normalized() * sqrt(2.0 * 30.0 * maxf(dist, 0.0))
+
+
 func take_damage(amount: float, pos: Vector3, _dir: Vector3, _kind := "", src: Node = null) -> void:
 	if dead or amount <= 0.0:
 		return
@@ -181,9 +193,12 @@ func _physics_process(delta: float) -> void:
 		want = want.normalized()
 	var hv := Vector3(velocity.x, 0, velocity.z).move_toward(want * speed, 14.0 * delta)
 	_knock = _knock.move_toward(Vector3.ZERO, 30.0 * delta)
-	velocity = hv + _knock
+	velocity = hv + _knock + _pull
+	_pull = Vector3.ZERO
 	velocity.y = 0.0
 	move_and_slide()
+	# толчок и притяжение не копятся в своей скорости крипа (иначе толчок не гас, и крип улетал за карту)
+	velocity = hv
 	global_position.y = 0.0
 	# корпус разворачивается туда, куда едет; башня на цель
 	var flat := Vector3(velocity.x, 0, velocity.z)

@@ -4,6 +4,8 @@ extends Node3D
 ## Связка (kind "bolas") — верёвка с двумя грузами, крутится в полёте; попала — обматывает ноги:
 ## мех обездвижен (корпус крутится, пушки стреляют), крип оглушён.
 ## Дротик (kind "jam") — втыкается в броню и искрит: мех не стреляет, крип оглушён.
+## Целеуказатель (kind "mark") — дротик с красным маячком: по меху все попадания сильнее.
+## Болванка (kind "slug") — тяжёлый снаряд: урон и оглушение (тяжёлого — короче).
 
 var team := 0
 var shooter: Node
@@ -63,8 +65,17 @@ func _ready() -> void:
 		rope.mesh = rm
 		rope.material_override = mat("rope", Color(0.45, 0.36, 0.22))
 		_spin.add_child(rope)
+	elif kind == "slug":
+		var sm := SphereMesh.new()
+		sm.radius = 0.32
+		sm.height = 0.9
+		var sl := MeshInstance3D.new()
+		sl.mesh = sm
+		sl.material_override = mat("slug", Color(1.0, 0.7, 0.35) * 2.2, true)
+		sl.rotation.x = PI * 0.5
+		_spin.add_child(sl)
 	else:
-		# дротик с жёлтым огоньком на хвосте
+		# дротик с огоньком на хвосте: жёлтым (глушилка) или красным (метка)
 		var dm := CylinderMesh.new()
 		dm.top_radius = 0.02
 		dm.bottom_radius = 0.09
@@ -80,7 +91,7 @@ func _ready() -> void:
 		gm.height = 0.2
 		var g := MeshInstance3D.new()
 		g.mesh = gm
-		g.material_override = mat("dart_glow", Color(1.0, 0.85, 0.3) * 2.5, true)
+		g.material_override = _glow()
 		g.position = Vector3(0, 0, 0.4)
 		_spin.add_child(g)
 	global_position = _from
@@ -120,6 +131,16 @@ func _hit(hit: Dictionary) -> void:
 		elif kind == "jam" and target.has_method("disarm"):
 			target.disarm(t)
 			_stick(target, pos, t)
+		elif kind == "mark":
+			if target.has_method("mark"):
+				target.mark(t, float(p.get("boost", 0.25)))
+				_stick(target, pos, t)
+		elif kind == "slug":
+			var k: float = shooter.damage_mult() if is_instance_valid(shooter) else 1.0
+			target.take_damage(float(p.get("damage", 70.0)) * k, pos, _vel.normalized(), "", shooter if is_instance_valid(shooter) else null)
+			if target.has_method("stun"):
+				target.stun(float(p.get("stun_time", 1.2)))
+			Fx.impact(pos, -_vel.normalized(), "armor", float(p.get("damage", 70.0)))
 		elif target.has_method("stun"):
 			target.stun(t)
 		Sfx.play_at("hit", pos, -4.0, 0.1)
@@ -152,8 +173,14 @@ func _stick(target: Node3D, pos: Vector3, t: float) -> void:
 	gm.radius = 0.14
 	gm.height = 0.28
 	d.mesh = gm
-	d.material_override = mat("dart_glow", Color(1.0, 0.85, 0.3) * 2.5, true)
+	d.material_override = _glow()
 	holder.add_child(d)
 	d.global_position = pos
 	Fx.spark(pos, -_vel.normalized(), true, false)
 	get_tree().create_timer(t, false).timeout.connect(d.queue_free)
+
+
+func _glow() -> StandardMaterial3D:
+	if kind == "mark":
+		return mat("mark_glow", Color(1.0, 0.2, 0.15) * 2.5, true)
+	return mat("dart_glow", Color(1.0, 0.85, 0.3) * 2.5, true)

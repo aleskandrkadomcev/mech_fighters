@@ -1,13 +1,14 @@
 class_name Barricade
 extends StaticBody3D
 ## Раскладная баррикада: мех ставит её перед собой в сторону прицела, она разворачивается из контейнера
-## в бронещит. Держит пули, лучи и рельсу (свои и чужие), мехи через неё не проходят. Свои гранаты
-## (гранатомёт и снаряды абилок) летят над ней (lob.gd исключает свои баррикады). Обзор не закрывает —
-## мех выше неё. Ломается от урона врага или через «Длительность». Боты и крипы обходят (main._nav_boxes).
+## в бронещит в полный рост меха. Как стена: держит пули, лучи и рельсу (свои и чужие), закрывает обзор,
+## мехи и крипы не проходят. Свои гранаты (гранатомёт и снаряды абилок) летят над ней, чужие могут
+## перелететь по её настоящей высоте (lob.gd). Ломается от любого урона или через «Длительность».
+## Боты и крипы обходят (main._nav_boxes).
 ## Пока в месте постановки стоит мех, баррикада не твёрдая (иначе физика выкинет меха вверх), потом твердеет.
 
 const W := 5.0                   # ширина, единиц
-const H := 2.6                   # высота
+const H := 5.0                   # высота (на вид и для гранат); для пуль и обзора — как у стен, 30
 const D := 0.6                   # толщина
 
 var team := 0
@@ -16,7 +17,8 @@ var hp_max := 400.0
 var life := 25.0
 var hp := 400.0
 var dead := false
-var _shape: BoxShape3D
+var _shape: BoxShape3D           # столкновение (высокое, как у стен)
+var _check: BoxShape3D           # объём на вид — проверить, не стоит ли там мех
 var _vis: Node3D
 
 
@@ -27,10 +29,12 @@ func _ready() -> void:
 	collision_mask = 0
 	hp = hp_max
 	_shape = BoxShape3D.new()
-	_shape.size = Vector3(W, H, D)
+	_shape.size = Vector3(W, 30.0, D)
+	_check = BoxShape3D.new()
+	_check.size = Vector3(W, H, D)
 	var cs := CollisionShape3D.new()
 	cs.shape = _shape
-	cs.position.y = H * 0.5
+	cs.position.y = 15.0
 	add_child(cs)
 	_vis = Node3D.new()
 	_vis.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
@@ -82,6 +86,11 @@ func box() -> Array:
 	return [global_position.x, global_position.z, wx, H, wz]
 
 
+# объём на вид в своих осях (граната летит над ним или врезается)
+func local_box() -> AABB:
+	return AABB(Vector3(-W * 0.5, 0.0, -D * 0.5), Vector3(W, H, D))
+
+
 func get_hit_radius() -> float:
 	return D
 
@@ -94,11 +103,9 @@ func blast_distance(pos: Vector3) -> float:
 	return Vector2(dx, dz).length()
 
 
-func take_damage(amount: float, pos: Vector3, _dir: Vector3, _kind := "", src: Node = null) -> void:
+func take_damage(amount: float, _pos: Vector3, _dir: Vector3, _kind := "", _src: Node = null) -> void:
 	if dead or amount <= 0.0:
 		return
-	if src != null and is_instance_valid(src) and src.get("team") == team:
-		return          # свои по своей баррикаде не ломают
 	hp -= amount
 	if hp <= 0.0:
 		_break()
@@ -112,12 +119,13 @@ func _physics_process(delta: float) -> void:
 		_break()
 		return
 	if collision_layer == 0 and not _mech_inside():
-		collision_layer = 16      # как обломки: держит пули и мехов, обзор не закрывает
+		collision_layer = 1       # как стена: держит пули, мехов и обзор
+		_nav_changed()
 
 
 func _mech_inside() -> bool:
 	var q := PhysicsShapeQueryParameters3D.new()
-	q.shape = _shape
+	q.shape = _check
 	q.transform = global_transform * Transform3D(Basis(), Vector3(0, H * 0.5, 0))
 	q.collision_mask = 2 | 64
 	return not get_world_3d().direct_space_state.intersect_shape(q, 1).is_empty()

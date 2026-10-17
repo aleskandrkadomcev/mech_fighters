@@ -884,6 +884,8 @@ func _nav_boxes() -> Array:
 func obstacle_changed(area: Rect2) -> void:
 	if nav != null:
 		nav.refresh(area, _nav_boxes())
+	if vision != null:
+		vision.invalidate_static()
 
 
 func structures_left(team: int) -> int:

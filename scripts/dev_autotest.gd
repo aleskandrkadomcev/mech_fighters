@@ -50,6 +50,7 @@ var _lobtest := false            # --lobtest: ЭМИ и осадное оруд�
 var _spawntest := false         # --spawntest --drop --enemies=0 --allies=1: мех садится прямо на другого — никто не подпрыгивает
 var _proptest := false           # --proptest: кучка ящиков не мешает пройти, ломается от меха и от взрыва
 var _pingtest := false           # --pingtest: Alt+клик — обычная метка, Alt + зажатая ЛКМ — круговое меню, выбор по направлению мыши
+var _abil3test := false         # --abil3test: вторая пачка абилок и правки (баррикада-стена, толчок по дистанции, крипы)
 var _abil2test := false         # --abil2test: абилки 17.10.2026 по очереди (связка, дротик, ЭМИ, напалм, зонд, баррикада, дрон, оборона, якорь, волна, прыжок)
 var _dashtest := false           # --dashtest: рывок разгоняется за «Разгон рывка», а не мгновенно; дальность как без разгона
 var _statustest := false         # --statustest: шкала контроля над полоской (оглушение → ЭМИ → замедление) и статусы своего меха
@@ -186,6 +187,8 @@ func setup(main_node: Node3D, args: PackedStringArray) -> void:
 			_dashtest = true
 		elif a == "--abil2test":
 			_abil2test = true
+		elif a == "--abil3test":
+			_abil3test = true
 		elif a == "--pingtest":
 			_pingtest = true
 		elif a == "--ruintest":
@@ -288,6 +291,8 @@ func _process(_delta: float) -> void:
 		_run_dashtest()
 	if _abil2test:
 		_run_abil2test()
+	if _abil3test:
+		_run_abil3test()
 	if _pingtest:
 		_run_pingtest()
 	if _ruintest:
@@ -369,7 +374,7 @@ func _process(_delta: float) -> void:
 		var img := get_viewport().get_texture().get_image()
 		img.save_png(("%s/%s_f%04d.png" % [_shot_dir, _target, shot_f]) if _fxreel else ("%s/f%04d.png" % [_shot_dir, shot_f]))
 		_shots_left.erase(shot_f)
-		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and not _linktest and _mechexport == "" and not _gfxbench and not _cpubench and not _fancheck and not _aimtest and not _creeptest and not _radartest and not _ruintest and not _coredmg and not _slidetest and not _lobtest and not _spawntest and not _proptest and not _cdtest and not _statustest and not _dashtest and not _pingtest and not _abil2test:
+		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and not _linktest and _mechexport == "" and not _gfxbench and not _cpubench and not _fancheck and not _aimtest and not _creeptest and not _radartest and not _ruintest and not _coredmg and not _slidetest and not _lobtest and not _spawntest and not _proptest and not _cdtest and not _statustest and not _dashtest and not _pingtest and not _abil2test and not _abil3test:
 			get_tree().quit()
 
 
@@ -3500,6 +3505,7 @@ func _run_statustest() -> void:
 		_stage_creeps(1, 1, spot.x + 6.0, spot.z + 5.0)
 	if _frame == 20:
 		var e = get_meta("enemy")
+		Cfg.control_mass = m.stats["weight"]     # масса меха = базовая: длительности как написано
 		m.stun(1.5)
 		m.block_regen(3.0)
 		m.apply_slow(0.3, 4.5)
@@ -3767,7 +3773,7 @@ func _run_abil2test() -> void:
 			_abil2_cast(m, "barricade", e.global_position)
 		600:
 			var bs := get_tree().get_nodes_in_group("barricades")
-			var ok2: bool = bs.size() == 1 and bs[0].collision_layer == 16 and not main.nav.is_free(bs[0].global_position)
+			var ok2: bool = bs.size() == 1 and bs[0].collision_layer == 1 and not main.nav.is_free(bs[0].global_position)
 			_abil2_check("баррикада стоит, твёрдая, боты обходят", ok2, "")
 		610:
 			m.set_build({"mech": "mech_fortress", "core": "core_combat", "weapons": ["autocannon", "autocannon"],
@@ -3799,8 +3805,8 @@ func _run_abil2test() -> void:
 		1010:
 			_abil2_cast(m, "repulse", m.global_position)
 		1012:
-			# сразу после удара: скорость от меха (дальше враг тут упирается в стену карты)
-			_abil2_check("волна отбросила", e.velocity.x > 20.0, "скорость %.0f ед/с от меха (база 30 × контроль %.2f)" % [e.velocity.x, e.control_k()])
+			# сразу после удара: летит от меха (дальше враг тут упирается в стену карты)
+			_abil2_check("волна отбросила", e._shove_t > 0.05 and e._shove_v.x > 20.0, "летит %.0f ед/с ещё %.2f с" % [e._shove_v.x, e._shove_t])
 		1060:
 			_abil2_put(e, spot + Vector3(24, 0.05, -10))
 			set_meta("hp", e.hp)
@@ -3814,3 +3820,161 @@ func _run_abil2test() -> void:
 			var f: int = get_meta("fails", 0)
 			print("[ABIL2] итог: %s" % ("ВСЁ ВЕРНО" if f == 0 else "ошибок %d" % f))
 			get_tree().quit()
+
+
+# ------------------------------------------------------------------
+#  Вторая пачка абилок (--abil3test --enemies=0 --allies=0): купол держит вражескую пулю, турель
+#  стреляет, шар доезжает и взрывается, метка и болванка, перезапуск снимает оглушение, матрица,
+#  форсаж, подача, перископ; баррикада закрывает обзор и ломается от своих; волна отбрасывает меха
+#  по массе и крипа на полную дистанцию; якорь тянет крипа
+# ------------------------------------------------------------------
+
+func _run_abil3test() -> void:
+	var m = main.mech
+	var spot := Vector3(-46, 0.05, -30)
+	if _frame == 5:
+		Cfg.creeps_enabled = 0
+		Cfg.bot_enemies = 1
+		Cfg.cam_distance = 40.0
+		m.set_build({"mech": "mech_fortress", "core": "core_combat", "weapons": ["autocannon", "autocannon"],
+			"modules": ["mod_dome", "mod_turret", "mod_roller", "mod_marker", "mod_slug", "mod_purge", "mod_matrix"]})
+		m.shield_left = 0.0
+		m.global_position = spot
+		m.snap_interpolation(m)
+		m.demo = {"move": Vector2.ZERO, "fire": false, "aim": spot + Vector3(14, 1.5, 0)}
+		main.cam._started = false
+		var e = _stage_mech(main._spawn_bot(1), "mech_assault", ["autocannon", "laser"], spot + Vector3(14, 0.05, 0))
+		e.demo["fire"] = false
+		e.demo["aim"] = spot
+		set_meta("enemy", e)
+		for st in get_tree().get_nodes_in_group("structures"):
+			st.set_physics_process(false)
+		_stage_creeps(1, 1, spot.x - 6.0, spot.z + 12.0)
+	if _frame < 20:
+		return
+	var e = get_meta("enemy")
+	match _frame:
+		20:
+			_abil2_cast(m, "dome", m.global_position)
+			set_meta("hp", m.hp)
+		30:
+			var pr = load("res://scripts/projectile.gd").new()
+			var o: Vector3 = e.global_position + Vector3.UP * 2.0
+			pr.setup(o, (m.global_position + Vector3.UP * 2.0 - o).normalized() * 70.0, 50.0, 40.0, e)
+			main.add_child(pr)
+		70:
+			var domes := get_tree().get_nodes_in_group("gadgets")
+			var dhp: float = domes[0].hp if domes.size() > 0 else -1.0
+			_abil2_check("купол держит вражескую пулю", domes.size() == 1 and dhp < 500.0 and m.hp >= float(get_meta("hp")), "прочность купола %.0f, HP меха %.0f" % [dhp, m.hp])
+		80:
+			for d in get_tree().get_nodes_in_group("gadgets"):
+				d._end()
+			set_meta("hp", e.hp + _creeps_hp())
+			_abil2_cast(m, "turret", spot + Vector3(6, 0, 5))
+		260:
+			var tu := 0
+			for g in get_tree().get_nodes_in_group("gadgets"):
+				if g is MiniTurret:
+					tu += 1
+			var now: float = e.hp + _creeps_hp()
+			_abil2_check("турель стоит и стреляет", tu == 1 and now < float(get_meta("hp")) - 10.0, "HP врагов (мех и крип) %.0f → %.0f" % [float(get_meta("hp")), now])
+			for g in get_tree().get_nodes_in_group("gadgets"):
+				if g is MiniTurret:
+					g._break(g.global_position)
+		270:
+			e.hp = e.max_hp()
+			set_meta("hp", e.hp)
+			_abil2_cast(m, "roller", e.global_position)
+		400:
+			var rl := 0
+			for g in get_tree().get_nodes_in_group("gadgets"):
+				if g is Roller:
+					rl += 1
+			_abil2_check("шар доехал и взорвался", rl == 0 and e.hp < float(get_meta("hp")) - 40.0, "урон %.0f" % (float(get_meta("hp")) - e.hp))
+		410:
+			e.hp = e.max_hp()
+			_abil2_cast(m, "marker", e.global_position)
+		450:
+			var h0: float = e.hp
+			e.take_damage(100.0, e.global_position, Vector3.ZERO, "", m)
+			_abil2_check("метка: урон по цели больше", e.marked_left > 0.0 and absf(h0 - e.hp - 125.0) < 1.0, "100 урона → %.0f" % (h0 - e.hp))
+		470:
+			e.hp = e.max_hp()
+			set_meta("hp", e.hp)
+			_abil2_cast(m, "slug", e.global_position)
+		540:
+			_abil2_check("болванка: урон и оглушение", e.stun_left > 0.0 and e.hp < float(get_meta("hp")) - 30.0, "урон %.0f, оглушён %.2f с" % [float(get_meta("hp")) - e.hp, e.stun_left])
+		550:
+			m.stun(3.0)
+			var ok: bool = m.is_stunned() and m.can_cast(m.ability_index("purge"))
+			_abil2_cast(m, "purge", m.global_position)
+			m.stun(2.0)
+			m.root(2.0)
+			_abil2_check("перезапуск снял оглушение и не берёт новое", ok and not m.is_stunned() and m.root_left == 0.0 and m.purge_left > 0.0, "")
+		570:
+			_abil2_cast(m, "matrix", m.global_position)
+			var h1: float = m.hp
+			m.take_damage(100.0, m.global_position, Vector3.ZERO, "", e)
+			_abil2_check("матрица режет урон", absf(h1 - m.hp - 60.0) < 1.0, "100 урона → %.0f" % (h1 - m.hp))
+		580:
+			m.set_build({"mech": "mech_fortress", "core": "core_combat", "weapons": ["autocannon", "autocannon"],
+				"modules": ["mod_overdrive", "mod_rapid", "mod_periscope", "mod_repulse", "mod_gravity", "mod_barricade", "mod_jump"]})
+		590:
+			var w0: float = m.walk_speed()
+			_abil2_cast(m, "overdrive", m.global_position)
+			_abil2_cast(m, "rapid", m.global_position)
+			_abil2_cast(m, "periscope", m.global_position)
+			var ks: float = m.walk_speed() / w0
+			var kv: float = m.vision_r() / m.stats["vision"]
+			_abil2_check("форсаж, подача, перископ", absf(ks - 1.35) < 0.01 and absf(m.fire_mult() - 1.5) < 0.01 and absf(kv - 1.6) < 0.01, "скорость ×%.2f, стрельба ×%.2f, обзор ×%.2f" % [ks, m.fire_mult(), kv])
+		620:
+			_abil2_cast(m, "barricade", e.global_position)
+		660:
+			var bs := get_tree().get_nodes_in_group("barricades")
+			var ok2: bool = bs.size() == 1 and bs[0].collision_layer == 1 and not main.vision._los(m.global_position, e.global_position)
+			_abil2_check("баррикада — стена: закрывает обзор", ok2, "")
+			if bs.size() == 1:
+				set_meta("bhp", bs[0].hp)
+				var pr2 = load("res://scripts/projectile.gd").new()
+				var o2: Vector3 = m.global_position + Vector3.UP * 3.0
+				pr2.setup(o2, Vector3(1, 0, 0) * 70.0, 30.0, 40.0, m)
+				main.add_child(pr2)
+		700:
+			var bs2 := get_tree().get_nodes_in_group("barricades")
+			var bhp: float = bs2[0].hp if bs2.size() > 0 else -1.0
+			_abil2_check("своя пуля бьёт свою баррикаду", bs2.size() == 1 and bhp < float(get_meta("bhp")), "прочность %.0f" % bhp)
+			for b in bs2:
+				b._break()
+		720:
+			_abil2_put(e, spot + Vector3(5, 0.05, 0))
+			for c in get_tree().get_nodes_in_group("creeps"):
+				c.global_position = spot + Vector3(-5, 0.05, 0)
+		726:
+			_abil2_cast(m, "repulse", m.global_position)
+			var want: float = 8.0 * e.control_k()
+			var c0 = get_tree().get_nodes_in_group("creeps")[0]
+			var ok3: bool = absf(e._shove_t * 30.0 - want) < 0.3 and absf(c0._knock.length() - sqrt(60.0 * 8.0)) < 0.5
+			_abil2_check("волна: мех по массе, крип на полную", ok3, "мех %.0f т: %.1f ед (ждём %.1f), крип: скорость %.1f" % [e.stats["weight"], e._shove_t * 30.0, want, c0._knock.length()])
+		740:
+			_abil2_put(e, spot + Vector3(14, 0.05, 0))
+			var c1 = get_tree().get_nodes_in_group("creeps")[0]
+			c1.global_position = spot + Vector3(10, 0.05, 0)
+			set_meta("cpos", c1.global_position)
+			_abil2_cast(m, "gravity", spot + Vector3(4, 0, 0))
+		800:
+			var c2 = get_tree().get_nodes_in_group("creeps")[0]
+			var cp: Vector3 = get_meta("cpos")
+			var d0: float = Vector2(cp.x - spot.x - 4, cp.z - spot.z).length()
+			var d1: float = Vector2(c2.global_position.x - spot.x - 4, c2.global_position.z - spot.z).length()
+			_abil2_check("якорь тянет крипа", d1 < d0 - 1.5, "было %.1f, стало %.1f" % [d0, d1])
+		830:
+			var f: int = get_meta("fails", 0)
+			print("[ABIL2] итог: %s" % ("ВСЁ ВЕРНО" if f == 0 else "ошибок %d" % f))
+			get_tree().quit()
+
+
+func _creeps_hp() -> float:
+	var t := 0.0
+	for c in get_tree().get_nodes_in_group("creeps"):
+		t += c.hp
+	return t

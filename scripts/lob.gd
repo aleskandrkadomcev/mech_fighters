@@ -98,10 +98,9 @@ func _ready() -> void:
 		# стены и скалы проверяем сами, по настоящему объёму (см. _cast)
 		for b in get_tree().get_nodes_in_group("solid_tops"):
 			_exclude.append(b.get_rid())
-		# свои баррикады свои гранаты перелетают
+		# баррикады проверяем сами (по повёрнутой коробке до верха), свои гранаты их перелетают
 		for b in get_tree().get_nodes_in_group("barricades"):
-			if b.team == team:
-				_exclude.append(b.get_rid())
+			_exclude.append(b.get_rid())
 	var big: bool = _p.get("kind", "") == "explosive" and _p.get("radius", 4.0) > 5.0
 	var emp: bool = _p.get("kind", "") == "emp"
 	_body = MeshInstance3D.new()
@@ -230,6 +229,14 @@ func _cast(from: Vector3, to: Vector3) -> Dictionary:
 		if t >= 0.0 and t < best_t:
 			best_t = t
 			best = {"position": from + seg * t, "collider": b}
+	for b in get_tree().get_nodes_in_group("barricades"):
+		if b.team == team:
+			continue
+		var inv: Transform3D = b.global_transform.affine_inverse()
+		var t2 := _seg_box(inv * from, inv.basis * seg, b.local_box())
+		if t2 >= 0.0 and t2 < best_t:
+			best_t = t2
+			best = {"position": from + seg * t2, "collider": b}
 	return best
 
 
@@ -289,7 +296,7 @@ func _land() -> void:
 				n.drain_energy(_p["burn"])
 			if _p.get("damage", 0.0) > 0.0 and n.has_method("take_damage"):
 				n.take_damage(_p["damage"], n.global_position + Vector3.UP * 2.0, d.normalized(), "", src)
-	elif _p.get("kind", "") in ["napalm", "probe", "gravity"]:
+	elif _p.get("kind", "") in ["napalm", "probe", "gravity", "turret"]:
 		_spawn_device(Vector3(_to.x, 0.0, _to.z), src)
 	else:
 		Fx.explosion(pos, radius)
@@ -328,6 +335,12 @@ func _spawn_device(at: Vector3, src: Node) -> void:
 			gw.life = _p.get("duration", 2.5)
 			gw.push = _p.get("push", 6.0)
 			n = gw
+		"turret":
+			var tu := MiniTurret.new()
+			tu.team = team
+			tu.owner_mech = src
+			tu.p = _p.get("params", {})
+			n = tu
 	n.position = at
 	get_tree().current_scene.add_child(n)
 	n.reset_physics_interpolation()

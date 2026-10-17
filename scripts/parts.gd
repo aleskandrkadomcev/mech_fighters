@@ -194,7 +194,30 @@ const DATA := {
 		"weight": 4.0, "energy": 10.0, "cost": 35.0, "cooldown": 16.0, "speed": 26.0, "range": 30.0, "radius": 9.0,
 		"duration": 2.5, "push": 6.0},
 	"mod_repulse": {"slot": "module", "ability": "repulse", "name": "Ударная волна", "short": "Толчок",
-		"weight": 4.0, "energy": 10.0, "cost": 30.0, "cooldown": 10.0, "radius": 8.0, "push": 30.0, "damage": 10.0},
+		"weight": 4.0, "energy": 10.0, "cost": 30.0, "cooldown": 10.0, "radius": 8.0, "shove": 8.0, "damage": 10.0},
+	"mod_dome": {"slot": "module", "ability": "dome", "name": "Купольный щит", "short": "Купол",
+		"weight": 6.0, "energy": 10.0, "cost": 40.0, "cooldown": 22.0, "radius": 6.5, "hp": 500.0, "duration": 6.0},
+	"mod_turret": {"slot": "module", "ability": "turret", "name": "Мини-турель", "short": "Турель",
+		"weight": 5.0, "energy": 10.0, "cost": 35.0, "cooldown": 20.0, "speed": 24.0, "range": 20.0, "radius": 26.0,
+		"hp": 150.0, "duration": 15.0, "damage": 6.0, "fire_rate": 4.0},
+	"mod_roller": {"slot": "module", "ability": "roller", "name": "Шар-самоубийца", "short": "Шар",
+		"weight": 4.0, "energy": 10.0, "cost": 30.0, "cooldown": 14.0, "speed": 12.0, "range": 40.0, "hp": 50.0,
+		"damage": 90.0, "radius": 5.0, "edge_damage": 0.4},
+	"mod_marker": {"slot": "module", "ability": "marker", "name": "Дротик-целеуказатель", "short": "Метка",
+		"weight": 2.0, "energy": 5.0, "cost": 20.0, "cooldown": 12.0, "speed": 45.0, "range": 32.0, "duration": 6.0, "boost": 0.25},
+	"mod_slug": {"slot": "module", "ability": "slug", "name": "Тяжёлая болванка", "short": "Болванка",
+		"weight": 6.0, "energy": 10.0, "cost": 35.0, "cooldown": 14.0, "speed": 60.0, "range": 40.0, "delay": 0.4,
+		"damage": 70.0, "stun_time": 1.2},
+	"mod_purge": {"slot": "module", "ability": "purge", "name": "Аварийный перезапуск", "short": "Перезапуск",
+		"weight": 3.0, "energy": 10.0, "cost": 30.0, "cooldown": 30.0, "duration": 2.5},
+	"mod_matrix": {"slot": "module", "ability": "matrix", "name": "Матрица брони", "short": "Матрица",
+		"weight": 4.0, "energy": 10.0, "cost": 30.0, "cooldown": 18.0, "duration": 4.0, "reduce": 0.4},
+	"mod_overdrive": {"slot": "module", "ability": "overdrive", "name": "Форсаж", "short": "Форсаж",
+		"weight": 3.0, "energy": 10.0, "cost": 25.0, "cooldown": 16.0, "duration": 4.0, "boost": 0.35},
+	"mod_rapid": {"slot": "module", "ability": "rapid", "name": "Форсированная подача", "short": "Подача",
+		"weight": 3.0, "energy": 10.0, "cost": 30.0, "cooldown": 18.0, "duration": 5.0, "boost": 0.5},
+	"mod_periscope": {"slot": "module", "ability": "periscope", "name": "Перископ", "short": "Перископ",
+		"weight": 2.0, "energy": 5.0, "cost": 20.0, "cooldown": 20.0, "duration": 8.0, "boost": 0.6, "omni": 10.0},
 
 	# ---------------- ПОСТРОЙКИ (не для ангара: турели и штаб на карте) ----------------
 	"turret_t1": {"slot": "structure", "name": "Турель 1 уровня (у центра)",
@@ -331,6 +354,8 @@ const FIELDS := {
 	"burn": ["Сжигает энергию", 0, 300, 1, "энергии у каждого задетого врага (меха базовой массы, см. «Контроль»)"],
 	"push": ["Сила", 0, 80, 0.5, "м/с: как быстро тянет или толкает меха базовой массы; тяжелее — слабее"],
 	"reduce": ["Снижение урона", 0, 0.95, 0.05, "доля урона, которую режет, пока включено"],
+	"shove": ["Дистанция толчка", 0, 40, 0.5, "метров: на сколько отлетает мех базовой массы (F2 → «Контроль»), тяжелее — ближе; крипы — ровно на столько"],
+	"boost": ["Усиление", 0, 2, 0.05, "доля: форсаж — к скорости, подача — к скорострельности, перископ — к обзору, метка — к урону по цели"],
 	"emp_cooldown": ["ЭМИ-граната: перезарядка", 1, 30, 0.5, "секунд"],
 	"emp_range": ["ЭМИ-граната: дальность", 5, 80, 1, "метров"],
 	"emp_radius": ["ЭМИ-граната: радиус", 1, 15, 0.5, "метров"],
@@ -374,7 +399,7 @@ const WEAPON_STATS := ["ammo", "fire_rate", "damage", "bullet_speed", "range", "
 	"radius", "edge_damage", "charge_time", "pierce", "spin_up"]
 const ABILITY_STATS := ["cost", "cooldown", "count", "salvo_delay", "speed", "range", "damage", "radius",
 	"edge_damage", "scatter", "stun_time", "no_regen_time",
-	"duration", "break_on_fire", "charges", "trigger_radius", "arm_time", "slow", "slow_time", "heal_per_sec", "delay", "upkeep", "energy_per_damage", "absorb", "dps", "burn", "push", "reduce", "omni", "hp"]
+	"duration", "break_on_fire", "charges", "trigger_radius", "arm_time", "slow", "slow_time", "heal_per_sec", "delay", "upkeep", "energy_per_damage", "absorb", "dps", "burn", "push", "reduce", "omni", "hp", "shove", "boost", "fire_rate"]
 # значения, если у меха такого числа нет
 const MECH_DEFAULTS := {"dash_charges": 1.0, "moving_spread": 1.0, "energy_regen_mult": 1.0, "cd_mult": 1.0, "brace_time": 0.6,
 	"regen_delay": 4.0, "legs_scale": 1.0, "hull_scale": 1.0, "stance": 1.0}
@@ -651,7 +676,27 @@ func describe(id: String) -> String:
 				"gravity":
 					out.append("тянет врагов %s с, радиус %s м" % [_n(v(id, "duration")), _m(v(id, "radius"))])
 				"repulse":
-					out.append("отбрасывает врагов, радиус %s м" % _m(v(id, "radius")))
+					out.append("отбрасывает врагов на %s м, радиус %s м" % [_m(v(id, "shove")), _m(v(id, "radius"))])
+				"dome":
+					out.append("купол %s м, %s HP на %s с" % [_m(v(id, "radius")), _n(v(id, "hp")), _n(v(id, "duration"))])
+				"turret":
+					out.append("турель %s урона × %s/с на %s с" % [_n(v(id, "damage")), _n(v(id, "fire_rate")), _n(v(id, "duration"))])
+				"roller":
+					out.append("катится к врагам, взрыв %s урона" % _n(v(id, "damage")))
+				"marker":
+					out.append("цель получает %s урона %s с" % [_pct(v(id, "boost")), _n(v(id, "duration"))])
+				"slug":
+					out.append("%s урона + оглушение %s с" % [_n(v(id, "damage")), _n(v(id, "stun_time"))])
+				"purge":
+					out.append("снимает контроль, %s с не берёт новый" % _n(v(id, "duration")))
+				"matrix":
+					out.append("урон %s на %s с" % [_pct(-v(id, "reduce")), _n(v(id, "duration"))])
+				"overdrive":
+					out.append("скорость %s на %s с" % [_pct(v(id, "boost")), _n(v(id, "duration"))])
+				"rapid":
+					out.append("скорострельность %s на %s с" % [_pct(v(id, "boost")), _n(v(id, "duration"))])
+				"periscope":
+					out.append("обзор %s, омни +%s м на %s с" % [_pct(v(id, "boost")), _m(v(id, "omni")), _n(v(id, "duration"))])
 			if d.get("ability", "") in ["shield", "stance"]:
 				out.append("вкл. %s эн., кд %s с после выкл." % [_n(v(id, "cost")), _n(v(id, "cooldown"))])
 			elif d.has("ability"):
