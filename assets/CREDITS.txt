@@ -3,3 +3,24 @@
 Земля: Poly Haven (CC0 1.0), polyhaven.com: aerial_grass_rock, aerial_ground_rock, aerial_mud_1, dirt_aerial_02, aerial_rocks_02 (assets/textures/ground_*; уменьшены до 1K, затенение впечено в цвет).
 Модели машин: Kenney Car Kit (kenney.nl, CC0 1.0) — sedan, suv, delivery, truck-flat, hatchback-sports (брошенная техника на карте, 16.10.2026).
 Значки меток (assets/ui/ping_*.png): свои, нарисованы скриптом tools/make_ping_icons.py — 16.10.2026.
+
+=== Бесплатные ассеты, скачаны 18.10.2026 (в игре пока не используются) ===
+ЗВУКИ (assets/sounds):
+- kenney_sci-fi-sounds, kenney_impact-sounds, kenney_interface-sounds, kenney_ui-audio, kenney_digital-audio — Kenney (kenney.nl), CC0 1.0.
+- oga_free_firearms — «The Free Firearm Sound Library» (opengameart.org/content/the-free-firearm-sound-library), CC0. Пересжаты в ogg 48 кГц, тишина в конце обрезана, имена по описанию: оружие_очередь_дистанция.
+- oga_gunshots_tabasco — «gunshot sounds», Tabasco (opengameart.org/content/gunshot-sounds), CC0.
+- oga_impacts — «Impacts» (opengameart.org/content/impactsgunsfx), CC0.
+- oga_50_scifi_sfx — «50 CC0 Sci-Fi SFX», rubberduck (opengameart.org/content/50-cc0-sci-fi-sfx), CC0.
+- oga_100_cc0_sfx — «100 CC0 SFX», rubberduck (opengameart.org/content/100-cc0-sfx), CC0.
+- oga_misc/qubodup_synthetic_explosion — «Synthesized explosion», qubodup (opengameart.org/content/synthesized-explosion), CC0.
+- jc_scifi_vol1 — «JC Sounds Sci-Fi Pack Vol 1», автор JC Sounds (opengameart.org/content/jc-sounds-sci-fi-pack-vol-1), CC-BY 4.0 — В ТИТРАХ ИГРЫ УКАЗАТЬ: «Sound effects by JC Sounds (CC-BY 4.0)».
+ЭФФЕКТЫ (assets/fx_packs/godotshaders), godotshaders.com, автор и лицензия — в первой строке каждого файла:
+- scifi_shield (flakmonkey, CC0), shield_intersection (ramjing, CC0; поправлен под GL Compatibility), shield_multiple_impacts (zestfulfibre, CC0), energy_shield_impact (dan, MIT), bubble_forcefield (ironsidedev, CC0), scifi_hologram (kubikpixel, MIT; переведён на Godot 4), hologram_scanlines (pixeldreamerstudio, MIT), lightning_3d (loop_box, CC0), lightning_ball (thelastflapjack, CC0), dissolve_glowing_edge (pixeldreamerstudio, MIT), jet_thruster (madserb, CC0), rising_energy_wave (madserb, CC0).
+  MIT: при выпуске игры положить в титры/файл лицензий текст MIT с именами авторов (kubikpixel, pixeldreamerstudio, dan).
+ШРИФТЫ (assets/fonts), Google Fonts (github.com/google/fonts), SIL OFL 1.1, у каждого рядом OFL.txt, у всех есть кириллица:
+- Exo 2 (Natanael Gama), Russo One (Jovanny Lemonad), Jura (Daniel Johnson), Play (Jonas Hecksher), Tektur (Adam Jagosz), Oswald (Vernon Adams и др.).
+ЗНАЧКИ (assets/ui):
+- kenney_game_icons — Kenney Game Icons (kenney.nl), CC0.
+- game_icons_net — game-icons.net, ~4100 значков SVG, CC-BY 3.0 (немногие CC0 — см. license.txt в папке). Авторы (папки внутри): andymeneely, aussiesim, carl-olsen, caro-asercion, cathelineau, catsu, darkzaitzev, delapouite, faithtoken, felbrigg, generalace135, guard13007, heavenly-dog, irongamer, john-colburn, john-redman, kier-heyl, lorc, lord-berandas, lucasms, pepijn-poolman, pierre-leducq, priorblue, quoting, rihlsul, sbed, seregacthtuf, skoll, sparker, spencerdub, starseeker, various-artists, viscious-speed, willdabeast, zajkonur, zeromancer. В ТИТРАХ: «Icons by game-icons.net authors (CC-BY 3.0)». В папке .gdignore — Godot её не импортирует; нужный значок копировать в assets/ui/hud.
+3D-МОДЕЛИ (assets/models), Kenney (kenney.nl), CC0 1.0, только GLB/glTF:
+- kenney_blaster_kit (пушки), kenney_tower_defense_kit (турели), kenney_space_kit (турели, генераторы, тарелки, камни), kenney_modular_space_kit, kenney_city_kit_industrial (цистерны, контейнеры, трубы). В папках .gdignore — нужную модель копировать в assets/props.
