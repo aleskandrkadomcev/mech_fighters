@@ -131,6 +131,10 @@ var _mark_k := 0.0
 var _shove_v := Vector3.ZERO    # толчок ударной волны: скорость и сколько ещё секунд
 var _shove_t := 0.0
 var _matrix_vis: MeshInstance3D
+var _ip_yaw := 0.0              # значения прошлого тика: прицел на земле рисуется каждый кадр и плавно
+var _ip_aim := Vector3.ZERO     # переходит от прошлого тика к текущему (как движок сглаживает модель меха)
+var _ip_ground := Vector3.ZERO
+var _ip_spread := [0.0, 0.0]
 const SHOVE_SPEED := 30.0       # единиц/с, с которой отлетает мех от ударной волны
 const JUMP_UP := 0.35           # секунд взлёта на двигателях до ухода из кадра
 const PROBE_ARC := 6.0          # на сколько единиц зонд в полёте выше точки броска (перелетает стены)
@@ -612,6 +616,26 @@ func torso_forward() -> Vector3:
 	return Vector3(-sin(torso_yaw), 0, -cos(torso_yaw))
 
 
+# то же для рисования между тиками (прицел на земле): плавно от прошлого тика к текущему
+func torso_forward_smooth() -> Vector3:
+	var yaw := lerp_angle(_ip_yaw, torso_yaw, Engine.get_physics_interpolation_fraction())
+	return Vector3(-sin(yaw), 0, -cos(yaw))
+
+
+func aim_point_smooth() -> Vector3:
+	return _ip_aim.lerp(aim_point, Engine.get_physics_interpolation_fraction())
+
+
+func aim_ground_smooth() -> Vector3:
+	return _ip_ground.lerp(aim_ground, Engine.get_physics_interpolation_fraction())
+
+
+func spread_smooth(i: int) -> float:
+	if i >= 2:
+		return weapon_spread_deg(i)
+	return lerpf(_ip_spread[i], weapon_spread_deg(i), Engine.get_physics_interpolation_fraction())
+
+
 func aim_distance() -> float:
 	var d := aim_point - global_position
 	d.y = 0
@@ -679,6 +703,11 @@ func press_ability(index: int) -> void:
 func _physics_process(delta: float) -> void:
 	if dead:
 		return
+	_ip_yaw = torso_yaw
+	_ip_aim = aim_point
+	_ip_ground = aim_ground
+	for i in mini(weapons.size(), 2):
+		_ip_spread[i] = weapon_spread_deg(i)
 	# числа деталей поменяли в панели F2: пересчитываемся на лету
 	if _parts_version != Parts.version:
 		_apply_build()

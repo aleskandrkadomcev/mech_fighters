@@ -28,20 +28,24 @@ func _process(_delta: float) -> void:
 	_im.clear_surfaces()
 	if mech == null or mech.dead:
 		return
-	var y := maxf(mech.aim_point.y, 0.06)
+	# всё, что считается на тиках (поворот корпуса, точка прицела, разброс), берём сглаженным между
+	# тиками — иначе прицел на земле двигается рывками, 30 раз в секунду
+	var aim: Vector3 = mech.aim_point_smooth()
+	var y := maxf(aim.y, 0.06)
 	var origin: Vector3 = mech.get_global_transform_interpolated().origin
 	origin.y = y
-	var fwd: Vector3 = mech.torso_forward()
-	var dist: float = maxf(mech.aim_distance(), mech.GUN_MIN_DIST)
+	var fwd: Vector3 = mech.torso_forward_smooth()
+	var dist: float = maxf(maxf(Vector2(aim.x - origin.x, aim.z - origin.z).length(), 4.0), mech.GUN_MIN_DIST)
 	var center := origin + fwd * dist
-	var spread: float = deg_to_rad(mech.get_spread_deg())
+	var spread: float = 0.0
 
 	_im.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
 	# по кольцу на каждую пушку: у разных пушек разный разброс
 	var col := Color(1, 1, 1, 0.9)
 	for i in mech.weapons.size():
 		var w: Dictionary = mech.weapons[i]
-		var sd: float = mech.weapon_spread_deg(i)
+		var sd: float = mech.spread_smooth(i)
+		spread = maxf(spread, deg_to_rad(sd))
 		var radius := maxf(tan(deg_to_rad(sd)) * dist, 0.28)
 		# цвет: белый когда точно, оранжевый когда разброс большой
 		var k := clampf((sd - w["spread_stand"]) / maxf(w["spread_run"] - w["spread_stand"], 0.1), 0.0, 1.0)
@@ -60,7 +64,8 @@ func _process(_delta: float) -> void:
 				_arc(center, 1.1 + i * 0.25, 0.12, k, Color(0.5, 0.9, 1.0, 0.95))
 		elif mech.weapons[i]["type"] == "lob":
 			# гранатомёт: куда на земле полетит граната (не дальше его дальности)
-			var dl := minf(maxf(mech.aim_ground_distance(), mech.GUN_MIN_DIST), mech.w_range(i))
+			var ag: Vector3 = mech.aim_ground_smooth()
+			var dl := minf(maxf(Vector2(ag.x - origin.x, ag.z - origin.z).length(), mech.GUN_MIN_DIST), mech.w_range(i))
 			_ring(Vector3(origin.x, 0.06, origin.z) + fwd * dl, 0.5, 0.06, Color(1.0, 0.7, 0.3, 0.6))
 	# края конуса разброса
 	var faint := Color(col.r, col.g, col.b, 0.22)
@@ -68,7 +73,7 @@ func _process(_delta: float) -> void:
 		var d := fwd.rotated(Vector3.UP, spread * sgn)
 		_line(origin + d * 3.2, origin + d * dist, 0.05, faint)
 	# курсор, если корпус ещё не довернул
-	var cur: Vector3 = mech.aim_point
+	var cur: Vector3 = aim
 	cur.y = y
 	if cur.distance_to(center) > 0.6:
 		_ring(cur, 0.16, 0.06, Color(1, 1, 1, 0.6))

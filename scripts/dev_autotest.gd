@@ -4025,6 +4025,14 @@ func _run_camtest() -> void:
 	if t >= 0.3:
 		var xs: Array = get_meta("xs")
 		xs.append(cam.global_position.x)
+		# прицел на земле: край конуса разброса на 10 ед. — по тиковым числам (как было) и сглаженным (сейчас)
+		var o: Vector3 = m.get_global_transform_interpolated().origin
+		var ch_old: Array = get_meta("ch_old", [])
+		ch_old.append((o + m.torso_forward() * 10.0).x)
+		set_meta("ch_old", ch_old)
+		var ch_new: Array = get_meta("ch_new", [])
+		ch_new.append((o + m.torso_forward_smooth() * 10.0).x)
+		set_meta("ch_new", ch_new)
 	if t >= CAM_PASS_TIME:
 		var xs2: Array = get_meta("xs")
 		var d1 := 0.0
@@ -4032,10 +4040,22 @@ func _run_camtest() -> void:
 		for k in range(1, xs2.size() - 1):
 			d1 += absf(xs2[k + 1] - xs2[k])
 			d2 += absf(xs2[k + 1] - 2.0 * xs2[k] + xs2[k - 1])
-		print("[CAM] %s: кадров %d, рывки %.1f%%" % [CAM_PASSES[pi][1], xs2.size(), d2 / maxf(d1, 0.0001) * 100.0])
+		print("[CAM] %s: кадров %d, рывки %.1f%%; прицел на земле: по тикам %.1f%%, сглаженный %.1f%%" % [CAM_PASSES[pi][1], xs2.size(), d2 / maxf(d1, 0.0001) * 100.0, _jerk(get_meta("ch_old", [])), _jerk(get_meta("ch_new", []))])
 		set_meta("xs", [])
+		set_meta("ch_old", [])
+		set_meta("ch_new", [])
 		set_meta("t", -0.5)
 		set_meta("pass", pi + 1)
 		if pi + 1 >= CAM_PASSES.size():
 			print("[CAM] done, кадров/с ~%d" % Engine.get_frames_per_second())
 			get_tree().quit()
+
+
+# насколько движение скачет от кадра к кадру: вторая разность / первая (меньше — плавнее)
+func _jerk(a: Array) -> float:
+	var d1 := 0.0
+	var d2 := 0.0
+	for k in range(1, a.size() - 1):
+		d1 += absf(a[k + 1] - a[k])
+		d2 += absf(a[k + 1] - 2.0 * a[k] + a[k - 1])
+	return d2 / maxf(d1, 0.0001) * 100.0
