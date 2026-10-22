@@ -7,11 +7,16 @@ extends Node
 ##   mode        "pvp" = бой мехов без баз, турелей и крипов (по счёту убийств); нет поля = моба
 ##   size        [ширина, глубина]
 ##   spawns      [x, z, команда]                       точки появления (только для PvP)
-##   covers      [x, z, ширина, высота, глубина, вид]   вид: wall (стена), barrier (барьер), rock (скала)
-##   structures  [деталь, команда, x, z, линия]         деталь: turret_t1/t2/t3, hq; линия: top/mid/bot/base
+##   covers      [x, z, ширина, высота, глубина, вид, поворот]   вид: wall (стена), barrier (барьер), rock (скала);
+##                                                     поворот в градусах вокруг центра (можно не писать = 0)
+##   structures  [деталь, команда, x, z]               деталь: turret_t1/t2/t3, hq. Линию турели игра находит сама
+##                                                     (ближайшая дорога), старое 5-е поле «линия» не используется
 ##   pois        [x, z, вид]                           вид: regen (Реактор), damage (Арсенал), radar (Радар), dock (Ремонтный док)
 ##   crates      [x, z]                                куда падают ящики
-##   lanepoints  [x, z, линия]                         через какие точки идёт линия (кроме турелей)
+##   lanepoints  [x, z, линия]                         дороги: линия top/mid/bot идёт от своего штаба через свои точки
+##                                                     к вражескому штабу (турели на путь не влияют)
+##   version     2 = дороги только по точкам (в старых картах точки дорог были ещё и на турелях —
+##               при чтении они переносятся в lanepoints сами)
 ##   decor       [вид, x, z, поворот]                  низкие постройки (контейнеры, генераторы...)
 ##   lamps       [x, z]                                фонари
 ##   pylons      [[x, z], [x, z]...]                   цепочка мачт с проводами
@@ -74,16 +79,48 @@ func normalize(d: Dictionary) -> Dictionary:
 		out["name"] = "Без названия"
 	if not out.has("size") or out["size"].size() < 2:
 		out["size"] = [240, 140]
-	for k in ["covers", "structures", "pois", "crates", "lanepoints", "decor", "lamps", "pylons", "targets", "walkers"]:
+	for k in ["covers", "structures", "pois", "crates", "lanepoints", "decor", "lamps", "pylons", "targets", "walkers", "spawns"]:
 		if not out.has(k) or not (out[k] is Array):
 			out[k] = []
 	for s in out["structures"]:
 		s[1] = int(s[1])
+	# старая карта: дорога шла ещё и через турели своей линии. Теперь дороги отдельно —
+	# переносим эти точки в точки дорог, чтобы путь крипов остался прежним
+	if int(out.get("version", 1)) < 2:
+		for s in out["structures"]:
+			var ln: String = String(s[4]) if s.size() > 4 else ""
+			if String(s[0]).begins_with("turret") and ln in ["top", "mid", "bot"]:
+				out["lanepoints"].append([s[2], s[3], ln])
+		out["version"] = 2
 	return out
 
 
 func empty_map(w: float, d: float, title: String) -> Dictionary:
-	return normalize({"name": title, "size": [w, d]})
+	return normalize({"name": title, "size": [w, d], "version": 2})
+
+
+# ------------------------------------------------------------------
+#  Повёрнутые укрытия: поворот в градусах (7-е поле), 0 — вдоль осей
+# ------------------------------------------------------------------
+
+func cover_rot(c: Array) -> float:
+	return float(c[6]) if c.size() > 6 else 0.0
+
+
+# лежит ли точка внутри прямоугольника с центром x, z, размером w × d, повёрнутого на rot градусов (с запасом pad)
+func in_box(px: float, pz: float, x: float, z: float, w: float, d: float, rot: float, pad := 0.0) -> bool:
+	var l := Vector2(px - x, pz - z)
+	if rot != 0.0:
+		l = l.rotated(deg_to_rad(rot))      # в оси самого прямоугольника (поворот как у узла rotation.y)
+	return absf(l.x) <= w * 0.5 + pad and absf(l.y) <= d * 0.5 + pad
+
+
+# прямоугольник по осям карты, в который помещается повёрнутый прямоугольник
+func box_rect(x: float, z: float, w: float, d: float, rot: float) -> Rect2:
+	var a := deg_to_rad(rot)
+	var hx := absf(cos(a)) * w * 0.5 + absf(sin(a)) * d * 0.5
+	var hz := absf(sin(a)) * w * 0.5 + absf(cos(a)) * d * 0.5
+	return Rect2(x - hx, z - hz, hx * 2.0, hz * 2.0)
 
 
 func current() -> Dictionary:
@@ -188,22 +225,15 @@ func spawn_pos(data: Dictionary, team: int) -> Vector3:
 	return hq_pos(data, team)
 
 
-# линии: имя -> точки от базы команды 0 до базы команды 1.
-# Точки линии: турели этой линии обеих команд и точки линии из редактора, по порядку от базы к базе.
-# В PvP линий нет
+# линии (дороги): имя -> точки от базы команды 0 до базы команды 1.
+# Только точки дорог из редактора, по порядку от базы к базе; турели на путь не влияют.
+# Нет ни одной точки — прямая центральная линия от штаба к штабу. В PvP линий нет
 func lanes(data: Dictionary) -> Dictionary:
 	if is_pvp(data):
 		return {}
 	var a := hq_pos(data, 0)
 	var b := hq_pos(data, 1)
 	var pts := {}
-	for s in data["structures"]:
-		var lane: String = s[4] if s.size() > 4 else "mid"
-		if s[0] == "hq" or lane == "base" or lane == "":
-			continue
-		if not pts.has(lane):
-			pts[lane] = []
-		pts[lane].append(Vector3(float(s[2]), 0, float(s[3])))
 	for p in data["lanepoints"]:
 		var lane2: String = p[2] if p.size() > 2 else "mid"
 		if not pts.has(lane2):
@@ -221,6 +251,25 @@ func lanes(data: Dictionary) -> Dictionary:
 	if out.is_empty():
 		out["mid"] = PackedVector3Array([a, b])
 	return out
+
+
+# какая линия ближе всего к точке (для турели: по какой линии её толкают боты)
+func nearest_lane(lane_paths: Dictionary, p: Vector3) -> String:
+	var best := ""
+	var best_d := 1e9
+	for ln in lane_paths:
+		var path: PackedVector3Array = lane_paths[ln]
+		for i in path.size() - 1:
+			var a := Vector2(path[i].x, path[i].z)
+			var b := Vector2(path[i + 1].x, path[i + 1].z)
+			var q := Vector2(p.x, p.z)
+			var ab := b - a
+			var t := clampf((q - a).dot(ab) / maxf(ab.length_squared(), 0.001), 0.0, 1.0)
+			var d := (a + ab * t).distance_to(q)
+			if d < best_d:
+				best_d = d
+				best = ln
+	return best
 
 
 # насколько точка близка к вражеской базе: 0 у своей базы, 1 у вражеской

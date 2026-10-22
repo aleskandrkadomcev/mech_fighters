@@ -2,20 +2,24 @@ extends Node3D
 ## Редактор карт. Вид строго сверху. Слева инструменты (что ставить), справа свойства.
 ##   ЛКМ        поставить выбранное / выбрать и тащить (инструмент «Выбор»)
 ##   ПКМ        удалить то, что под курсором
-##   R          повернуть стену (поменять длину и толщину местами)
+##   R          повернуть стену, барьер или скалу на 15° (Shift+R — обратно); украшение — на 90°
 ##   Delete     удалить выбранное
 ##   Ctrl+Z     отменить          Ctrl+S  сохранить
 ##   WASD / стрелки / зажатое колесо  двигать камеру, колесо  приблизить
 ## Зеркало: всё, что ставишь, сразу появляется и на другой половине (постройки достаются другой команде).
-## Линии для крипов и ботов строятся сами: от штаба через турели линии (и точки линии) к вражескому штабу.
-## Их видно цветными линиями поверх карты.
+## Режим карты: «Моба» (штабы, турели, дороги, крипы) или «PvP» (только мехи: две точки появления, без баз).
+## Дороги (линии крипов и ботов) ставятся отдельно от турелей: инструменты «Верхняя линия», «Мидлиния»,
+## «Нижняя линия». Линия идёт от своего штаба через свои точки по порядку к вражескому штабу,
+## её видно цветной полосой поверх карты. Турели на дорогу не влияют — их ставь где хочешь.
 
 const GameMenu := preload("res://scripts/game_menu.gd")
 
 const TOOLS := [
 	["Укрытия", [["wall", "Стена (разрушаемая)"], ["barrier", "Барьер (разрушаемый)"], ["rock", "Скала"]]],
 	["Постройки", [["hq", "Штаб"], ["turret_t1", "Турель 1"], ["turret_t2", "Турель 2 (ЭМИ)"], ["turret_t3", "Турель 3 (осадная)"]]],
-	["Точки", [["poi_regen", "Реактор"], ["poi_damage", "Арсенал"], ["poi_radar", "Радар"], ["poi_dock", "Ремонтный док"], ["crate", "Место ящика"], ["lanepoint", "Точка линии"]]],
+	["Дороги", [["lane_top", "Верхняя линия"], ["lane_mid", "Мидлиния"], ["lane_bot", "Нижняя линия"]]],
+	["Появление (PvP)", [["spawn", "Точка появления"]]],
+	["Точки", [["poi_regen", "Реактор"], ["poi_damage", "Арсенал"], ["poi_radar", "Радар"], ["poi_dock", "Ремонтный док"], ["crate", "Место ящика"]]],
 	["Украшения", [["decor_container", "Контейнер"], ["decor_generator", "Генератор"], ["decor_tank", "Цистерна"],
 		["decor_terminal", "Терминал"], ["decor_crates", "Ящики"], ["decor_antenna", "Антенна"], ["lamp", "Фонарь"], ["target", "Мишень"],
 		["decor_sandbags", "Мешки с песком"], ["decor_jersey", "Бетонные блоки"], ["decor_fence", "Забор"], ["decor_car", "Брошенная машина"]]],
@@ -25,16 +29,20 @@ const DECOR_SIZE := {"container": Vector2(2.6, 6.2), "generator": Vector2(3.4, 2
 	"terminal": Vector2(1.6, 1.2), "crates": Vector2(3.2, 2.6), "antenna": Vector2(2.2, 2.2),
 	"sandbags": Vector2(4.8, 7.6), "jersey": Vector2(6.6, 1.0), "fence": Vector2(9.4, 0.7), "car": Vector2(2.4, 3.6)}
 const LANE_COLORS := {"top": Color(0.4, 0.8, 1.0), "mid": Color(1.0, 0.85, 0.3), "bot": Color(0.6, 1.0, 0.45), "base": Color(0.8, 0.8, 0.8)}
+const LANE_TITLES := {"top": "Верхняя линия", "mid": "Мидлиния", "bot": "Нижняя линия"}
 const TEAM_COLORS := [Color(1.0, 0.55, 0.15), Color(0.95, 0.2, 0.2)]
+const MOBA_GROUPS := ["Постройки", "Дороги"]       # в PvP их нет
+const PVP_GROUPS := ["Появление (PvP)"]            # в мобе их нет
+const ROT_STEP := 15.0                             # поворот укрытия клавишей R, градусов
 
 var data := {}
 var file_path := ""               # куда сохранять (пусто = ещё не сохранена)
 var tool := "wall"
 var team := 0
-var lane := "mid"
 var mirror := 2                   # 0 нет, 1 слева-направо, 2 поворот вокруг центра, 3 сверху-вниз
 var grid := 1.0
 var dims := {"wall": Vector3(20, 4, 4), "barrier": Vector3(8, 3.5, 1.6), "rock": Vector3(6, 4.5, 6)}
+var cover_rot := 0.0              # поворот, с которым ставится новое укрытие, градусов
 var dirty := false
 
 var _cam: Camera3D
@@ -59,9 +67,11 @@ var _name_edit: LineEdit
 var _w_spin: SpinBox
 var _d_spin: SpinBox
 var _dim_spins: Array = []
+var _rot_spin: SpinBox
 var _sel_label: Label
 var _team_opt: OptionButton
-var _lane_opt: OptionButton
+var _mode_opt: OptionButton
+var _group_nodes := {}            # группа инструментов -> её заголовок и кнопки (прячутся по режиму карты)
 var _dialog: Control
 
 
@@ -257,7 +267,9 @@ func _build_ui() -> void:
 	# слева: что ставить
 	var left := _panel(false, 74, 250)
 	for group in TOOLS:
-		left.add_child(_lbl(group[0].to_upper(), 14, 0.45))
+		var head := _lbl(group[0].to_upper(), 14, 0.45)
+		left.add_child(head)
+		_group_nodes[group[0]] = [head]
 		for t in group[1]:
 			var b := Button.new()
 			b.text = t[1]
@@ -269,10 +281,18 @@ func _build_ui() -> void:
 			b.pressed.connect(func() -> void: _set_tool(id))
 			left.add_child(b)
 			_tool_buttons[id] = b
+			_group_nodes[group[0]].append(b)
 
 	# справа: свойства
 	var right := _panel(true, 74, 300)
 	right.add_child(_lbl("КАРТА", 14, 0.45))
+	right.add_child(_lbl("Режим карты"))
+	_mode_opt = OptionButton.new()
+	_mode_opt.add_item("Моба: штабы, турели, дороги")
+	_mode_opt.add_item("PvP: только мехи")
+	_mode_opt.focus_mode = Control.FOCUS_NONE
+	_mode_opt.item_selected.connect(func(i: int) -> void: _set_mode(i == 1))
+	right.add_child(_mode_opt)
 	var row := HBoxContainer.new()
 	right.add_child(row)
 	row.add_child(_lbl("Ширина"))
@@ -284,6 +304,10 @@ func _build_ui() -> void:
 	_d_spin = _spin(60, 500, 10, 160, func(_v: float) -> void: pass)
 	row2.add_child(_d_spin)
 	right.add_child(_btn("Применить размер", func() -> void:
+		# число, набранное в поле, но без Enter, поле само ещё не приняло — принимаем здесь
+		# (раньше из-за этого размер иногда не менялся)
+		_w_spin.apply()
+		_d_spin.apply()
 		_push_undo()
 		data["size"] = [_w_spin.value, _d_spin.value]
 		dirty = true
@@ -299,7 +323,7 @@ func _build_ui() -> void:
 	var mh := _lbl("Всё, что ставишь, появляется и на другой половине карты. Постройки там достаются врагам.", 14, 0.5)
 	mh.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	right.add_child(mh)
-	right.add_child(_lbl("ПОСТРОЙКИ", 14, 0.45))
+	right.add_child(_lbl("КОМАНДА", 14, 0.45))
 	_team_opt = OptionButton.new()
 	_team_opt.add_item("Своя команда (оранжевые)")
 	_team_opt.add_item("Враги (красные)")
@@ -308,26 +332,27 @@ func _build_ui() -> void:
 		team = i
 		_apply_to_selected("team", i))
 	right.add_child(_team_opt)
-	right.add_child(_lbl("Линия турели или точки"))
-	_lane_opt = OptionButton.new()
-	for k in ["top", "mid", "bot", "base"]:
-		_lane_opt.add_item(Maps.LANE_NAMES[k])
-	_lane_opt.select(1)
-	_lane_opt.focus_mode = Control.FOCUS_NONE
-	_lane_opt.item_selected.connect(func(i: int) -> void:
-		lane = ["top", "mid", "bot", "base"][i]
-		_apply_to_selected("lane", lane))
-	right.add_child(_lane_opt)
+	var th := _lbl("Чья постройка или точка появления. Турели к дорогам не привязаны: линию турели игра найдёт сама (ближайшая дорога).", 14, 0.5)
+	th.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	right.add_child(th)
 	right.add_child(_lbl("УКРЫТИЕ: длина, высота, толщина", 14, 0.45))
 	for k in 3:
 		var r := HBoxContainer.new()
 		right.add_child(r)
-		r.add_child(_lbl(["По X", "Высота", "По Z"][k]))
+		r.add_child(_lbl(["Длина", "Высота", "Толщина"][k]))
 		var idx := k
 		var sp := _spin(0.5, 80, 0.5, 4, func(v: float) -> void: _on_dim(idx, v))
 		r.add_child(sp)
 		_dim_spins.append(sp)
-	right.add_child(_btn("Повернуть (R)", _rotate))
+	var rr := HBoxContainer.new()
+	right.add_child(rr)
+	rr.add_child(_lbl("Поворот, °"))
+	_rot_spin = _spin(0, 179, 1, 0, func(v: float) -> void: _set_rot(v))
+	rr.add_child(_rot_spin)
+	var rb := HBoxContainer.new()
+	right.add_child(rb)
+	rb.add_child(_btn("⟲ 15° (Shift+R)", func() -> void: _rotate(-1.0)))
+	rb.add_child(_btn("⟳ 15° (R)", func() -> void: _rotate(1.0)))
 	right.add_child(_lbl("Сетка, м", 14, 0.45))
 	var go := OptionButton.new()
 	for g in [0.5, 1.0, 2.0, 4.0]:
@@ -343,7 +368,7 @@ func _build_ui() -> void:
 	_sel_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	right.add_child(_sel_label)
 	right.add_child(_btn("Удалить (Delete)", _delete_selected))
-	var help := _lbl("ЛКМ поставить или выбрать · ПКМ удалить · R повернуть · Ctrl+Z отменить · Ctrl+S сохранить · WASD, колесо, зажатое колесо — камера", 14, 0.5)
+	var help := _lbl("ЛКМ поставить или выбрать · ПКМ удалить · R / Shift+R повернуть · Ctrl+Z отменить · Ctrl+S сохранить · WASD, колесо, зажатое колесо — камера", 14, 0.5)
 	help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	right.add_child(help)
 	_set_tool("wall")
@@ -356,8 +381,55 @@ func _set_tool(id: String) -> void:
 	if dims.has(id):
 		_sel = null
 		_show_dims(dims[id])
+		_rot_spin.set_value_no_signal(cover_rot)
 	_update_ghost()
 	_update_sel_label()
+
+
+func is_pvp() -> bool:
+	return Maps.is_pvp(data)
+
+
+# режим карты: моба или PvP. Лишние для режима инструменты прячутся; в PvP нужны две точки появления —
+# если их нет, ставим туда, где штабы (или в углы карты)
+func _set_mode(pvp: bool) -> void:
+	if pvp == is_pvp():
+		return
+	_push_undo()
+	if pvp:
+		data["mode"] = "pvp"
+		for tm in 2:
+			if not data["spawns"].any(func(p) -> bool: return int(p[2]) == tm):
+				var at := _default_spawn(tm)
+				data["spawns"].append([at.x, at.z, tm])
+	else:
+		data.erase("mode")
+	dirty = true
+	_sel = null
+	_refresh_mode()
+	_rebuild()
+
+
+# где поставить точку появления по умолчанию: на месте штаба, иначе в углу (свои — слева снизу)
+func _default_spawn(tm: int) -> Vector3:
+	for s in data["structures"]:
+		if s[0] == "hq" and int(s[1]) == tm:
+			return Vector3(float(s[2]), 0, float(s[3]))
+	var w := float(data["size"][0])
+	var d := float(data["size"][1])
+	return Vector3(-w * 0.5 + 14.0, 0, d * 0.5 - 14.0) if tm == 0 else Vector3(w * 0.5 - 14.0, 0, -d * 0.5 + 14.0)
+
+
+# показать инструменты под режим карты
+func _refresh_mode() -> void:
+	var pvp := is_pvp()
+	_mode_opt.select(1 if pvp else 0)
+	for g in _group_nodes:
+		var on: bool = not (g in (MOBA_GROUPS if pvp else PVP_GROUPS))
+		for n in _group_nodes[g]:
+			n.visible = on
+	if not _tool_buttons[tool].visible:
+		_set_tool("wall")
 
 
 func _show_dims(d: Vector3) -> void:
@@ -384,6 +456,35 @@ func _on_dim(k: int, v: float) -> void:
 		_update_ghost()
 
 
+# поворот укрытия: в зеркальной половине — зеркальный (при повороте карты вокруг центра — такой же)
+func _mirror_rot(r: float) -> float:
+	return fposmod(-r if mirror == 1 or mirror == 3 else r, 180.0)
+
+
+# записать поворот в укрытие (7-е поле; у прямого укрытия его может не быть)
+func _put_rot(c: Array, r: float) -> void:
+	r = fposmod(r, 180.0)
+	if c.size() > 6:
+		c[6] = r
+	elif r != 0.0:
+		c.append(r)
+
+
+# поле «Поворот»: выбранному укрытию (и его зеркальной копии) или новым укрытиям
+func _set_rot(v: float) -> void:
+	if _sel != null and _sel[0] == "covers":
+		_push_undo()
+		var twin = _twin_of("covers", _sel[1])
+		_put_rot(data["covers"][_sel[1]], v)
+		if twin != null:
+			_put_rot(data["covers"][twin], _mirror_rot(v))
+		dirty = true
+		_rebuild()
+		return
+	cover_rot = fposmod(v, 180.0)
+	_update_ghost()
+
+
 func _update_status() -> void:
 	var p := Maps.problems(data)
 	var t := ("● не сохранено   " if dirty else "") + (file_path.get_file() if file_path != "" else "новая карта")
@@ -396,11 +497,18 @@ func _update_status() -> void:
 #  Карта: новая, открыть, сохранить, играть
 # ------------------------------------------------------------------
 
-func _new_map(w: float, d: float, title: String) -> void:
+func _new_map(w: float, d: float, title: String, pvp := false) -> void:
 	data = Maps.empty_map(w, d, title)
-	# сразу два штаба друг напротив друга (их можно перенести)
-	data["structures"].append(["hq", 0, -w * 0.5 + 14.0, 0, "base"])
-	data["structures"].append(["hq", 1, w * 0.5 - 14.0, 0, "base"])
+	if pvp:
+		# PvP: две точки появления в противоположных углах (их можно перенести)
+		data["mode"] = "pvp"
+		for tm in 2:
+			var at := _default_spawn(tm)
+			data["spawns"].append([at.x, at.z, tm])
+	else:
+		# моба: сразу два штаба друг напротив друга (их можно перенести)
+		data["structures"].append(["hq", 0, -w * 0.5 + 14.0, 0])
+		data["structures"].append(["hq", 1, w * 0.5 - 14.0, 0])
 	file_path = ""
 	dirty = false
 	_undo.clear()
@@ -413,6 +521,7 @@ func _after_load() -> void:
 	_zoom = maxf(float(data["size"][0]), float(data["size"][1])) * 1.15
 	_cam.position = Vector3(30, 100, 0)
 	_sel = null
+	_refresh_mode()
 	_rebuild()
 
 
@@ -494,12 +603,20 @@ func _ask_new() -> void:
 	var d := _spin(60, 500, 10, 160, func(_v: float) -> void: pass)
 	r.add_child(d)
 	col.add_child(_lbl("Квадратная карта: ширина = глубина", 14, 0.5))
+	var mo := OptionButton.new()
+	mo.add_item("Моба: штабы, турели, дороги")
+	mo.add_item("PvP: только мехи, две точки появления")
+	mo.focus_mode = Control.FOCUS_NONE
+	mo.add_theme_font_size_override("font_size", 17)
+	col.add_child(mo)
 	var b := HBoxContainer.new()
 	b.alignment = BoxContainer.ALIGNMENT_END
 	col.add_child(b)
 	b.add_child(_btn("Отмена", _close_modal))
 	b.add_child(_btn("Создать", func() -> void:
-		_new_map(w.value, d.value, n.text)
+		w.apply()
+		d.apply()
+		_new_map(w.value, d.value, n.text, mo.selected == 1)
 		_close_modal()
 		_after_load(), 140))
 
@@ -587,7 +704,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event is InputEventKey and event.pressed and not event.echo:
 		match event.physical_keycode:
 			KEY_R:
-				_rotate()
+				_rotate(-1.0 if event.shift_pressed else 1.0)
 			KEY_DELETE:
 				_delete_selected()
 			KEY_ESCAPE:
@@ -631,6 +748,7 @@ func _process(delta: float) -> void:
 	_ghost.visible = not _over_ui() and tool != "select" and tool != "erase"
 	if _ghost.visible:
 		_ghost.position = _snap(_mouse_world)
+		_ghost.rotation.y = deg_to_rad(cover_rot) if dims.has(tool) else 0.0
 
 
 func _snap(p: Vector3) -> Vector3:
@@ -694,23 +812,33 @@ func _place(t: String, p: Vector3, mirrored := false) -> void:
 	var z := p.z
 	if dims.has(t):
 		var d: Vector3 = dims[t]
-		data["covers"].append([x, z, d.x, d.y, d.z, t])
+		var c := [x, z, d.x, d.y, d.z, t]
+		_put_rot(c, _mirror_rot(cover_rot) if mirrored else cover_rot)
+		data["covers"].append(c)
 	elif t == "hq" or t.begins_with("turret"):
+		# турель к дороге не привязана: линию игра найдёт сама
 		var tm := 1 - team if mirrored else team
-		var ln := "base" if t == "hq" else (_mirror_lane(lane) if mirrored else lane)
 		if t == "hq":
 			# штаб у команды один: старый убираем
 			for i in range(data["structures"].size() - 1, -1, -1):
 				var s: Array = data["structures"][i]
 				if s[0] == "hq" and int(s[1]) == tm:
 					data["structures"].remove_at(i)
-		data["structures"].append([t, tm, x, z, ln])
+		data["structures"].append([t, tm, x, z])
+	elif t == "spawn":
+		# точка появления у команды одна: старую убираем
+		var tm2 := 1 - team if mirrored else team
+		for i in range(data["spawns"].size() - 1, -1, -1):
+			if int(data["spawns"][i][2]) == tm2:
+				data["spawns"].remove_at(i)
+		data["spawns"].append([x, z, tm2])
 	elif t.begins_with("poi_"):
 		data["pois"].append([x, z, t.trim_prefix("poi_")])
 	elif t == "crate":
 		data["crates"].append([x, z])
-	elif t == "lanepoint":
-		data["lanepoints"].append([x, z, _mirror_lane(lane) if mirrored else lane])
+	elif t.begins_with("lane_"):
+		var ln := t.trim_prefix("lane_")
+		data["lanepoints"].append([x, z, _mirror_lane(ln) if mirrored else ln])
 	elif t.begins_with("decor_"):
 		var rot := 0.0
 		data["decor"].append([t.trim_prefix("decor_"), x, z, rot + (180.0 if mirrored and mirror == 2 else 0.0)])
@@ -794,7 +922,7 @@ func _delete_selected() -> void:
 func _pick(p: Vector3):
 	var best = null
 	var best_d := 1e9
-	for list in ["structures", "pois", "crates", "lanepoints", "decor", "lamps", "targets", "covers"]:
+	for list in _lists():
 		for i in data[list].size():
 			var it: Array = data[list][i]
 			var c := _item_pos(list, i)
@@ -803,10 +931,10 @@ func _pick(p: Vector3):
 			match list:
 				"structures":
 					r = 5.0 if it[0] == "hq" else 3.0
-				"pois":
+				"pois", "spawns":
 					r = 5.0
 				"covers":
-					if absf(p.x - c.x) <= float(it[2]) * 0.5 + 0.5 and absf(p.z - c.z) <= float(it[4]) * 0.5 + 0.5:
+					if Maps.in_box(p.x, p.z, c.x, c.z, float(it[2]), float(it[4]), Maps.cover_rot(it), 0.5):
 						d = 0.5
 					else:
 						continue
@@ -816,46 +944,38 @@ func _pick(p: Vector3):
 	return best
 
 
-func _rotate() -> void:
+# какие предметы есть в этом режиме карты (в PvP нет построек и дорог, в мобе — точек появления)
+func _lists() -> Array:
+	var out := ["pois", "crates", "decor", "lamps", "targets", "covers"]
+	out += ["spawns"] if is_pvp() else ["structures", "lanepoints"]
+	return out
+
+
+# R: укрытие на 15° (dir = 1 по часовой, -1 против), украшение на 90°; без выбора — новые укрытия
+func _rotate(dir := 1.0) -> void:
 	if _sel != null and _sel[0] == "covers":
-		_push_undo()
 		var c: Array = data["covers"][_sel[1]]
-		var t = c[2]
-		c[2] = c[4]
-		c[4] = t
-		var twin = _twin_of("covers", _sel[1])
-		if twin != null:
-			var c2: Array = data["covers"][twin]
-			c2[2] = c[2]
-			c2[4] = c[4]
+		_set_rot(Maps.cover_rot(c) - ROT_STEP * dir)
 		_sync_panel_to_selection()
-		dirty = true
-		_rebuild()
 	elif _sel != null and _sel[0] == "decor":
 		_push_undo()
-		data["decor"][_sel[1]][3] = fmod(float(data["decor"][_sel[1]][3]) + 90.0, 360.0)
+		data["decor"][_sel[1]][3] = fposmod(float(data["decor"][_sel[1]][3]) - 90.0 * dir, 360.0)
 		dirty = true
 		_rebuild()
 	elif dims.has(tool):
-		var d: Vector3 = dims[tool]
-		dims[tool] = Vector3(d.z, d.y, d.x)
-		_show_dims(dims[tool])
-		_update_ghost()
+		_set_rot(cover_rot - ROT_STEP * dir)
+		_rot_spin.set_value_no_signal(cover_rot)
 
 
 func _apply_to_selected(field: String, value) -> void:
-	if _sel == null:
+	if _sel == null or field != "team":
 		return
-	if field == "team" and _sel[0] == "structures":
+	if _sel[0] == "structures":
 		_push_undo()
 		data["structures"][_sel[1]][1] = value
-	elif field == "lane" and (_sel[0] == "structures" or _sel[0] == "lanepoints"):
+	elif _sel[0] == "spawns":
 		_push_undo()
-		var it: Array = data[_sel[0]][_sel[1]]
-		if _sel[0] == "structures" and it[0] != "hq":
-			it[4] = value
-		elif _sel[0] == "lanepoints":
-			it[2] = value
+		data["spawns"][_sel[1]][2] = value
 	else:
 		return
 	dirty = true
@@ -868,12 +988,11 @@ func _sync_panel_to_selection() -> void:
 	var it: Array = data[_sel[0]][_sel[1]]
 	if _sel[0] == "covers":
 		_show_dims(Vector3(float(it[2]), float(it[3]), float(it[4])))
+		_rot_spin.set_value_no_signal(Maps.cover_rot(it))
 	elif _sel[0] == "structures":
 		_team_opt.select(int(it[1]))
-		var ln: String = it[4] if it.size() > 4 else "mid"
-		_lane_opt.select(["top", "mid", "bot", "base"].find(ln))
-	elif _sel[0] == "lanepoints":
-		_lane_opt.select(["top", "mid", "bot", "base"].find(it[2]))
+	elif _sel[0] == "spawns":
+		_team_opt.select(int(it[2]))
 
 
 func _update_sel_label() -> void:
@@ -885,13 +1004,15 @@ func _update_sel_label() -> void:
 	var t := ""
 	match _sel[0]:
 		"covers":
-			t = {"wall": "Стена", "barrier": "Барьер", "rock": "Скала"}.get(it[5], it[5]) + "  %s × %s м" % [it[2], it[4]]
+			t = {"wall": "Стена", "barrier": "Барьер", "rock": "Скала"}.get(it[5], it[5]) + "  %s × %s м, поворот %d°" % [it[2], it[4], int(Maps.cover_rot(it))]
 		"structures":
-			t = Parts.pname(it[0]) + ", " + ("своя команда" if int(it[1]) == 0 else "враги") + ", линия: " + Maps.LANE_NAMES.get(it[4] if it.size() > 4 else "mid", "")
+			t = Parts.pname(it[0]) + ", " + ("своя команда" if int(it[1]) == 0 else "враги")
+		"spawns":
+			t = "Точка появления, " + ("своя команда" if int(it[2]) == 0 else "враги")
 		"pois":
 			t = Maps.POI_NAMES.get(it[2], "Точка")
 		"lanepoints":
-			t = "Точка линии: " + Maps.LANE_NAMES.get(it[2], "")
+			t = "Дорога: " + LANE_TITLES.get(it[2], it[2])
 		"decor":
 			t = "Украшение: " + it[0]
 		_:
@@ -912,6 +1033,7 @@ func _undo_step() -> void:
 	_sel = null
 	dirty = true
 	_name_edit.text = data.get("name", "")
+	_refresh_mode()
 	_rebuild()
 
 
@@ -983,11 +1105,13 @@ func _rebuild_objects() -> void:
 	for c in _objects.get_children():
 		c.queue_free()
 	var root := _objects
+	var pvp := is_pvp()
 	for i in data["covers"].size():
 		var c: Array = data["covers"][i]
 		var col: Color = {"wall": Color(0.62, 0.63, 0.66), "barrier": Color(0.75, 0.68, 0.45), "rock": Color(0.5, 0.42, 0.33)}.get(c[5], Color.GRAY)
-		_add_box(root, Vector3(c[2], c[3], c[4]), Vector3(c[0], 0, c[1]), col)
-	for s in data["structures"]:
+		_add_box(root, Vector3(c[2], c[3], c[4]), Vector3(c[0], 0, c[1]), col, Maps.cover_rot(c))
+	# в PvP построек и дорог нет (в файле они остаются, вернутся при режиме «Моба»), зато есть точки появления
+	for s in ([] if pvp else data["structures"]):
 		var tc: Color = TEAM_COLORS[int(s[1])]
 		var p := Vector3(float(s[2]), 0, float(s[3]))
 		if s[0] == "hq":
@@ -995,8 +1119,13 @@ func _rebuild_objects() -> void:
 			_add_label(root, "ШТАБ", p, Color.WHITE, 120)
 		else:
 			_add_cyl(root, 1.8, 5.0, p, tc.darkened(0.2))
-			var ln: String = s[4] if s.size() > 4 else "mid"
-			_add_label(root, "T" + String(s[0]).right(1), p, LANE_COLORS.get(ln, Color.WHITE))
+			_add_label(root, "T" + String(s[0]).right(1), p, Color.WHITE)
+	for sp in (data["spawns"] if pvp else []):
+		var p2 := Vector3(float(sp[0]), 0, float(sp[1]))
+		var tc2: Color = TEAM_COLORS[int(sp[2])]
+		_add_cyl(root, 12.0, 0.15, p2, tc2.darkened(0.55))      # где появляются мехи (кольца до 12 м)
+		_add_cyl(root, 2.0, 3.0, p2, tc2)
+		_add_label(root, "ПОЯВЛЕНИЕ", p2, tc2.lightened(0.3), 110)
 	for p in data["pois"]:
 		var pos := Vector3(float(p[0]), 0, float(p[1]))
 		_add_cyl(root, Cfg.poi_radius, 0.2, pos, Color(0.3, 0.4, 0.55))
@@ -1004,9 +1133,9 @@ func _rebuild_objects() -> void:
 		_add_label(root, Maps.POI_NAMES.get(p[2], "Точка"), pos, Color(0.6, 0.9, 1.0))
 	for p in data["crates"]:
 		_add_box(root, Vector3(2.4, 1.6, 2.4), Vector3(float(p[0]), 0, float(p[1])), Color(1.0, 0.8, 0.25))
-	for p in data["lanepoints"]:
+	for p in ([] if pvp else data["lanepoints"]):
 		var lc: Color = LANE_COLORS.get(p[2], Color.WHITE)
-		_add_cyl(root, 1.2, 0.6, Vector3(float(p[0]), 0, float(p[1])), lc)
+		_add_cyl(root, 1.6, 0.8, Vector3(float(p[0]), 0, float(p[1])), lc)
 	for d in data["decor"]:
 		var sz: Vector2 = DECOR_SIZE.get(d[0], Vector2(2.5, 2.5))
 		_add_box(root, Vector3(sz.x, 2.4, sz.y), Vector3(float(d[1]), 0, float(d[2])), Color(0.35, 0.45, 0.55), float(d[3]) if d.size() > 3 else 0.0)
@@ -1066,6 +1195,12 @@ func _update_ghost() -> void:
 		var bm := BoxMesh.new()
 		bm.size = dims[tool]
 		mesh = bm
+	elif tool == "spawn":
+		var cm2 := CylinderMesh.new()
+		cm2.top_radius = 12.0
+		cm2.bottom_radius = 12.0
+		cm2.height = 0.3
+		mesh = cm2
 	elif tool == "hq":
 		var bm2 := BoxMesh.new()
 		bm2.size = Vector3(8, 6, 8)
@@ -1092,20 +1227,50 @@ func _selftest() -> void:
 	_new_map(200, 200, "Тест квадрат")
 	mirror = 2
 	_set_tool("wall")
+	_rotate(1.0)          # новые стены повёрнуты на -15° (по часовой)
+	_rotate(1.0)
 	_on_click(Vector3(-30, 0, -20))
+	print("[EDITOR] wall rot=%s twin rot=%s (ждём 150 и 150)" % [Maps.cover_rot(data["covers"][0]), Maps.cover_rot(data["covers"][1])])
+	mirror = 1
+	_on_click(Vector3(-50, 0, 30))
+	print("[EDITOR] mirror left-right: rot=%s twin=%s (ждём 150 и 30)" % [Maps.cover_rot(data["covers"][2]), Maps.cover_rot(data["covers"][3])])
+	print("[EDITOR] pick rotated wall end: %s" % str(_pick(Vector3(-30, 0, -20) + Vector3(9, 0, 0).rotated(Vector3.UP, deg_to_rad(150.0)))))
+	mirror = 2
 	_set_tool("turret_t1")
 	team = 0
-	lane = "top"
 	_on_click(Vector3(-40, 0, -60))
+	_set_tool("lane_top")
+	_on_click(Vector3(-60, 0, -70))
+	_on_click(Vector3(-20, 0, -75))
 	_set_tool("poi_regen")
 	_on_click(Vector3(0, 0, -50))
-	print("[EDITOR] covers=%d structures=%d pois=%d lanes=%s problems=%s" % [data["covers"].size(), data["structures"].size(),
-		data["pois"].size(), Maps.lanes(data).keys(), Maps.problems(data)])
+	var ln := Maps.lanes(data)
+	print("[EDITOR] covers=%d structures=%s pois=%d lanes=%s top=%s bot=%s problems=%s" % [data["covers"].size(), str(data["structures"]),
+		data["pois"].size(), ln.keys(), str(ln.get("top", [])), str(ln.get("bot", [])), Maps.problems(data)])
 	var path := "user://editortest_map.json"
 	Maps.save_to(data, path)
 	var back := Maps.load_map(path)
-	print("[EDITOR] saved and loaded back: covers=%d structures=%d size=%s" % [back["covers"].size(), back["structures"].size(), back["size"]])
+	print("[EDITOR] saved and loaded back: covers=%d structures=%d size=%s rot=%s" % [back["covers"].size(), back["structures"].size(), back["size"], Maps.cover_rot(back["covers"][0])])
 	_undo_step()
 	print("[EDITOR] after undo: pois=%d" % data["pois"].size())
+	# размер: число набрано в поле без Enter, затем «Применить размер»
+	_w_spin.get_line_edit().text = "260"
+	_w_spin.apply()
+	print("[EDITOR] size field after apply: %s (ждём 260)" % _w_spin.value)
+	# PvP: режим, точки появления, без построек и дорог
+	_set_mode(true)
+	print("[EDITOR] pvp: mode=%s spawns=%s problems=%s lanes=%s lists=%s tool_hq_visible=%s" % [data.get("mode", ""), str(data["spawns"]),
+		Maps.problems(data), Maps.lanes(data).keys(), _lists(), _tool_buttons["hq"].visible])
+	_set_tool("spawn")
+	team = 0
+	_on_click(Vector3(-70, 0, 60))
+	print("[EDITOR] pvp spawns after placing: %s" % str(data["spawns"]))
+	_new_map(120, 120, "Тест PvP", true)
+	print("[EDITOR] new pvp map: spawns=%s problems=%s" % [str(data["spawns"]), Maps.problems(data)])
+	# старая карта: дороги через турели переехали в точки дорог
+	var cl := Maps.load_map("res://maps/classic.json")
+	var lc := Maps.lanes(cl)
+	for k in lc:
+		print("[EDITOR] classic lane %s: %s" % [k, str(lc[k])])
 	if not OS.get_cmdline_user_args().has("--stay"):
 		get_tree().quit()

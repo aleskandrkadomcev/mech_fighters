@@ -140,7 +140,7 @@ func build(covers: Array, edges: Array, map_rect: Rect2, no_grass: Array, map: D
 		var kind: String = c[5] if c.size() > 5 else "wall"
 		if kind == "rock":
 			_rock_cluster(c)
-		_blob(Vector3(c[0], 0, c[1]), Vector2(c[2] + 2.5, c[4] + 2.5))
+		_blob(Vector3(c[0], 0, c[1]), Vector2(c[2] + 2.5, c[4] + 2.5), deg_to_rad(Maps.cover_rot(c)))
 	for e in edges:
 		_edge_wall(e[0], e[1])
 	for d in map.get("decor", []):
@@ -172,7 +172,9 @@ func _rock_cluster(c: Array) -> void:
 			sx *= 0.65
 			sy *= _rng.randf_range(0.5, 0.85)
 			sz *= 0.65
-		var pos := Vector3(c[0] + _rng.randf_range(-w, w) * 0.3 * float(i > 0), 0.0, c[1] + _rng.randf_range(-d, d) * 0.3 * float(i > 0))
+		# сдвиг валуна внутри скалы — в осях скалы (скалу можно повернуть в редакторе)
+		var off := Vector3(_rng.randf_range(-w, w) * 0.3 * float(i > 0), 0.0, _rng.randf_range(-d, d) * 0.3 * float(i > 0))
+		var pos := Vector3(c[0], 0.0, c[1]) + off.rotated(Vector3.UP, deg_to_rad(Maps.cover_rot(c)))
 		_add(mesh, Transform3D(Basis(Vector3.UP, _rng.randf() * TAU).scaled(Vector3(sx, sy, sz)), pos), rock(), true)
 
 
@@ -192,7 +194,7 @@ func _edge_wall(center: Vector3, size: Vector3) -> void:
 
 
 # мягкое тёмное пятно на земле под объектом (вместе с затенением в углах, SSAO)
-func _blob(pos: Vector3, size: Vector2) -> void:
+func _blob(pos: Vector3, size: Vector2, rot := 0.0) -> void:
 	if not _mats.has("blob"):
 		var sh := Shader.new()
 		sh.code = """shader_type spatial;
@@ -210,7 +212,7 @@ void fragment() {
 		_mats["blob"] = m
 	var pm := PlaneMesh.new()
 	pm.size = size
-	_add(pm, Transform3D(Basis(), pos + Vector3.UP * 0.03), _mats["blob"], false)
+	_add(pm, Transform3D(Basis(Vector3.UP, rot), pos + Vector3.UP * 0.03), _mats["blob"], false)
 
 
 # ------------------------------------------------------------------
@@ -515,7 +517,16 @@ func _grass(rect: Rect2, covers: Array, no_grass: Array) -> void:
 			for x in range(maxi(int(cx - hx - rect.position.x), 0), mini(int(cx + hx - rect.position.x) + 1, w)):
 				ok[y * w + x] = 0
 	for c in covers:
-		block.call(c[0], c[1], c[2] * 0.5 + 0.6, c[4] * 0.5 + 0.6)
+		var rot := Maps.cover_rot(c)
+		if rot == 0.0:
+			block.call(c[0], c[1], c[2] * 0.5 + 0.6, c[4] * 0.5 + 0.6)
+			continue
+		# повёрнутое укрытие: проверяем каждую клетку его описанного прямоугольника
+		var br := Maps.box_rect(c[0], c[1], c[2] + 1.2, c[4] + 1.2, rot)
+		for y in range(maxi(int(br.position.y - rect.position.y), 0), mini(int(br.end.y - rect.position.y) + 1, h)):
+			for x in range(maxi(int(br.position.x - rect.position.x), 0), mini(int(br.end.x - rect.position.x) + 1, w)):
+				if Maps.in_box(rect.position.x + x + 0.5, rect.position.y + y + 0.5, c[0], c[1], c[2], c[4], rot, 0.6 + 0.71):
+					ok[y * w + x] = 0
 	for b in decor_boxes + prop_boxes:
 		block.call(b[0], b[1], b[2] * 0.5 + 0.4, b[4] * 0.5 + 0.4)
 	for p in no_grass:
@@ -595,7 +606,7 @@ func _scatter(rect: Rect2, covers: Array, no_grass: Array) -> void:
 			var z2 := _rng.randf_range(rect.position.y + 3.0, rect.end.y - 3.0)
 			var ok := true
 			for c in covers:
-				if absf(x2 - c[0]) < c[2] * 0.5 + 1.0 and absf(z2 - c[1]) < c[4] * 0.5 + 1.0:
+				if Maps.in_box(x2, z2, c[0], c[1], c[2], c[4], Maps.cover_rot(c), 1.0):
 					ok = false
 			if not ok:
 				continue

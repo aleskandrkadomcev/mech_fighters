@@ -13,7 +13,7 @@ var _nz := 0
 var _points: Array = []
 
 
-# rect: границы карты (x, z, ширина, глубина); boxes: укрытия и постройки [x, z, ширина, высота, глубина];
+# rect: границы карты (x, z, ширина, глубина); boxes: укрытия и постройки [x, z, ширина, высота, глубина, (поворот°)];
 # points: точки, которые надо обходить (мишени)
 func build(rect: Rect2, boxes: Array, points: Array) -> void:
 	_rect = rect
@@ -35,7 +35,13 @@ func _eval(cell: Vector2i, boxes: Array) -> void:
 	var solid := p.x < rect.position.x + 3.5 or p.x > rect.end.x - 3.5 or p.z < rect.position.y + 3.5 or p.z > rect.end.y - 3.5
 	if not solid:
 		for b in boxes:
-			if absf(p.x - b[0]) < b[2] * 0.5 + MARGIN and absf(p.z - b[1]) < b[4] * 0.5 + MARGIN:
+			# 6-е поле (если есть и это число) — поворот укрытия в градусах
+			var rot: float = float(b[5]) if b.size() > 5 and (b[5] is float or b[5] is int) else 0.0
+			if rot == 0.0:
+				if absf(p.x - b[0]) < b[2] * 0.5 + MARGIN and absf(p.z - b[1]) < b[4] * 0.5 + MARGIN:
+					solid = true
+					break
+			elif Maps.in_box(p.x, p.z, b[0], b[1], b[2], b[4], rot, MARGIN):
 				solid = true
 				break
 	if not solid:

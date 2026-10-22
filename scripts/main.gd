@@ -642,7 +642,9 @@ func _build_structures() -> void:
 		st.id = s[0]
 		st.team = team
 		st.tier = 0 if s[0] == "hq" else int(String(s[0]).right(1))
-		st.set_meta("lane", s[4] if s.size() > 4 else "mid")
+		# линия турели — ближайшая дорога (её толкают боты этой линии); турели 3 уровня и штаб — база
+		var pos := Vector3(float(s[2]), 0, float(s[3]))
+		st.set_meta("lane", Maps.nearest_lane(lanes, pos) if st.tier == 1 or st.tier == 2 else "base")
 		st.position = Vector3(float(s[2]), 0, float(s[3]))
 		add_child(st)
 		# смотрит в сторону врага
@@ -871,7 +873,7 @@ func _nav_boxes() -> Array:
 		var kind: String = c[5] if c.size() > 5 else "wall"
 		if kind != "rock":
 			continue
-		out.append(c)
+		out.append([c[0], c[1], c[2], c[3], c[4], Maps.cover_rot(c)])     # 6-е поле — поворот
 	for w in walls:
 		if not w.is_destroyed():
 			out.append(w.box())
@@ -942,7 +944,7 @@ func time_left() -> float:
 # стену сломали: боты могут ходить сквозь, туман и миникарта обновляются
 func _on_wall_destroyed(w: Node3D) -> void:
 	var b: Array = w.box()
-	nav.refresh(Rect2(b[0] - b[2] * 0.5, b[1] - b[4] * 0.5, b[2], b[4]), _nav_boxes())
+	nav.refresh(Maps.box_rect(b[0], b[1], b[2], b[4], b[5]), _nav_boxes())
 	vision.invalidate_static()
 	if minimap != null:
 		minimap.redraw(self)
@@ -1389,7 +1391,7 @@ func _build_walls() -> void:
 	for c in covers:
 		var kind: String = c[5] if c.size() > 5 else "wall"
 		if kind == "rock":
-			_block(Vector3(c[0], c[3] * 0.5, c[1]), Vector3(c[2], c[3], c[4]))
+			_block(Vector3(c[0], c[3] * 0.5, c[1]), Vector3(c[2], c[3], c[4]), Maps.cover_rot(c))
 		else:
 			var w := Wall.new()
 			w.c = c
@@ -1407,11 +1409,12 @@ func _build_walls() -> void:
 	art.build(covers, edges, r, no_grass, map)
 
 
-func _block(pos: Vector3, size: Vector3) -> void:
+func _block(pos: Vector3, size: Vector3, rot_deg := 0.0) -> void:
 	var body := StaticBody3D.new()
 	body.collision_layer = 1
 	body.collision_mask = 0
 	body.position = pos
+	body.rotation.y = deg_to_rad(rot_deg)
 	body.set_meta("top", pos.y + size.y * 0.5)     # настоящая высота: граната её перелетает
 	body.add_to_group("solid_tops")
 	add_child(body)

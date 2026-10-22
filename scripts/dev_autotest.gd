@@ -157,8 +157,9 @@ func setup(main_node: Node3D, args: PackedStringArray) -> void:
 		elif a.begins_with("--secs="):
 			_moba_secs = int(a.trim_prefix("--secs="))
 		elif a.begins_with("--map="):
-			# карта из папки maps: --map=arena (PvP) или --map=classic
-			Maps.selected = "res://maps/%s.json" % a.trim_prefix("--map=")
+			# карта из папки maps: --map=arena (PvP) или --map=classic; или полный путь (user://карта.json)
+			var mp := a.trim_prefix("--map=")
+			Maps.selected = mp if mp.contains("://") else "res://maps/%s.json" % mp
 		elif a == "--perf":
 			_perf = true
 		elif a == "--prof":
@@ -914,6 +915,18 @@ func _run_mobatest() -> void:
 			if c is MultiMeshInstance3D:
 				grass += c.multimesh.instance_count
 		print("[MOBA] meshes=%d multimesh instances=%d" % [n, grass])
+		# повёрнутые стены: проходимость вдоль стены закрыта, сбоку открыта; хитбокс повёрнут
+		for w in main.walls:
+			var rot: float = Maps.cover_rot(w.c)
+			if rot == 0.0:
+				continue
+			var along := Vector3(w.c[2] * 0.4, 0, 0).rotated(Vector3.UP, deg_to_rad(rot))
+			var side := Vector3(0, 0, w.c[4] * 0.5 + 4.0).rotated(Vector3.UP, deg_to_rad(rot))
+			var cp := Vector3(w.c[0], 0, w.c[1])
+			var q := PhysicsRayQueryParameters3D.create(cp + along * 1.5 + Vector3.UP * 2.0, cp + Vector3.UP * 2.0, 1)
+			var hit := main.get_world_3d().direct_space_state.intersect_ray(q)
+			print("[MOBA] rotated wall %s rot=%d: nav center=%s end=%s side=%s ray hits at %s" % [cp, int(rot), main.nav.is_free(cp),
+				main.nav.is_free(cp + along), main.nav.is_free(cp + side), str(hit.get("position", "-"))])
 	if _frame == 40 and _shot_dir != "":
 		await RenderingServer.frame_post_draw
 		main.vision._viewport.get_texture().get_image().save_png(_shot_dir + "/fogmask.png")

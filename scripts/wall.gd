@@ -11,7 +11,7 @@ signal destroyed(wall: Node3D)
 
 const Art := preload("res://scripts/art.gd")
 
-var c: Array = []               # [x, z, ширина, высота, глубина, вид]
+var c: Array = []               # [x, z, ширина, высота, глубина, вид, поворот°]
 var art: Node                   # map_art.gd: материалы карты
 var extra := 30.0               # насколько стена выше для выстрелов, чем на вид (игра плоская)
 var team := -1                  # ничья: бьют все
@@ -38,6 +38,7 @@ func _ready() -> void:
 	add_to_group("damageable")
 	_rng.seed = int(c[0] * 131.0 + c[1] * 17.0)
 	position = Vector3(c[0], 0, c[1])
+	rotation.y = deg_to_rad(Maps.cover_rot(c))      # стену можно повернуть в редакторе: поворачивается вся, с хитбоксом
 	reset_physics_interpolation()
 	var w: float = c[2]
 	var h: float = c[3]
@@ -69,8 +70,9 @@ func kind() -> String:
 	return c[5] if c.size() > 5 else "wall"
 
 
+# для карты проходимости: [x, z, ширина, высота, глубина, поворот°]
 func box() -> Array:
-	return [c[0], c[1], c[2], c[3], c[4]]
+	return [c[0], c[1], c[2], c[3], c[4], Maps.cover_rot(c)]
 
 
 func is_destroyed() -> bool:
@@ -83,8 +85,9 @@ func get_hit_radius() -> float:
 
 # расстояние от точки взрыва до стены (до ближайшего края, а не до центра)
 func blast_distance(p: Vector3) -> float:
-	var dx := maxf(absf(p.x - c[0]) - c[2] * 0.5, 0.0)
-	var dz := maxf(absf(p.z - c[1]) - c[4] * 0.5, 0.0)
+	var l := Vector2(p.x - c[0], p.z - c[1]).rotated(deg_to_rad(Maps.cover_rot(c)))     # в осях стены
+	var dx := maxf(absf(l.x) - c[2] * 0.5, 0.0)
+	var dz := maxf(absf(l.y) - c[4] * 0.5, 0.0)
 	return Vector2(dx, dz).length()
 
 
@@ -144,7 +147,8 @@ func _collapse() -> void:
 	_debris(clampi(int(maxf(w, d) * 1.2), 10, 26), 1.0, 1.0)
 	Fx.dust_ring(global_position, maxf(w, d) * 0.6)
 	Fx.dust_cloud(global_position, clampf(maxf(w, d) * 0.5, 2.0, 5.0))      # пыль от обвала долго оседает
-	Fx.clear_marks(AABB(global_position - Vector3(w * 0.5, 0, d * 0.5), Vector3(w, h + 2.0, d)))
+	var br := Maps.box_rect(c[0], c[1], w, d, Maps.cover_rot(c))
+	Fx.clear_marks(AABB(Vector3(br.position.x, 0, br.position.y), Vector3(br.size.x, h + 2.0, br.size.y)))
 	Fx.explosion(global_position + Vector3.UP * h * 0.4, minf(maxf(w, d) * 0.35, 4.0))
 	Sfx.play_at("wallbreak", global_position, 2.0, 0.08)
 	destroyed.emit(self)
@@ -166,7 +170,7 @@ func _debris(count: int, size_k: float, speed_k: float) -> void:
 		mi.mesh = Art.bevel_box(s, minf(minf(s.x, s.y), s.z) * 0.2)
 		mi.material_override = mats[0] if _rng.randf() < 0.85 else mats[1]
 		scene.add_child(mi)
-		var start := global_position + Vector3(_rng.randf_range(-w, w) * 0.45, _rng.randf_range(0.3, h), _rng.randf_range(-d, d) * 0.45)
+		var start := global_position + global_basis * Vector3(_rng.randf_range(-w, w) * 0.45, _rng.randf_range(0.3, h), _rng.randf_range(-d, d) * 0.45)
 		mi.global_position = start
 		mi.rotation = Vector3(_rng.randf() * TAU, _rng.randf() * TAU, _rng.randf() * TAU)
 		var out := Vector3(start.x - global_position.x, 0, start.z - global_position.z)

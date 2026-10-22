@@ -85,7 +85,16 @@ func _draw_map(covers: Array, broken: Array) -> Image:
 			col = Color(0.32, 0.3, 0.28)
 		elif c.size() > 5 and c[5] == "rock":
 			col = Color(0.55, 0.5, 0.42)
-		img.fill_rect(Rect2i(x0, y0, maxi(int(c[2] * 2), 1), maxi(int(c[4] * 2), 1)), col)
+		var rot := Maps.cover_rot(c)
+		if rot == 0.0:
+			img.fill_rect(Rect2i(x0, y0, maxi(int(c[2] * 2), 1), maxi(int(c[4] * 2), 1)), col)
+			continue
+		# повёрнутое укрытие: закрашиваем пиксели внутри него (2 пикселя на метр)
+		var br := Maps.box_rect(c[0], c[1], c[2], c[4], rot)
+		for y in range(maxi(int((br.position.y - _rect.position.y) * 2), 0), mini(int((br.end.y - _rect.position.y) * 2) + 1, h)):
+			for x in range(maxi(int((br.position.x - _rect.position.x) * 2), 0), mini(int((br.end.x - _rect.position.x) * 2) + 1, w)):
+				if Maps.in_box(_rect.position.x + (x + 0.5) * 0.5, _rect.position.y + (y + 0.5) * 0.5, c[0], c[1], c[2], c[4], rot, 0.25):
+					img.set_pixel(x, y, col)
 	return img
 
 
