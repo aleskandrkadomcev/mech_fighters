@@ -24,14 +24,14 @@ const DATA := {
 	# ---------------- МЕХИ (ноги и корпус вместе) ----------------
 	# class: лёгкий/средний/тяжёлый; trait: особенность словами; style: как выглядит корпус (если мех из коробок);
 	# model: 3D-модель из assets/mechs (если задана, мех собирается из неё)
-	"mech_wasp": {"slot": "mech", "name": "Оса", "class": "Лёгкий", "style": "light", "model": "light_046748",
+	"mech_wasp": {"slot": "mech", "name": "Оса", "class": "Лёгкий", "style": "light", "model": "light_046748_v2",
 		"trait": "Два рывка подряд, самый быстрый",
 		"weight": 20.0, "capacity": 60.0, "hp": 190.0, "hit_radius": 1.55, "vision": 40.0, "omni": 15.0, "slots": 3,
 		"walk_speed": 9.0, "run_speed": 17.5, "accel": 22.0, "decel": 36.0,
 		"dash_speed": 50.0, "dash_time": 0.22, "dash_cooldown": 1.6, "dash_brake": 120.0, "dash_charges": 2, "dash_ramp": 0.12,
 		"legs_turn_speed": 320.0, "torso_turn_speed": 340.0,
 		"stride_walk": 5.0, "stride_run": 6.0, "legs_scale": 0.85, "hull_scale": 0.8},
-	"mech_hound": {"slot": "mech", "name": "Гончая", "class": "Лёгкий", "style": "scout", "model": "light_cc59ad",
+	"mech_hound": {"slot": "mech", "name": "Гончая", "class": "Лёгкий", "style": "scout", "model": "light_cc59ad_v2",
 		"trait": "Разведчик: дальний обзор и сильный омни-сенсор",
 		"weight": 22.0, "capacity": 62.0, "hp": 210.0, "hit_radius": 1.6, "vision": 52.0, "omni": 24.0, "slots": 3,
 		"walk_speed": 8.6, "run_speed": 16.5, "accel": 20.0, "decel": 34.0,
@@ -52,7 +52,7 @@ const DATA := {
 		"dash_speed": 46.0, "dash_time": 0.26, "dash_cooldown": 2.0, "dash_brake": 110.0, "dash_charges": 1, "dash_ramp": 0.16,
 		"legs_turn_speed": 220.0, "torso_turn_speed": 260.0, "moving_spread": 0.5,
 		"stride_walk": 5.5, "stride_run": 6.1, "legs_scale": 1.0, "hull_scale": 0.92},
-	"mech_assault": {"slot": "mech", "name": "Штурмовик", "class": "Средний", "style": "mid", "model": "mid_87e20",
+	"mech_assault": {"slot": "mech", "name": "Штурмовик", "class": "Средний", "style": "mid", "model": "mid_87e20_v2",
 		"trait": "Универсал: ровные числа, много слотов",
 		"weight": 34.0, "capacity": 90.0, "hp": 300.0, "hit_radius": 1.9, "vision": 36.0, "omni": 14.0, "slots": 5,
 		"walk_speed": 7.8, "run_speed": 14.9, "accel": 16.0, "decel": 31.0,

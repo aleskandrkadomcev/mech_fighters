@@ -112,6 +112,10 @@ MODELS = {
 
 # Крепость, вторая версия: тот же исходник, но пересборка по объёму вместо простого упрощения (23.10.2026)
 MODELS["heavy_26cbe_v2"] = dict(MODELS["heavy_26cbe"], remesh=0.03)
+# остальные мехи из моделей — так же (лёгкие мельче, шаг сетки меньше)
+MODELS["mid_87e20_v2"] = dict(MODELS["mid_87e20"], remesh=0.028)
+MODELS["light_046748_v2"] = dict(MODELS["light_046748"], remesh=0.022)
+MODELS["light_cc59ad_v2"] = dict(MODELS["light_cc59ad"], remesh=0.022)
 
 argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 NAMES = [argv[0]] if argv and argv[0] in MODELS else list(MODELS.keys())
