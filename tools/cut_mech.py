@@ -12,6 +12,10 @@
 #      у исходника тёмные линии на корпусе — это тени щелей между деталями, после упрощения их нет;
 #      упрощает; окраска и карта рельефа 2048, шероховатость 1024; корпус матовее (глянец отражал небо
 #      и заливал окраску серым);
+#   5б. (если у модели задан remesh) пересобирает каждую часть по объёму: сплошная оболочка без дыр и щелей
+#      (исходник собран из тысяч отдельных кусков, при простом упрощении между ними открывались щели), упрощает,
+#      делает одну новую раскладку текстуры на все части и запекает на неё окраску с исходника (старая раскладка
+#      из сотен островков рвалась при упрощении). Мелкие тонкие детали пропадают — на экране мех ~200 пикселей;
 #   6. добавляет точки (пустые узлы): суставы j_hip/j_knee/j_ankle _l/_r, крепления пушек gun_l/gun_r,
 #      модулей mod_0.., двигателей рывка jet_0.., полосы цвета команды accent_0.. (масштаб узла = размер полосы).
 # Игра (mech_visual.gd) сама переносит части в кости по суставам.
@@ -103,6 +107,9 @@ MODELS = {
 		accents=[(0.07, -0.02, 0.01, 0.16)],
 		target=dict(hull=8000, pelvis=0, thigh=1800, shin=2000, foot=1500)),
 }
+
+# Крепость, вторая версия: тот же исходник, но пересборка по объёму вместо простого упрощения (23.10.2026)
+MODELS["heavy_26cbe_v2"] = dict(MODELS["heavy_26cbe"], remesh=0.03)
 
 argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 NAMES = [argv[0]] if argv and argv[0] in MODELS else list(MODELS.keys())
@@ -272,7 +279,12 @@ def cut(name):
 		o.data.update()
 	# 5. затенение щелей с исходной модели (до упрощения), потом упрощение
 	ao = bake_ao(objs, mat0)
+	if cfg.get("remesh"):
+		fix_textures(ao)            # затенение щелей впекаем в окраску исходника, с неё потом запекаем
+		objs = rebuild(objs, cfg)
 	for nm, o in objs.items():
+		if cfg.get("remesh"):
+			break
 		t0 = tris(o)
 		target = cfg["target"][nm.split("_")[0]]
 		if target > 0 and t0 > target:
@@ -326,7 +338,8 @@ def cut(name):
 			k += 1
 	bm.free()
 	# 7. текстуры: окраска с затенением щелей, рельеф, матовость
-	fix_textures(ao)
+	if not cfg.get("remesh"):
+		fix_textures(ao)
 	if SHOTS:
 		shots(name, objs, empties)
 	# 8. выгрузка
@@ -337,6 +350,94 @@ def cut(name):
 	bpy.ops.export_scene.gltf(filepath=dst, export_format='GLB', use_selection=True, export_normals=True,
 		export_materials='EXPORT', export_yup=True, export_apply=True, export_image_format='JPEG')
 	print("TOTAL %s: треугольников %d -> %s" % (name, sum(tris(o) for o in objs.values()), dst))
+
+
+def rebuild(objs, cfg):
+	"""пересборка по объёму, упрощение, одна раскладка на все части, окраска запекается с исходника"""
+	vox = cfg["remesh"]
+	lows = {}
+	for nm, hi in objs.items():
+		lo = hi.copy()
+		lo.data = hi.data.copy()
+		lo.name = nm + "_lo"
+		bpy.context.scene.collection.objects.link(lo)
+		bpy.ops.object.select_all(action='DESELECT')
+		bpy.context.view_layer.objects.active = lo
+		lo.select_set(True)
+		# исходник — тонкие открытые листы: сначала толщина, иначе пересборка по объёму их теряет
+		sol = lo.modifiers.new("sol", 'SOLIDIFY')
+		sol.thickness = vox * 2.0
+		sol.offset = 0.0
+		bpy.ops.object.modifier_apply(modifier="sol")
+		m = lo.modifiers.new("vox", 'REMESH')
+		m.mode = 'VOXEL'
+		m.voxel_size = vox
+		bpy.ops.object.modifier_apply(modifier="vox")
+		t0 = tris(lo)
+		target = cfg["target"][nm.split("_")[0]]
+		if target > 0 and t0 > target:
+			d = lo.modifiers.new("dec", 'DECIMATE')
+			d.decimate_type = 'COLLAPSE'
+			d.ratio = target / t0
+			d.use_collapse_triangulate = True
+			bpy.ops.object.modifier_apply(modifier="dec")
+		bpy.ops.object.shade_smooth_by_angle(angle=math.radians(35))
+		if not lo.data.uv_layers:
+			lo.data.uv_layers.new(name="UVMap")
+		print("REMESH %-8s исходник %8d -> оболочка %7d -> %6d" % (nm, tris(hi), t0, tris(lo)))
+		lows[nm] = lo
+	# одна раскладка на все части
+	bpy.ops.object.select_all(action='DESELECT')
+	for lo in lows.values():
+		lo.select_set(True)
+	bpy.context.view_layer.objects.active = next(iter(lows.values()))
+	bpy.ops.object.mode_set(mode='EDIT')
+	bpy.ops.mesh.select_all(action='SELECT')
+	bpy.ops.uv.smart_project(angle_limit=math.radians(60), island_margin=0.003)
+	bpy.ops.object.mode_set(mode='OBJECT')
+	# новый материал с одной текстурой
+	img = bpy.data.images.new("mech_color", TEX, TEX, alpha=False)
+	mat = bpy.data.materials.new("mech")
+	mat.use_nodes = True
+	nt = mat.node_tree
+	bsdf = nt.nodes["Principled BSDF"]
+	bsdf.inputs["Roughness"].default_value = 0.75
+	bsdf.inputs["Metallic"].default_value = 0.35
+	node = nt.nodes.new('ShaderNodeTexImage')
+	node.image = img
+	nt.links.new(node.outputs["Color"], bsdf.inputs["Base Color"])
+	nt.nodes.active = node
+	for lo in lows.values():
+		lo.data.materials.clear()
+		lo.data.materials.append(mat)
+	# запекание окраски с исходника (только цвет, без света)
+	sc = bpy.context.scene
+	sc.cycles.samples = 4
+	bk = sc.render.bake
+	bk.use_selected_to_active = True
+	bk.cage_extrusion = vox * 3.0
+	bk.max_ray_distance = vox * 10.0
+	bk.margin = 8
+	bk.use_pass_direct = False
+	bk.use_pass_indirect = False
+	bk.use_pass_color = True
+	first = True
+	for nm, lo in lows.items():
+		bpy.ops.object.select_all(action='DESELECT')
+		objs[nm].select_set(True)
+		lo.select_set(True)
+		bpy.context.view_layer.objects.active = lo
+		bk.use_clear = first
+		bpy.ops.object.bake(type='DIFFUSE', pass_filter={'COLOR'}, use_selected_to_active=True,
+			cage_extrusion=vox * 3.0, max_ray_distance=vox * 10.0, margin=8, use_clear=first)
+		first = False
+	img.pack()
+	# исходник больше не нужен
+	for nm in list(objs.keys()):
+		bpy.data.objects.remove(objs[nm])
+		lows[nm].name = nm
+		lows[nm].data.name = nm
+	return lows
 
 
 def bake_ao(objs, mat):

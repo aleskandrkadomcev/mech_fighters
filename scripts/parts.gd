@@ -87,7 +87,7 @@ const DATA := {
 		"dash_speed": 36.0, "dash_time": 0.26, "dash_cooldown": 3.2, "dash_brake": 90.0, "dash_charges": 1, "dash_ramp": 0.2,
 		"legs_turn_speed": 150.0, "torso_turn_speed": 160.0, "armor_flat": 3.0, "resist_stun": 0.2,
 		"stride_walk": 6.0, "stride_run": 6.4, "legs_scale": 1.16, "hull_scale": 1.18},
-	"mech_fortress": {"slot": "mech", "name": "Крепость", "class": "Тяжёлый", "style": "heavy", "model": "heavy_26cbe",
+	"mech_fortress": {"slot": "mech", "name": "Крепость", "class": "Тяжёлый", "style": "heavy", "model": "heavy_26cbe_v2",
 		"trait": "Больше всех слотов, защита от взрывов и оглушения",
 		"weight": 54.0, "capacity": 135.0, "hp": 460.0, "hit_radius": 2.3, "vision": 30.0, "omni": 12.0, "slots": 7,
 		"walk_speed": 5.2, "run_speed": 10.0, "accel": 10.0, "decel": 27.0,
