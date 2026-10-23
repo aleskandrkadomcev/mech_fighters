@@ -27,6 +27,7 @@ from mathutils.bvhtree import BVHTree
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEX = 2048           # окраска и карта рельефа (исходник 4096: в бою мех мелкий, 4096 только съест видеопамять)
+TEX_BAKE = 4096      # окраска после пересборки по объёму: раскладка своя, кусков много — нужно больше точек
 TEX_ORM = 1024       # металличность и шероховатость
 AO_DIST = 0.18       # затенение щелей: на каком расстоянии (метры игры) деталь затеняет соседнюю
 AO_K = 0.7           # насколько щели темнеют (0 — никак, 1 — до чёрного)
@@ -279,9 +280,13 @@ def cut(name):
 		o.data.vertices.foreach_set('co', b.ravel())
 		o.data.update()
 	# 5. затенение щелей с исходной модели (до упрощения), потом упрощение
-	ao = bake_ao(objs, mat0)
 	if cfg.get("remesh"):
-		fix_textures(ao)            # затенение щелей впекаем в окраску исходника, с неё потом запекаем
+		# затенение щелей впекаем в окраску исходника в полном размере (4096), с неё потом запекаем
+		ao = bake_ao(objs, mat0, TEX_BAKE)
+		fix_textures(ao, TEX_BAKE)
+	else:
+		ao = bake_ao(objs, mat0)
+	if cfg.get("remesh"):
 		objs = rebuild(objs, cfg)
 	for nm, o in objs.items():
 		if cfg.get("remesh"):
@@ -349,7 +354,8 @@ def cut(name):
 		o.select_set(True)
 	dst = os.path.join(ROOT, "assets", "mechs", name + ".glb")
 	bpy.ops.export_scene.gltf(filepath=dst, export_format='GLB', use_selection=True, export_normals=True,
-		export_materials='EXPORT', export_yup=True, export_apply=True, export_image_format='JPEG')
+		export_materials='EXPORT', export_yup=True, export_apply=True, export_image_format='JPEG',
+		export_jpeg_quality=95)
 	print("TOTAL %s: треугольников %d -> %s" % (name, sum(tris(o) for o in objs.values()), dst))
 
 
@@ -394,10 +400,22 @@ def rebuild(objs, cfg):
 	bpy.context.view_layer.objects.active = next(iter(lows.values()))
 	bpy.ops.object.mode_set(mode='EDIT')
 	bpy.ops.mesh.select_all(action='SELECT')
-	bpy.ops.uv.smart_project(angle_limit=math.radians(60), island_margin=0.003)
+	bpy.ops.uv.smart_project(angle_limit=math.radians(80), island_margin=0.001)
+	# плотная укладка кусков по их форме (с поворотом), иначе на сам мех приходится малая часть картинки и она мутная
+	bpy.ops.uv.pack_islands(shape_method='CONCAVE', rotate=True, margin=0.001)
 	bpy.ops.object.mode_set(mode='OBJECT')
+	used = 0.0
+	for lo in lows.values():
+		uv = lo.data.uv_layers.active.data
+		for poly in lo.data.polygons:
+			pts = [uv[i].uv for i in poly.loop_indices]
+			a = 0.0
+			for k in range(1, len(pts) - 1):
+				a += abs((pts[k] - pts[0]).cross(pts[k + 1] - pts[0])) * 0.5
+			used += a
+	print("UV: мех занимает %.0f%% картинки" % (used * 100.0))
 	# новый материал с одной текстурой
-	img = bpy.data.images.new("mech_color", TEX, TEX, alpha=False)
+	img = bpy.data.images.new("mech_color", TEX_BAKE, TEX_BAKE, alpha=False)
 	mat = bpy.data.materials.new("mech")
 	mat.use_nodes = True
 	nt = mat.node_tree
@@ -413,7 +431,7 @@ def rebuild(objs, cfg):
 		lo.data.materials.append(mat)
 	# запекание окраски с исходника (только цвет, без света)
 	sc = bpy.context.scene
-	sc.cycles.samples = 4
+	sc.cycles.samples = 16          # сглаживание при переносе окраски
 	bk = sc.render.bake
 	bk.use_selected_to_active = True
 	bk.cage_extrusion = vox * 3.0
@@ -441,7 +459,7 @@ def rebuild(objs, cfg):
 	return lows
 
 
-def bake_ao(objs, mat):
+def bake_ao(objs, mat, size=TEX):
 	"""затенение щелей и углублений с исходной модели в раскладку текстуры -> массив TEX×TEX (0..1)"""
 	sc = bpy.context.scene
 	sc.render.engine = 'CYCLES'
@@ -465,7 +483,7 @@ def bake_ao(objs, mat):
 	w = bpy.data.worlds.new("ao")
 	sc.world = w
 	w.light_settings.distance = AO_DIST
-	img = bpy.data.images.new("ao_bake", TEX, TEX, alpha=False)
+	img = bpy.data.images.new("ao_bake", size, size, alpha=False)
 	img.colorspace_settings.name = 'Non-Color'
 	nt = mat.node_tree
 	node = nt.nodes.new('ShaderNodeTexImage')
@@ -478,16 +496,16 @@ def bake_ao(objs, mat):
 	sc.render.bake.margin = 6
 	sc.render.bake.use_clear = True
 	bpy.ops.object.bake(type='AO')
-	buf = np.empty(TEX * TEX * 4, dtype=np.float32)
+	buf = np.empty(size * size * 4, dtype=np.float32)
 	img.pixels.foreach_get(buf)
 	nt.nodes.remove(node)
 	bpy.data.images.remove(img)
-	ao = buf.reshape(TEX, TEX, 4)[:, :, 0]
+	ao = buf.reshape(size, size, 4)[:, :, 0]
 	print("AO: средняя %.2f, тёмных (<0.5) %.1f%%" % (float(ao.mean()), float((ao < 0.5).mean() * 100)))
 	return ao
 
 
-def fix_textures(ao):
+def fix_textures(ao, size=TEX):
 	"""окраска 2048 с затенением щелей, рельеф 2048, шероховатость 1024 и матовее"""
 	for img in list(bpy.data.images):
 		nm = img.name.lower()
@@ -506,11 +524,11 @@ def fix_textures(ao):
 			if img.size[0] != TEX:
 				img.scale(TEX, TEX)
 		else:
-			if img.size[0] != TEX:
-				img.scale(TEX, TEX)
-			px = np.empty(TEX * TEX * 4, dtype=np.float32)
+			if img.size[0] != size:
+				img.scale(size, size)
+			px = np.empty(size * size * 4, dtype=np.float32)
 			img.pixels.foreach_get(px)
-			px = px.reshape(TEX, TEX, 4)
+			px = px.reshape(size, size, 4)
 			k = (1.0 - AO_K) + AO_K * ao
 			px[:, :, :3] *= k[:, :, None]
 			img.pixels.foreach_set(px.ravel())
