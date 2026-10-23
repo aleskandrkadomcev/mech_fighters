@@ -40,7 +40,8 @@ MODELS = {
 	"heavy_26cbe": dict(
 		src="26cbe29566d8c5027b8ddae8bf96abbf.glb", rotz=0, x0=0.0, scale=6.3,
 		delete=[lambda x, y, z, ax: (ax > 0.2) & (z > 0.445)],
-		delete_comp=[lambda x, y, z, ax: (ax > 0.25) & (z > 0.38)],
+		# обрезки пушек на балках; крышку тазобедренного шарнира (торчит вбок на той же высоте) не трогаем
+		delete_comp=[lambda x, y, z, ax: (ax > 0.25) & (z > 0.38) & ~((np.abs(y - 0.025) < 0.09) & (z < 0.44))],
 		torso=lambda x, y, z, ax: z > 0.445,
 		pelvis=lambda x, y, z, ax: ax < 0.12,
 		thigh=[(-0.32, 0.45), (0.2, 0.45), (0.2, 0.31), (0.0, 0.27), (-0.07, 0.25), (-0.32, 0.19)],
