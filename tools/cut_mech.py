@@ -16,6 +16,9 @@
 #      (исходник собран из тысяч отдельных кусков, при простом упрощении между ними открывались щели), упрощает,
 #      делает одну новую раскладку текстуры на все части и запекает на неё окраску с исходника (старая раскладка
 #      из сотен островков рвалась при упрощении). Мелкие тонкие детали пропадают — на экране мех ~200 пикселей;
+#   5в. (если задан weapon_comp) пушки модели героя остаются: куски, чей центр подходит под правило, становятся
+#      деталями weapon_l / weapon_r (игра крутит их за прицелом), точки muzzle_l/_r — концы стволов.
+#      gun_side "l"/"r" — пушка только с одной стороны: обе точки gun_ и muzzle_ на ней (второй ствол стреляет оттуда же);
 #   6. добавляет точки (пустые узлы): суставы j_hip/j_knee/j_ankle _l/_r, крепления пушек gun_l/gun_r,
 #      модулей mod_0.., двигателей рывка jet_0.., полосы цвета команды accent_0.. (масштаб узла = размер полосы).
 # Игра (mech_visual.gd) сама переносит части в кости по суставам.
@@ -109,6 +112,110 @@ MODELS = {
 		accents=[(0.07, -0.02, 0.01, 0.16)],
 		target=dict(hull=8000, pelvis=0, thigh=1800, shin=2000, foot=1500)),
 }
+
+# ГЕРОИ (28.10.2026, модели Сани в «3d ref»): пушки модели остаются (weapon_comp), сразу пересборка по объёму.
+# Координаты — по снимкам с сеткой (единицы модели, перёд -Y, верх Z, x от середины; +X — левая сторона меха)
+HEROES = {
+	# артиллерия: длинная спаренная пушка только справа (-X), слева короб — часть корпуса
+	"hero_art1": dict(
+		src="art1.glb", rotz=0, x0=0.0, scale=6.0, delete=[], delete_comp=[],
+		weapon_comp=lambda x, y, z, ax: (x < -0.15) & (z > 0.5), gun_side="r",
+		gun=(-0.25, -0.05, 0.6), muzzle=(-0.24, -0.59, 0.585),
+		torso=lambda x, y, z, ax: z > 0.505,
+		pelvis=lambda x, y, z, ax: ax < 0.12,
+		thigh=[(-0.22, 0.52), (0.2, 0.52), (0.2, 0.34), (0.0, 0.28), (-0.22, 0.3)],
+		foot_z=0.07,
+		hip=(0.24, 0.0, 0.46), knee=(0.24, -0.06, 0.3), ankle=(0.24, 0.06, 0.08),
+		mods=[(0.08, 0.0), (-0.08, 0.0)], jets=[(0.1, 0.22, 0.62), (-0.1, 0.22, 0.62)], accents=[],
+		target=dict(hull=9000, pelvis=1200, thigh=3000, shin=3000, foot=2200, weapon=3000), remesh=0.03),
+	# тяжёлый: на плечах блоки Гатлингов по обе стороны
+	"hero_h1": dict(
+		src="h1.glb", rotz=0, x0=0.0, scale=5.6, delete=[], delete_comp=[],
+		weapon_comp=lambda x, y, z, ax: (ax > 0.26) & (z > 0.44) & (z < 0.61),
+		gun=(0.33, 0.0, 0.53), muzzle=(0.33, -0.23, 0.52),
+		torso=lambda x, y, z, ax: z > 0.515,
+		pelvis=lambda x, y, z, ax: ax < 0.1,
+		thigh=[(-0.25, 0.52), (0.2, 0.52), (0.2, 0.33), (0.0, 0.27), (-0.25, 0.29)],
+		foot_z=0.08,
+		hip=(0.22, -0.02, 0.45), knee=(0.22, -0.06, 0.28), ankle=(0.22, 0.02, 0.08),
+		mods=[(0.1, 0.05), (-0.1, 0.05)], jets=[(0.08, 0.2, 0.6), (-0.08, 0.2, 0.6)], accents=[],
+		target=dict(hull=9000, pelvis=1200, thigh=3000, shin=3000, foot=2200, weapon=2500), remesh=0.03),
+	# средний: пушки в плечевых блоках по обе стороны, ракетные коробы сверху остаются на корпусе
+	"hero_m3": dict(
+		src="m3.glb", rotz=0, x0=0.0, scale=4.4, delete=[], delete_comp=[],
+		weapon_comp=lambda x, y, z, ax: (ax > 0.24) & (z > 0.58) & (z < 0.73),
+		gun=(0.31, 0.0, 0.66), muzzle=(0.32, -0.29, 0.635),
+		torso=lambda x, y, z, ax: (z > 0.585) | ((ax < 0.13) & (z > 0.52)),
+		pelvis=lambda x, y, z, ax: (ax < 0.13) & (z > 0.42),
+		thigh=[(-0.25, 0.56), (0.15, 0.56), (0.15, 0.36), (0.0, 0.3), (-0.25, 0.32)],
+		foot_z=0.07,
+		hip=(0.22, 0.0, 0.48), knee=(0.22, -0.1, 0.3), ankle=(0.22, 0.02, 0.08),
+		mods=[(0.17, 0.0), (-0.17, 0.0)], jets=[(0.07, 0.18, 0.62), (-0.07, 0.18, 0.62)], accents=[],
+		target=dict(hull=8000, pelvis=1000, thigh=2200, shin=2400, foot=1600, weapon=2000), remesh=0.028),
+	# лёгкий: длинные расставленные ноги, пушки на руках-пилонах по обе стороны
+	"hero_l1": dict(
+		src="l1.glb", rotz=0, x0=0.0, scale=3.8, delete=[], delete_comp=[],
+		weapon_comp=lambda x, y, z, ax: (ax > 0.22) & (z > 0.56) & (z < 0.68),
+		gun=(0.27, 0.0, 0.64), muzzle=(0.27, -0.29, 0.615),
+		torso=lambda x, y, z, ax: (z > 0.6) | ((ax < 0.12) & (z > 0.55)),
+		pelvis=lambda x, y, z, ax: (ax < 0.12) & (z > 0.42),
+		thigh=[(-0.25, 0.6), (0.15, 0.6), (0.15, 0.45), (-0.05, 0.33), (-0.25, 0.35)],
+		foot_z=0.06,
+		hip=(0.2, 0.0, 0.53), knee=(0.26, -0.14, 0.38), ankle=(0.32, 0.02, 0.07),
+		mods=[(0.15, 0.05), (-0.15, 0.05)], jets=[(0.06, 0.2, 0.62), (-0.06, 0.2, 0.62)], accents=[],
+		target=dict(hull=7000, pelvis=800, thigh=1800, shin=2000, foot=1500, weapon=1800), remesh=0.022),
+	# тяжёлый: ракетные блоки 2×2 трубы на плечах по обе стороны, сзади хвост
+	"hero_h4": dict(
+		src="h4.glb", rotz=0, x0=0.0, scale=5.5, delete=[], delete_comp=[],
+		weapon_comp=lambda x, y, z, ax: (ax > 0.33) & (z > 0.5) & (z < 0.68),
+		gun=(0.4, 0.0, 0.6), muzzle=(0.4, -0.13, 0.59),
+		torso=lambda x, y, z, ax: z > 0.5,
+		pelvis=lambda x, y, z, ax: (ax < 0.12) & (z > 0.35),
+		thigh=[(-0.25, 0.52), (0.2, 0.52), (0.2, 0.33), (0.0, 0.26), (-0.25, 0.28)],
+		foot_z=0.07,
+		hip=(0.25, 0.0, 0.45), knee=(0.25, -0.08, 0.27), ankle=(0.25, 0.02, 0.07),
+		mods=[(0.08, 0.0), (-0.08, 0.0)], jets=[(0.08, 0.3, 0.6), (-0.08, 0.3, 0.6)], accents=[],
+		target=dict(hull=9000, pelvis=1200, thigh=3000, shin=3000, foot=2200, weapon=2500), remesh=0.03),
+	# тяжёлый: спаренные стволы на плечах; стволы в модели опущены — доворачиваем их по оси короба (Саня)
+	"hero_h5": dict(
+		src="h5.glb", rotz=0, x0=0.0, scale=5.4, delete=[], delete_comp=[],
+		weapon_comp=lambda x, y, z, ax: (ax > 0.21) & (z > 0.535) & (z < 0.75),
+		barrel_fix=dict(cut_y=-0.22, pivot=(-0.22, 0.6), raise_deg=6.0),
+		gun=(0.3, 0.0, 0.62), muzzle=(0.3, -0.47, 0.6),
+		torso=lambda x, y, z, ax: (z > 0.535) | ((ax < 0.13) & (z > 0.48)),
+		pelvis=lambda x, y, z, ax: (ax < 0.13) & (z > 0.4),
+		thigh=[(-0.25, 0.55), (0.2, 0.55), (0.2, 0.36), (0.0, 0.3), (-0.25, 0.32)],
+		foot_z=0.07,
+		hip=(0.24, 0.0, 0.47), knee=(0.24, -0.08, 0.3), ankle=(0.24, 0.06, 0.09),
+		mods=[(0.08, 0.05), (-0.08, 0.05)], jets=[(0.08, 0.25, 0.65), (-0.08, 0.25, 0.65)], accents=[],
+		target=dict(hull=9000, pelvis=1200, thigh=3000, shin=3000, foot=2200, weapon=2500), remesh=0.03),
+	# средний: как h1, но мельче — блоки Гатлингов под плечами
+	"hero_m1": dict(
+		src="m1.glb", rotz=0, x0=0.0, scale=4.6, delete=[], delete_comp=[],
+		weapon_comp=lambda x, y, z, ax: (ax > 0.24) & (z > 0.43) & (z < 0.6),
+		gun=(0.3, 0.0, 0.52), muzzle=(0.29, -0.27, 0.52),
+		torso=lambda x, y, z, ax: (z > 0.585) | ((ax < 0.11) & (z > 0.5)),
+		pelvis=lambda x, y, z, ax: (ax < 0.11) & (z > 0.36),
+		thigh=[(-0.25, 0.55), (0.2, 0.55), (0.2, 0.33), (0.0, 0.27), (-0.25, 0.29)],
+		foot_z=0.07,
+		hip=(0.2, 0.0, 0.44), knee=(0.2, -0.08, 0.28), ankle=(0.2, 0.03, 0.08),
+		mods=[(0.08, 0.05), (-0.08, 0.05)], jets=[(0.07, 0.2, 0.6), (-0.07, 0.2, 0.6)], accents=[],
+		target=dict(hull=8000, pelvis=1000, thigh=2200, shin=2400, foot=1600, weapon=2000), remesh=0.028),
+	# лёгкий: длинный нос, пушки разные: слева две трубы, справа три (точки по сторонам свои)
+	"hero_l2": dict(
+		src="l2.glb", rotz=0, x0=0.0, scale=3.6, delete=[], delete_comp=[],
+		weapon_comp=lambda x, y, z, ax: (ax > 0.17) & (z > 0.68) & (z < 0.84),
+		guns=dict(l=((0.28, -0.02, 0.76), (0.31, -0.27, 0.75)), r=((-0.29, -0.02, 0.76), (-0.33, -0.3, 0.755))),
+		gun=(0.28, -0.02, 0.76),
+		torso=lambda x, y, z, ax: (z > 0.64) | ((ax < 0.12) & (z > 0.55)),
+		pelvis=lambda x, y, z, ax: (ax < 0.12) & (z > 0.45),
+		thigh=[(-0.3, 0.62), (0.15, 0.62), (0.15, 0.45), (-0.05, 0.36), (-0.3, 0.38)],
+		foot_z=0.06,
+		hip=(0.21, 0.0, 0.55), knee=(0.21, -0.12, 0.4), ankle=(0.21, 0.03, 0.08),
+		mods=[(0.06, 0.1), (-0.06, 0.1)], jets=[(0.06, 0.2, 0.75), (-0.06, 0.2, 0.75)], accents=[],
+		target=dict(hull=7000, pelvis=800, thigh=1800, shin=2000, foot=1500, weapon=1800), remesh=0.022),
+}
+MODELS.update(HEROES)
 
 # Крепость, вторая версия: тот же исходник, но пересборка по объёму вместо простого упрощения (23.10.2026)
 MODELS["heavy_26cbe_v2"] = dict(MODELS["heavy_26cbe"], remesh=0.03)
@@ -233,19 +340,48 @@ def cut(name):
 	me.update()
 	# 3. части
 	x, y, z, ax = face_centers(me)
+	weapon = np.zeros(len(x), dtype=bool)
+	if cfg.get("weapon_comp"):
+		lab = face_components(me)
+		cnt = np.bincount(lab).astype(np.float64)
+		cnt[cnt == 0] = 1
+		cx = np.bincount(lab, x) / cnt
+		cy = np.bincount(lab, y) / cnt
+		cz = np.bincount(lab, z) / cnt
+		weapon = cfg["weapon_comp"](cx, cy, cz, np.abs(cx))[lab]
+		print("WEAPON %s: граней пушек %d" % (name, int(weapon.sum())))
+		bf = cfg.get("barrel_fix")
+		if bf:
+			sel = weapon & (y < bf["cut_y"])
+			vids = set()
+			for fi in np.nonzero(sel)[0]:
+				vids.update(me.polygons[int(fi)].vertices)
+			a = -math.radians(bf["raise_deg"])      # концы стволов (-Y) идут вверх
+			ca, sa = math.cos(a), math.sin(a)
+			py, pz = bf["pivot"]
+			for vi in vids:
+				v = me.vertices[vi]
+				dy, dz = v.co.y - py, v.co.z - pz
+				v.co.y = py + dy * ca - dz * sa
+				v.co.z = pz + dy * sa + dz * ca
+			me.update()
+			x, y, z, ax = face_centers(me)
+			print("BARREL %s: довернули вершин %d на %.1f°" % (name, len(vids), bf["raise_deg"]))
 	torso = cfg["torso"](x, y, z, ax)
 	pelvis = (~torso) & cfg["pelvis"](x, y, z, ax) if cfg["pelvis"] else np.zeros(len(x), dtype=bool)
 	leg = (~torso) & (~pelvis)
 	foot = leg & (z < cfg["foot_z"])
 	thigh = leg & (~foot) & in_poly(y, z, cfg["thigh"])
 	shin = leg & (~foot) & (~thigh)
-	names = ["hull", "pelvis", "thigh_l", "thigh_r", "shin_l", "shin_r", "foot_l", "foot_r"]
+	names = ["hull", "pelvis", "thigh_l", "thigh_r", "shin_l", "shin_r", "foot_l", "foot_r", "weapon_l", "weapon_r"]
 	part = np.zeros(len(x), dtype=np.int32)
 	part[pelvis] = 1
 	left = x > 0     # перёд -Y: левая рука меха на +X
 	for base, m in (("thigh", thigh), ("shin", shin), ("foot", foot)):
 		part[m & left] = names.index(base + "_l")
 		part[m & ~left] = names.index(base + "_r")
+	part[weapon & left] = names.index("weapon_l")
+	part[weapon & ~left] = names.index("weapon_r")
 	me.materials.clear()
 	for nm in names:
 		me.materials.append(bpy.data.materials.new(nm))
@@ -327,8 +463,17 @@ def cut(name):
 		for jn in ("hip", "knee", "ankle"):
 			p = cfg[jn]
 			empty("j_%s_%s" % (jn, side), to_game((p[0] * sg, p[1], p[2])))
+		if cfg.get("guns"):
+			g, mz = cfg["guns"][side]
+			empty("gun_" + side, to_game(g))
+			empty("muzzle_" + side, to_game(mz))
+			continue
 		g = cfg["gun"]
-		empty("gun_" + side, to_game((g[0] * sg, g[1], g[2])))
+		k = 1.0 if cfg.get("gun_side") else sg
+		empty("gun_" + side, to_game((g[0] * k, g[1], g[2])))
+		if cfg.get("muzzle"):
+			mz = cfg["muzzle"]
+			empty("muzzle_" + side, to_game((mz[0] * k, mz[1], mz[2])))
 	for i, (mx, my) in enumerate(cfg["mods"]):
 		zt = top_at(mx, my)
 		gp = to_game((mx, my, 0))

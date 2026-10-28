@@ -480,9 +480,18 @@ func _build_torso(weapon_looks: Array, rockets: bool) -> void:
 		torso.add_child(pod)
 		gun_pods.append(pod)
 		var look: String = weapon_looks[i] if i < weapon_looks.size() else "twin"
-		var muzzle_z := _build_weapon(pod, look, s, i)
+		# пушка с модели героя (точки muzzle_l/_r): ставим её саму, ствол там, где в модели; пушки на этой
+		# стороне у модели может не быть — тогда подвес пустой, стреляет из ствола другой стороны (точки совпадают)
+		var sn := "l" if i == 0 else "r"
+		var mpos := Vector3.ZERO
+		if _pts.has("muzzle_" + sn):
+			if _parts.has("weapon_" + sn):
+				_model_part(_holder(pod, Transform3D(Basis.IDENTITY, -_pt("gun_" + sn))), "weapon_" + sn)
+			mpos = _pt("muzzle_" + sn) - _pt("gun_" + sn)
+		else:
+			mpos = Vector3(0, -0.05, _build_weapon(pod, look, s, i))
 		var mz := Node3D.new()
-		mz.position = Vector3(0, -0.05, muzzle_z)
+		mz.position = mpos
 		pod.add_child(mz)
 		muzzles.append(mz)
 		# вспышка выстрела: спрайт (если есть) или светящийся шар
@@ -502,7 +511,7 @@ func _build_torso(weapon_looks: Array, rockets: bool) -> void:
 			fm.cull_mode = BaseMaterial3D.CULL_DISABLED
 			fl.material_override = fm
 			fl.rotation = Vector3(-PI / 2, 0, 0)
-			fl.position = Vector3(0, -0.05, muzzle_z - 0.9)
+			fl.position = mpos + Vector3(0, 0, -0.9)
 		else:
 			var sm := SphereMesh.new()
 			sm.radius = 0.38
@@ -511,7 +520,7 @@ func _build_torso(weapon_looks: Array, rockets: bool) -> void:
 			sm.rings = 4
 			fl.mesh = sm
 			fl.material_override = _unshaded(Color(1.0, 0.82, 0.4) * 2.5)
-			fl.position = Vector3(0, -0.05, muzzle_z - 0.3)
+			fl.position = mpos + Vector3(0, 0, -0.3)
 			fl.scale = Vector3(0.8, 0.8, 1.8)
 		fl.scale *= (1.5 if look == "heavy" or look == "shotgun" else 1.0)
 		fl.visible = false

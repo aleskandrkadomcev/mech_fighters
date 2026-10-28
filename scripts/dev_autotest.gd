@@ -50,6 +50,7 @@ var _lobtest := false            # --lobtest: ЭМИ и осадное оруд�
 var _spawntest := false         # --spawntest --drop --enemies=0 --allies=1: мех садится прямо на другого — никто не подпрыгивает
 var _proptest := false           # --proptest: кучка ящиков не мешает пройти, ломается от меха и от взрыва
 var _pingtest := false           # --pingtest: Alt+клик — обычная метка, Alt + зажатая ЛКМ — круговое меню, выбор по направлению мыши
+var _herotest := false          # --herotest: герои из моделей ходят и стреляют, стволы на месте
 var _camtest := false           # --camtest (окно, без --fixed-fps): плавность камеры, когда двигаешь мышью (сдвиг к прицелу)
 var _abil3test := false         # --abil3test: вторая пачка абилок и правки (баррикада-стена, толчок по дистанции, крипы)
 var _abil2test := false         # --abil2test: абилки 17.10.2026 по очереди (связка, дротик, ЭМИ, напалм, зонд, баррикада, дрон, оборона, якорь, волна, прыжок)
@@ -196,6 +197,8 @@ func setup(main_node: Node3D, args: PackedStringArray) -> void:
 			_abil3test = true
 		elif a == "--camtest":
 			_camtest = true
+		elif a == "--herotest":
+			_herotest = true
 		elif a == "--pingtest":
 			_pingtest = true
 		elif a == "--ruintest":
@@ -304,6 +307,8 @@ func _process(_delta: float) -> void:
 		_run_abil3test()
 	if _camtest:
 		_run_camtest()
+	if _herotest:
+		_run_herotest()
 	if _pingtest:
 		_run_pingtest()
 	if _ruintest:
@@ -385,7 +390,7 @@ func _process(_delta: float) -> void:
 		var img := get_viewport().get_texture().get_image()
 		img.save_png(("%s/%s_f%04d.png" % [_shot_dir, _target, shot_f]) if _fxreel else ("%s/f%04d.png" % [_shot_dir, shot_f]))
 		_shots_left.erase(shot_f)
-		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and not _linktest and _mechexport == "" and not _gfxbench and not _cpubench and not _fancheck and not _aimtest and not _creeptest and not _radartest and not _ruintest and not _coredmg and not _slidetest and not _lobtest and not _spawntest and not _proptest and not _cdtest and not _statustest and not _hudshot and not _dashtest and not _pingtest and not _abil2test and not _abil3test and not _camtest:
+		if _shots_left.is_empty() and not _inputtest and not _paneltest and not _bottest and not _hittest and not _hangartest and not _flattest and not _abiltest and not _cloaktest and not _mobatest and not _showcase and not _pushtest and not _minetest and not _markertest and not _steptest and not _starttest and not _turrettest and not _gallery and not _wallshot and not _fightshot and not _fxshot and not _coreshot and not _dropshot and not _resultshot and _target == "" and not _railtest and not _linktest and _mechexport == "" and not _gfxbench and not _cpubench and not _fancheck and not _aimtest and not _creeptest and not _radartest and not _ruintest and not _coredmg and not _slidetest and not _lobtest and not _spawntest and not _proptest and not _cdtest and not _statustest and not _hudshot and not _dashtest and not _pingtest and not _abil2test and not _abil3test and not _camtest and not _herotest:
 			get_tree().quit()
 
 
@@ -4143,3 +4148,66 @@ func _jerk(a: Array) -> float:
 		d1 += absf(a[k + 1] - a[k])
 		d2 += absf(a[k + 1] - 2.0 * a[k] + a[k - 1])
 	return d2 / maxf(d1, 0.0001) * 100.0
+
+
+# ------------------------------------------------------------------
+#  Герои из моделей (--herotest --enemies=0 --allies=0 [--heroes=hero_h1,hero_m3]): свой мех по очереди
+#  становится каждым героем, идёт вперёд и стреляет из обеих пушек. Проверка: мех дошёл (ноги работают),
+#  выстрелы были, стволы (muzzle) рядом с мехом и впереди корпуса
+# ------------------------------------------------------------------
+
+func _run_herotest() -> void:
+	var m = main.mech
+	var spot := Vector3(-46, 0.05, -30)
+	if _frame == 5:
+		Cfg.creeps_enabled = 0
+		Cfg.bot_enemies = 0
+		for st in get_tree().get_nodes_in_group("structures"):
+			st.set_physics_process(false)
+		var list: Array = []
+		for a in OS.get_cmdline_user_args():
+			if a.begins_with("--heroes="):
+				list = Array(a.substr(9).split(","))
+		if list.is_empty():
+			for id in Parts.DATA:
+				if id.begins_with("hero_"):
+					list.append(id)
+		set_meta("heroes", list)
+		set_meta("i", 0)
+		set_meta("t0", 10)
+		m.fired.connect(func(_mount: int) -> void: set_meta("shots", int(get_meta("shots", 0)) + 1))
+	var list2: Array = get_meta("heroes", [])
+	var i: int = get_meta("i", 0)
+	if _frame < 10:
+		return
+	if i >= list2.size():
+		var f: int = get_meta("fails", 0)
+		print("[HERO] итог: %s" % ("ВСЁ ВЕРНО" if f == 0 else "ошибок %d" % f))
+		get_tree().quit()
+		return
+	var t: int = _frame - int(get_meta("t0"))
+	var id: String = list2[i]
+	if t == 0:
+		m.set_build({"mech": id, "core": "core_combat", "weapons": ["autocannon", "heavy_cannon"], "modules": []})
+		m.shield_left = 0.0
+		m.global_position = spot
+		m.velocity = Vector3.ZERO
+		m.snap_interpolation(m)
+		m.refill_all()
+		m.demo = {"move": Vector2(1, 0), "fire": true, "fire2": true, "aim": spot + Vector3(30, 1.5, 0)}
+		set_meta("shots", 0)
+	if t == 150:
+		var moved: float = Vector2(m.global_position.x - spot.x, m.global_position.z - spot.z).length()
+		var ok: bool = moved > 4.0 and int(get_meta("shots", 0)) >= 2
+		var info := ""
+		for g in 2:
+			var mz: Vector3 = m.visual.get_muzzle(g)
+			var rel: Vector3 = mz - m.global_position
+			var fwd: float = rel.dot(m.torso_forward())
+			info += " ствол%d: от меха %.1f, вперёд %.1f, высота %.1f;" % [g, rel.length(), fwd, rel.y]
+			ok = ok and rel.length() < 7.0 and rel.y > 0.5
+		if not ok:
+			set_meta("fails", int(get_meta("fails", 0)) + 1)
+		print("[HERO] %s: прошёл %.1f, выстрелов %d,%s %s" % [id, moved, int(get_meta("shots", 0)), info, "ВЕРНО" if ok else "ОШИБКА"])
+		set_meta("i", i + 1)
+		set_meta("t0", _frame + 1)
