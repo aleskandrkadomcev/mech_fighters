@@ -24,7 +24,7 @@ const DATA := {
 	# ---------------- МЕХИ (ноги и корпус вместе) ----------------
 	# class: лёгкий/средний/тяжёлый; trait: особенность словами; style: как выглядит корпус (если мех из коробок);
 	# model: 3D-модель из assets/mechs (если задана, мех собирается из неё)
-	"mech_wasp": {"slot": "mech", "name": "Оса", "class": "Лёгкий", "style": "light", "model": "light_046748_v2",
+	"mech_wasp": {"slot": "mech", "name": "Оса", "class": "Лёгкий", "style": "light", "model": "hero_l3",
 		"trait": "Два рывка подряд, самый быстрый",
 		"weight": 20.0, "capacity": 60.0, "hp": 190.0, "hit_radius": 1.55, "vision": 40.0, "omni": 15.0, "slots": 3,
 		"walk_speed": 9.0, "run_speed": 17.5, "accel": 22.0, "decel": 36.0,

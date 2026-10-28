@@ -229,6 +229,12 @@ MODELS["hero_m2"] = dict(MODELS["mid_87e20"], src="m2.glb",
 	weapon_comp=lambda x, y, z, ax: (ax > 0.28) & (z > 0.44) & (z < 0.8),
 	gun=(0.38, 0.0, 0.62), muzzle=(0.36, -0.43, 0.69), remesh=0.028,
 	target=dict(hull=8000, pelvis=800, thigh=2200, shin=2200, foot=1600, weapon=2500))
+# Оса с пушками своей модели (l3): слева (+X) длинная винтовка опущена ~20° — доворачиваем всю, справа большое орудие
+MODELS["hero_l3"] = dict(MODELS["light_046748"], src="l3.glb", delete=[], delete_comp=[],
+	weapon_comp=lambda x, y, z, ax: ((x < -0.24) & (z > 0.5)) | ((x > 0.26) & (z > 0.38)),
+	barrel_fix=dict(cut_y=1.0, pivot=(0.1, 0.68), raise_deg=20.0, side="l"),
+	guns=dict(l=((0.3, 0.0, 0.68), (0.3, -0.41, 0.705)), r=((-0.3, 0.0, 0.68), (-0.32, -0.2, 0.66))),
+	remesh=0.022, target=dict(hull=7500, pelvis=700, thigh=2000, shin=1800, foot=1500, weapon=2000))
 # остальные мехи из моделей — так же (лёгкие мельче, шаг сетки меньше)
 MODELS["mid_87e20_v2"] = dict(MODELS["mid_87e20"], remesh=0.028)
 MODELS["light_046748_v2"] = dict(MODELS["light_046748"], remesh=0.022)
@@ -363,6 +369,10 @@ def cut(name):
 		bf = cfg.get("barrel_fix")
 		if bf:
 			sel = weapon & (y < bf["cut_y"])
+			if bf.get("side") == "l":
+				sel &= x > 0
+			elif bf.get("side") == "r":
+				sel &= x < 0
 			vids = set()
 			for fi in np.nonzero(sel)[0]:
 				vids.update(me.polygons[int(fi)].vertices)
