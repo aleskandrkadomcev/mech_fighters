@@ -219,6 +219,16 @@ MODELS.update(HEROES)
 
 # Крепость, вторая версия: тот же исходник, но пересборка по объёму вместо простого упрощения (23.10.2026)
 MODELS["heavy_26cbe_v2"] = dict(MODELS["heavy_26cbe"], remesh=0.03)
+# Крепость и Штурмовик с пушками своих моделей (h2, m2 — те же исходники; суставы прежние, пушки остаются)
+MODELS["hero_h2"] = dict(MODELS["heavy_26cbe"], src="h2.glb", delete=[], delete_comp=[],
+	weapon_comp=lambda x, y, z, ax: (ax > 0.25) & (z > 0.38) & ~((np.abs(y - 0.025) < 0.09) & (z < 0.44)),
+	gun=(0.33, -0.02, 0.55), muzzle=(0.33, -0.28, 0.55), remesh=0.03,
+	target=dict(hull=9000, pelvis=1200, thigh=3000, shin=3000, foot=2200, weapon=3000))
+MODELS["hero_m2"] = dict(MODELS["mid_87e20"], src="m2.glb",
+	delete=[lambda x, y, z, ax: (ax > 0.1) & (ax < 0.21) & (z > 0.72) & (z < 0.84) & (y < -0.12)], delete_comp=[],
+	weapon_comp=lambda x, y, z, ax: (ax > 0.28) & (z > 0.44) & (z < 0.8),
+	gun=(0.38, 0.0, 0.62), muzzle=(0.36, -0.43, 0.69), remesh=0.028,
+	target=dict(hull=8000, pelvis=800, thigh=2200, shin=2200, foot=1600, weapon=2500))
 # остальные мехи из моделей — так же (лёгкие мельче, шаг сетки меньше)
 MODELS["mid_87e20_v2"] = dict(MODELS["mid_87e20"], remesh=0.028)
 MODELS["light_046748_v2"] = dict(MODELS["light_046748"], remesh=0.022)
