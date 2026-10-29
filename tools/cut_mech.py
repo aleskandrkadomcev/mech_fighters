@@ -214,6 +214,23 @@ HEROES = {
 		hip=(0.21, 0.05, 0.57), knee=(0.21, 0.062, 0.33), ankle=(0.21, 0.05, 0.09),
 		mods=[(0.06, 0.1), (-0.06, 0.1)], jets=[(0.06, 0.2, 0.75), (-0.06, 0.2, 0.75)], accents=[],
 		target=dict(hull=7000, pelvis=800, thigh=1800, shin=2000, foot=1500, weapon=1800), remesh=0.022),
+	# тяжёлый: модель повёрнута и в шаге; левая нога шагает вперёд и заходит под середину — удаляем,
+	# правая (отведена назад, колено сзади) прямая в виде спереди — зеркалим. Пушки на руках, позы рук разные
+	"hero_h3": dict(
+		src="h3.glb", rotz=-28, x0=0.0, scale=5.0,
+		delete=[lambda x, y, z, ax: (x > -0.12) & (ax < 0.3) & (z < 0.42) & (y < 0.0),
+			lambda x, y, z, ax: (x > 0.0) & (ax < 0.3) & (z < 0.45)], delete_comp=[],
+		mirror=lambda x, y, z, ax: (x < 0.0) & (x > -0.3) & (z < 0.45),
+		weapon_comp=lambda x, y, z, ax: (ax > 0.33) & (z > 0.25) & (z < 0.55),
+		guns=dict(l=((0.44, -0.05, 0.46), (0.44, -0.3, 0.456)), r=((-0.45, -0.02, 0.45), (-0.45, -0.22, 0.447))),
+		gun=(0.44, -0.05, 0.46),
+		torso=lambda x, y, z, ax: z > 0.47,
+		pelvis=lambda x, y, z, ax: (ax < 0.09) & (z > 0.3),
+		thigh=[(-0.1, 0.52), (0.5, 0.52), (0.5, 0.37), (0.3, 0.36), (0.12, 0.3), (-0.1, 0.3)],
+		foot_z=0.07,
+		hip=(0.18, 0.06, 0.39), knee=(0.18, 0.3, 0.29), ankle=(0.18, 0.29, 0.08),
+		mods=[(0.1, 0.1), (-0.1, 0.1)], jets=[(0.1, 0.25, 0.6), (-0.1, 0.25, 0.6)], accents=[],
+		target=dict(hull=9000, pelvis=1200, thigh=3000, shin=3000, foot=2200, weapon=2500), remesh=0.03),
 }
 MODELS.update(HEROES)
 
@@ -235,6 +252,13 @@ MODELS["hero_l3"] = dict(MODELS["light_046748"], src="l3.glb", delete=[], delete
 	barrel_fix=dict(cut_y=1.0, pivot=(0.1, 0.68), raise_deg=20.0, side="l"),
 	guns=dict(l=((0.3, 0.0, 0.68), (0.3, -0.41, 0.705)), r=((-0.3, 0.0, 0.68), (-0.32, -0.2, 0.66))),
 	remesh=0.022, target=dict(hull=7500, pelvis=700, thigh=2000, shin=1800, foot=1500, weapon=2000))
+# Гончая с пушками своей модели (l5 — та же модель, что light_cc59ad: суставы и зеркальная нога оттуда, пилот рядом убран).
+# Слева (+X) винтовка с длинным стволом, справа (-X) подвесной блок, спаренные стволы сверху
+MODELS["hero_l5"] = dict(MODELS["light_cc59ad"], src="l5.glb",
+	delete=[lambda x, y, z, ax: (x < -0.05) & (y < -0.36) & (z < 0.34)], delete_comp=[],
+	weapon_comp=lambda x, y, z, ax: ((x < -0.18) & (z > 0.33)) | ((x > 0.19) & (z > 0.53)),
+	guns=dict(l=((0.3, 0.0, 0.6), (0.3, -0.33, 0.565)), r=((-0.276, 0.0, 0.65), (-0.276, -0.24, 0.73))),
+	remesh=0.022, target=dict(hull=7500, pelvis=0, thigh=1800, shin=2000, foot=1500, weapon=2000))
 # остальные мехи из моделей — так же (лёгкие мельче, шаг сетки меньше)
 MODELS["mid_87e20_v2"] = dict(MODELS["mid_87e20"], remesh=0.028)
 MODELS["light_046748_v2"] = dict(MODELS["light_046748"], remesh=0.022)

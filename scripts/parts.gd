@@ -31,7 +31,7 @@ const DATA := {
 		"dash_speed": 50.0, "dash_time": 0.22, "dash_cooldown": 1.6, "dash_brake": 120.0, "dash_charges": 2, "dash_ramp": 0.12,
 		"legs_turn_speed": 320.0, "torso_turn_speed": 340.0,
 		"stride_walk": 5.0, "stride_run": 6.0, "legs_scale": 0.85, "hull_scale": 0.8},
-	"mech_hound": {"slot": "mech", "name": "Гончая", "class": "Лёгкий", "style": "scout", "model": "light_cc59ad_v2",
+	"mech_hound": {"slot": "mech", "name": "Гончая", "class": "Лёгкий", "style": "scout", "model": "hero_l5",
 		"trait": "Разведчик: дальний обзор и сильный омни-сенсор",
 		"weight": 22.0, "capacity": 62.0, "hp": 210.0, "hit_radius": 1.6, "vision": 52.0, "omni": 24.0, "slots": 3,
 		"walk_speed": 8.6, "run_speed": 16.5, "accel": 20.0, "decel": 34.0,
@@ -151,6 +151,13 @@ const DATA := {
 		"dash_speed": 46.0, "dash_time": 0.24, "dash_cooldown": 1.8, "dash_brake": 115.0, "dash_charges": 1, "dash_ramp": 0.12,
 		"legs_turn_speed": 300.0, "torso_turn_speed": 380.0,
 		"stride_walk": 5.2, "stride_run": 6.0, "legs_scale": 0.88, "hull_scale": 0.85},
+	"hero_h3": {"slot": "mech", "name": "H3", "class": "Тяжёлый", "style": "heavy", "model": "hero_h3",
+		"trait": "Тяжёлый широкий, пушки на руках (герой, модель h3)",
+		"weight": 54.0, "capacity": 135.0, "hp": 460.0, "hit_radius": 2.3, "vision": 30.0, "omni": 12.0, "slots": 7,
+		"walk_speed": 5.2, "run_speed": 10.0, "accel": 10.0, "decel": 27.0,
+		"dash_speed": 36.0, "dash_time": 0.28, "dash_cooldown": 3.4, "dash_brake": 90.0, "dash_charges": 1, "dash_ramp": 0.2,
+		"legs_turn_speed": 150.0, "torso_turn_speed": 170.0, "resist_explosion": 0.25, "resist_stun": 0.3,
+		"stride_walk": 6.0, "stride_run": 6.4, "legs_scale": 1.18, "hull_scale": 1.2},
 
 	# ---------------- ЯДРА ----------------
 	"core_battery": {"slot": "core", "name": "Ядро-батарея",
@@ -501,7 +508,7 @@ func mech_model(name: String) -> PackedScene:
 
 # старые мехи, спрятанные из ангара и у ботов (Саня, 29.10.2026: остаются только мехи из новых моделей).
 # Данные не удалены: сохранённые сборки с ними по-прежнему загружаются
-const HIDDEN := ["mech_hound", "mech_ghost", "mech_ray", "mech_medic", "mech_ram", "mech_mortar", "mech_bastion"]
+const HIDDEN := ["mech_ghost", "mech_ray", "mech_medic", "mech_ram", "mech_mortar", "mech_bastion"]
 
 
 func ids_for(slot: String) -> Array:
