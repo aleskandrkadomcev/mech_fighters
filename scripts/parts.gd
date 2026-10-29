@@ -499,10 +499,15 @@ func mech_model(name: String) -> PackedScene:
 #  Числа деталей с учётом твоих изменений
 # ------------------------------------------------------------------
 
+# старые мехи, спрятанные из ангара и у ботов (Саня, 29.10.2026: остаются только мехи из новых моделей).
+# Данные не удалены: сохранённые сборки с ними по-прежнему загружаются
+const HIDDEN := ["mech_hound", "mech_ghost", "mech_ray", "mech_medic", "mech_ram", "mech_mortar", "mech_bastion"]
+
+
 func ids_for(slot: String) -> Array:
 	var out: Array = []
 	for id in DATA:
-		if DATA[id]["slot"] == slot:
+		if DATA[id]["slot"] == slot and not HIDDEN.has(id):
 			out.append(id)
 	return out
 

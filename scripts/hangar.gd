@@ -220,11 +220,17 @@ func _build_ui() -> void:
 	left.add_theme_constant_override("separation", 8)
 	body.add_child(left)
 	left.add_child(_label("МЕХ", 20, 0.8))
+	# мехов стало много: карточки прокручиваются, иначе список выталкивал кнопку «В бой» за край экрана
+	var cards_scroll := ScrollContainer.new()
+	cards_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	cards_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	left.add_child(cards_scroll)
 	_cards = GridContainer.new()
 	_cards.columns = 2
+	_cards.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_cards.add_theme_constant_override("h_separation", 8)
 	_cards.add_theme_constant_override("v_separation", 8)
-	left.add_child(_cards)
+	cards_scroll.add_child(_cards)
 	for id in Parts.ids_for("mech"):
 		_cards.add_child(_mech_card(id))
 
