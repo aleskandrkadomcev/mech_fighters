@@ -932,12 +932,6 @@ func _leg_model(f: Foot, side: float) -> void:
 	var ankle := _pt("j_ankle_" + sn)
 	_model_part(_holder(f.thigh, _bone_tr(hip, knee, _l1)), "thigh_" + sn)
 	_model_part(_holder(f.shin, _bone_tr(knee, ankle, _l2)), "shin_" + sn)
-	# шайба-шарнир на колене: закрывает щель между бедром и голенью при любом сгибе (Саня, 29.10.2026).
-	# Ось — поперёк ноги, размер — по толщине голени этого меха
-	if _parts.has("shin_" + sn):
-		var bb: AABB = (_parts["shin_" + sn][0] as Mesh).get_aabb()
-		var r := minf(bb.size.y, bb.size.z) * 0.3
-		_cyl(f.shin, r, bb.size.x * 0.75, Vector3(0, _l2 * 0.5, 0), m_dark, Vector3(0, 0, PI / 2))
 	_model_part(_holder(f.node, Transform3D(Basis.IDENTITY, -Vector3(ankle.x, 0, ankle.z))), "foot_" + sn)
 
 
