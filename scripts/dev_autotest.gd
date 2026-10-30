@@ -4158,16 +4158,21 @@ func _jerk(a: Array) -> float:
 
 func _run_herotest() -> void:
 	var m = main.mech
-	var spot := Vector3(-46, 0.05, -30)
+	var spot: Vector3 = get_meta("spot", Vector3(-46, 0.05, -30))
 	if _frame == 5:
 		Cfg.creeps_enabled = 0
 		Cfg.bot_enemies = 0
 		for st in get_tree().get_nodes_in_group("structures"):
 			st.set_physics_process(false)
+		if _nohud:
+			main.hud.visible = false
 		var list: Array = []
 		for a in OS.get_cmdline_user_args():
 			if a.begins_with("--heroes="):
 				list = Array(a.substr(9).split(","))
+			elif a.begins_with("--herospot="):     # место для снимков (по умолчанию у стены)
+				var p := a.substr(11).split(",")
+				set_meta("spot", Vector3(float(p[0]), 0.05, float(p[1])))
 		if list.is_empty():
 			for id in Parts.DATA:
 				if id.begins_with("hero_"):

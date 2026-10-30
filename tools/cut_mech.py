@@ -232,13 +232,16 @@ HEROES = {
 		mods=[(0.1, 0.1), (-0.1, 0.1)], jets=[(0.1, 0.25, 0.6), (-0.1, 0.25, 0.6)], accents=[],
 		target=dict(hull=9000, pelvis=1200, thigh=3000, shin=3000, foot=2200, weapon=2500), remesh=0.03),
 	# лёгкий: модель повёрнута; ноги почти одинаковые, левая (+X) зеркалится, колено чуть сзади. Пушки на руках
+	# в модели опущены (левая ~20°, правая ~27°) — руки доворачиваем вверх у плечевых шарниров
 	"hero_l4": dict(
 		src="l4.glb", rotz=-66, x0=-0.02, scale=3.8,
 		delete=[lambda x, y, z, ax: (x < -0.1) & (ax < 0.27) & (z < 0.5)], delete_comp=[],
 		mirror=lambda x, y, z, ax: (x > 0.1) & (ax < 0.27) & (z < 0.5),
-		weapon_comp=lambda x, y, z, ax: (ax > 0.27) & (z > 0.3) & (z < 0.7),
-		guns=dict(l=((0.31, -0.05, 0.43), (0.29, -0.27, 0.42)), r=((-0.32, -0.05, 0.43), (-0.32, -0.2, 0.42))),
-		gun=(0.31, -0.05, 0.43),
+		weapon_comp=lambda x, y, z, ax: (ax > 0.27) & (z > 0.36) & (z < 0.7),
+		barrel_fix=[dict(side="l", pivot=(-0.083, 0.68), raise_deg=20.0),
+			dict(side="r", pivot=(0.054, 0.68), raise_deg=27.0)],
+		guns=dict(l=((0.31, -0.1, 0.52), (0.29, -0.33, 0.515)), r=((-0.32, 0.0, 0.55), (-0.32, -0.272, 0.55))),
+		gun=(0.31, -0.1, 0.52),
 		torso=lambda x, y, z, ax: z > 0.5,
 		pelvis=lambda x, y, z, ax: (ax < 0.1) & (z > 0.2),
 		thigh=[(-0.3, 0.6), (0.4, 0.6), (0.4, 0.1), (0.15, 0.1), (0.12, 0.24), (0.0, 0.2), (-0.3, 0.2)],
@@ -247,19 +250,22 @@ HEROES = {
 		mods=[(0.1, 0.05), (-0.1, 0.05)], jets=[(0.06, 0.2, 0.65), (-0.06, 0.2, 0.65)], accents=[],
 		target=dict(hull=7000, pelvis=800, thigh=1800, shin=2000, foot=1500, weapon=1800), remesh=0.022),
 	# средний: модель повёрнута; ноги с обратным коленом (бедро назад, голень вперёд), широко расставлены;
-	# правая (-X) стоит стопой под корпусом — зеркалится. Гатлинги по обе стороны
+	# правая (-X) стоит стопой под корпусом — зеркалится. Гатлинги по обе стороны; в модели они на 10° вбок
+	# от корпуса — доворачиваем (корпус по прицелу важнее)
 	"hero_m5": dict(
-		src="m5.glb", rotz=-32, x0=0.02, scale=4.6,
+		src="m5.glb", rotz=-42, x0=0.02, scale=4.6,
 		delete=[lambda x, y, z, ax: (x > 0.08) & (z < 0.49)], delete_comp=[],
 		mirror=lambda x, y, z, ax: (x < -0.08) & (z < 0.49),
 		weapon_comp=lambda x, y, z, ax: (ax > 0.15) & (z > 0.49) & (z < 0.61),
-		guns=dict(l=((0.29, 0.0, 0.56), (0.29, -0.21, 0.545)), r=((-0.26, 0.0, 0.56), (-0.26, -0.27, 0.545))),
-		gun=(0.29, 0.0, 0.56),
+		barrel_fix=[dict(side="l", pivot_xy=(0.285, -0.054), yaw_deg=10.0),
+			dict(side="r", pivot_xy=(-0.256, 0.042), yaw_deg=10.0)],
+		guns=dict(l=((0.285, -0.054, 0.56), (0.285, -0.264, 0.545)), r=((-0.256, 0.042, 0.56), (-0.256, -0.228, 0.545))),
+		gun=(0.285, -0.054, 0.56),
 		torso=lambda x, y, z, ax: z > 0.5,
 		pelvis=lambda x, y, z, ax: (ax < 0.1) & (z > 0.35),
-		thigh=[(-0.3, 0.6), (0.3, 0.6), (0.3, 0.3), (0.02, 0.3), (-0.05, 0.26), (-0.3, 0.26)],
+		thigh=[(-0.3, 0.6), (0.3, 0.6), (0.3, 0.3), (0.06, 0.3), (-0.01, 0.26), (-0.3, 0.26)],
 		foot_z=0.06,
-		hip=(0.17, -0.03, 0.43), knee=(0.27, 0.078, 0.24), ankle=(0.38, -0.02, 0.07),
+		hip=(0.173, 0.0, 0.43), knee=(0.252, 0.124, 0.24), ankle=(0.378, 0.046, 0.07),
 		mods=[(0.08, 0.05), (-0.08, 0.05)], jets=[(0.07, 0.2, 0.6), (-0.07, 0.2, 0.6)], accents=[],
 		target=dict(hull=8000, pelvis=1000, thigh=2200, shin=2400, foot=1600, weapon=2000), remesh=0.028),
 }
@@ -421,9 +427,11 @@ def cut(name):
 		cz = np.bincount(lab, z) / cnt
 		weapon = cfg["weapon_comp"](cx, cy, cz, np.abs(cx))[lab]
 		print("WEAPON %s: граней пушек %d" % (name, int(weapon.sum())))
-		bf = cfg.get("barrel_fix")
-		if bf:
-			sel = weapon & (y < bf["cut_y"])
+		# доворот пушек: один dict или список (по стороне свой); yaw_deg — вбок у точки pivot_xy (+ против часовой
+		# стрелки, вид сверху), потом raise_deg — вверх у точки pivot (y, z)
+		bfs = cfg.get("barrel_fix")
+		for bf in (bfs if isinstance(bfs, list) else [bfs] if bfs else []):
+			sel = weapon & (y < bf.get("cut_y", 9.0))
 			if bf.get("side") == "l":
 				sel &= x > 0
 			elif bf.get("side") == "r":
@@ -431,17 +439,23 @@ def cut(name):
 			vids = set()
 			for fi in np.nonzero(sel)[0]:
 				vids.update(me.polygons[int(fi)].vertices)
-			a = -math.radians(bf["raise_deg"])      # концы стволов (-Y) идут вверх
+			b = math.radians(bf.get("yaw_deg", 0.0))
+			cb, sb = math.cos(b), math.sin(b)
+			qx, qy = bf.get("pivot_xy", (0.0, 0.0))
+			a = -math.radians(bf.get("raise_deg", 0.0))      # концы стволов (-Y) идут вверх
 			ca, sa = math.cos(a), math.sin(a)
-			py, pz = bf["pivot"]
+			py, pz = bf.get("pivot", (0.0, 0.0))
 			for vi in vids:
 				v = me.vertices[vi]
+				dx, dy = v.co.x - qx, v.co.y - qy
+				v.co.x = qx + dx * cb - dy * sb
+				v.co.y = qy + dx * sb + dy * cb
 				dy, dz = v.co.y - py, v.co.z - pz
 				v.co.y = py + dy * ca - dz * sa
 				v.co.z = pz + dy * sa + dz * ca
 			me.update()
 			x, y, z, ax = face_centers(me)
-			print("BARREL %s: довернули вершин %d на %.1f°" % (name, len(vids), bf["raise_deg"]))
+			print("BARREL %s: довернули вершин %d: вверх %.1f°, вбок %.1f°" % (name, len(vids), bf.get("raise_deg", 0.0), bf.get("yaw_deg", 0.0)))
 	torso = cfg["torso"](x, y, z, ax)
 	pelvis = (~torso) & cfg["pelvis"](x, y, z, ax) if cfg["pelvis"] else np.zeros(len(x), dtype=bool)
 	leg = (~torso) & (~pelvis)

@@ -422,8 +422,9 @@ func _build_pelvis() -> void:
 func _build_torso(weapon_looks: Array, rockets: bool) -> void:
 	torso = Node3D.new()
 	add_child(torso)
-	# поворотный круг
-	_cyl(torso, 0.62, 0.22, Vector3(0, 0.1, 0), m_armor2)
+	# поворотный круг (у мехов из моделей нет: торчал из-под корпуса огромной шайбой)
+	if model == "":
+		_cyl(torso, 0.62, 0.22, Vector3(0, 0.1, 0), m_armor2)
 	var pods: Array
 	var ports: Array
 	var jets: Array
