@@ -24,7 +24,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			Cfg.set_value("cam_distance", maxf(Cfg.cam_distance - 3.0, 20.0))
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			Cfg.set_value("cam_distance", minf(Cfg.cam_distance + 3.0, 90.0))
+			Cfg.set_value("cam_distance", minf(Cfg.cam_distance + 3.0, 140.0))
 
 
 func shake(amount: float) -> void:
