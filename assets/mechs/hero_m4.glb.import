@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://c7d6155tf4tau"
-path="res://.godot/imported/hero_h3.glb-826407fd2792de45c4c4473a99b4fe3f.scn"
+uid="uid://byxevnd71gxys"
+path="res://.godot/imported/hero_m4.glb-48bb0093577babedc317421bb50d87b1.scn"
 
 [deps]
 
-source_file="res://assets/mechs/hero_h3.glb"
-dest_files=["res://.godot/imported/hero_h3.glb-826407fd2792de45c4c4473a99b4fe3f.scn"]
+source_file="res://assets/mechs/hero_m4.glb"
+dest_files=["res://.godot/imported/hero_m4.glb-48bb0093577babedc317421bb50d87b1.scn"]
 
 [params]
 

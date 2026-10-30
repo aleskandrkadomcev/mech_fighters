@@ -2,19 +2,19 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://b0oslsy1uyt38"
-path="res://.godot/imported/hero_h3_mech_color.jpg-9489d607b3d5ba55548d1761f398aa84.ctex"
+uid="uid://cy42hhixbtvqs"
+path="res://.godot/imported/hero_m4_mech_color.jpg-391ab6b36a050e8d2e102260fe2e5624.ctex"
 metadata={
 "vram_texture": false
 }
 generator_parameters={
-"md5": "c6c277617521ea08b1c3fda366cd35ca"
+"md5": "242e81fb27225e8723eb7f207cf90806"
 }
 
 [deps]
 
-source_file="res://assets/mechs/hero_h3_mech_color.jpg"
-dest_files=["res://.godot/imported/hero_h3_mech_color.jpg-9489d607b3d5ba55548d1761f398aa84.ctex"]
+source_file="res://assets/mechs/hero_m4_mech_color.jpg"
+dest_files=["res://.godot/imported/hero_m4_mech_color.jpg-391ab6b36a050e8d2e102260fe2e5624.ctex"]
 
 [params]
 

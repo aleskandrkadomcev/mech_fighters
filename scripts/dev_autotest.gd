@@ -51,6 +51,7 @@ var _spawntest := false         # --spawntest --drop --enemies=0 --allies=1: м�
 var _proptest := false           # --proptest: кучка ящиков не мешает пройти, ломается от меха и от взрыва
 var _pingtest := false           # --pingtest: Alt+клик — обычная метка, Alt + зажатая ЛКМ — круговое меню, выбор по направлению мыши
 var _herotest := false          # --herotest: герои из моделей ходят и стреляют, стволы на месте
+var _hangarshots: Array = []     # --hangarshots=hero_l4,hero_m5: мехи по очереди в ангаре (снимки кадрами 50, 90, 130...)
 var _camtest := false           # --camtest (окно, без --fixed-fps): плавность камеры, когда двигаешь мышью (сдвиг к прицелу)
 var _abil3test := false         # --abil3test: вторая пачка абилок и правки (баррикада-стена, толчок по дистанции, крипы)
 var _abil2test := false         # --abil2test: абилки 17.10.2026 по очереди (связка, дротик, ЭМИ, напалм, зонд, баррикада, дрон, оборона, якорь, волна, прыжок)
@@ -199,6 +200,8 @@ func setup(main_node: Node3D, args: PackedStringArray) -> void:
 			_camtest = true
 		elif a == "--herotest":
 			_herotest = true
+		elif a.begins_with("--hangarshots="):
+			_hangarshots = Array(a.substr(14).split(","))
 		elif a == "--pingtest":
 			_pingtest = true
 		elif a == "--ruintest":
@@ -309,6 +312,8 @@ func _process(_delta: float) -> void:
 		_run_camtest()
 	if _herotest:
 		_run_herotest()
+	if not _hangarshots.is_empty():
+		_run_hangarshots()
 	if _pingtest:
 		_run_pingtest()
 	if _ruintest:
@@ -4155,6 +4160,24 @@ func _jerk(a: Array) -> float:
 #  становится каждым героем, идёт вперёд и стреляет из обеих пушек. Проверка: мех дошёл (ноги работают),
 #  выстрелы были, стволы (muzzle) рядом с мехом и впереди корпуса
 # ------------------------------------------------------------------
+
+#  Снимки в ангаре (--hangarshots=hero_l4,hero_m5 --shots=50,90): каждый мех 40 кадров на подиуме, вид три четверти
+func _run_hangarshots() -> void:
+	var h = main.hangar
+	if _frame == 10:
+		h.open(main.mech.build)
+	if _frame < 20 or (_frame - 20) % 40 != 0:
+		return
+	var k: int = (_frame - 20) / 40
+	if k >= _hangarshots.size():
+		get_tree().quit()
+		return
+	h._build["mech"] = _hangarshots[k]
+	h._model_yaw = 0.6
+	h._refresh_rows()
+	h._refresh_info()
+	print("[HSHOT] кадр %d: %s" % [_frame + 30, _hangarshots[k]])
+
 
 func _run_herotest() -> void:
 	var m = main.mech

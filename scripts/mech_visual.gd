@@ -18,6 +18,7 @@ const WAIST_UP := 0.32   # от таза до поворотного круга 
 const L1 := 1.2          # длина бедра
 const L2 := 1.25         # длина голени
 const ANKLE_H := 0.32    # высота щиколотки над подошвой
+const MODEL_CROUCH := 0.08   # мех из модели в ходьбе приседает на эту долю высоты таза (ноги достают дальше)
 const HIP_X := 0.9       # на сколько бёдра разнесены в стороны
 const FOOT_X0 := 1.05    # на сколько ступни разнесены в стороны
 
@@ -79,6 +80,7 @@ var _l1 := L1
 var _l2 := L2
 var _ankle_h := ANKLE_H
 var _knee_dir := 1.0            # 1 колено назад (как у птицы), -1 вперёд (как у человека)
+var _step_max := 0.0            # мех из модели: на сколько ступня уходит от бедра вперёд/назад (докуда достаёт нога)
 var _pts := {}                  # точки модели: имя -> Transform3D в позе модели
 var _parts := {}                # части модели: имя -> Mesh из файла
 var _model_mats := {}           # материал из файла -> его копия для этого меха (цвет команды, вспышки)
@@ -875,8 +877,9 @@ func _pt(name: String) -> Vector3:
 	return (_pts[name] as Transform3D).origin if _pts.has(name) else Vector3.ZERO
 
 
-# ноги по суставам модели. Кости моделей обычно короче, чем нужно: при беге ступня уходит далеко
-# вперёд и не дотягивается до земли. Поэтому кости вытягиваются ровно настолько, насколько нужно (до 1.4 раза)
+# ноги по суставам модели. В покое нога стоит ровно как в модели: кости не тянутся (раньше тянулись до 1.4 раза —
+# колени сильнее сгибались, детали ног растягивались, пропорции модели пропадали). Шаг не длиннее, чем достаёт нога:
+# в ходьбе мех чуть приседает и ставит ступни под бёдра, короткие ноги шагают чаще
 func _setup_model_legs() -> void:
 	var hip := _pt("j_hip_l")
 	var knee := _pt("j_knee_l")
@@ -893,13 +896,16 @@ func _setup_model_legs() -> void:
 	_knee_dir = 1.0 if knee.z >= lerpf(hip.z, ankle.z, t) else -1.0
 	var l1 := hip.distance_to(knee)
 	var l2 := knee.distance_to(ankle)
-	var reach := absf(_foot_z - _hip_z) + 0.26 * _s("stride_run", 6.0)
 	var lat := absf(_foot_x - _hip_x)
 	var vert := _hip_h - _ankle_h
-	var need := sqrt(vert * vert + reach * reach + lat * lat) + 0.05
-	var k := clampf(need / (l1 + l2), 1.0, 1.4)
+	var dz := _foot_z - _hip_z
+	# чуть-чуть длиннее (до 5%) — только если в позе модели нога совсем прямая и ступня иначе не встаёт на землю
+	var k := clampf((sqrt(vert * vert + lat * lat + dz * dz) + 0.03) / (l1 + l2), 1.0, 1.05)
 	_l1 = l1 * k
 	_l2 = l2 * k
+	var full := (_l1 + _l2) * 0.96
+	var v2 := vert * (1.0 - MODEL_CROUCH)
+	_step_max = maxf(sqrt(maxf(full * full - v2 * v2 - lat * lat, 0.0)), 0.15)
 
 
 # корпус модели; возвращает [подвесы пушек, ракетные блоки, двигатели рывка] в координатах корпуса.
@@ -1069,6 +1075,8 @@ func update_visual(delta: float, body_pos: Vector3, vel: Vector3, legs_yaw: floa
 	# посадка и покачивание корпуса
 	var t := clampf(speed / run, 0.0, 1.0)
 	var crouch_target := (0.1 * t + (0.22 if dashing else 0.0)) * ls
+	if _step_max > 0.0:
+		crouch_target += MODEL_CROUCH * hip_h() * minf(speed / walk, 1.0)
 	_crouch = lerpf(_crouch, crouch_target, 1.0 - exp(-12.0 * delta))
 	var bob := cos(phase * TAU * 2.0) * 0.05 * ls * minf(speed / walk, 1.0)
 	var hip_y := hip_h() - _crouch + bob
@@ -1128,6 +1136,12 @@ func _update_feet(delta: float, body_pos: Vector3, vel_h: Vector3, legs_yaw: flo
 	var t := clampf(speed / run, 0.0, 1.0)
 	var stride := lerpf(_s("stride_walk", 3.4), _s("stride_run", 5.4), t) * ls
 	var swing_frac := lerpf(0.42, 0.55, t)
+	# мех из модели: ступня уходит от места не дальше, чем достаёт нога; в ходьбе ступни под бёдрами,
+	# в покое — где стоят в модели
+	var foot_z := _foot_z
+	if _step_max > 0.0:
+		stride = minf(stride, 2.0 * _step_max * ls / (1.0 - swing_frac))
+		foot_z = lerpf(_foot_z, _hip_z, minf(speed / walk, 1.0))
 	var stance_half := stride * (1.0 - swing_frac) * 0.5
 	var right := Vector3(cos(legs_yaw), 0, -sin(legs_yaw))
 	var ground := body_pos.y
@@ -1144,7 +1158,7 @@ func _update_feet(delta: float, body_pos: Vector3, vel_h: Vector3, legs_yaw: flo
 		var f := feet[i]
 		var other := feet[1 - i]
 		var side := -1.0 if i == 0 else 1.0
-		var home := body_pos + right * side * foot_x + Vector3(-right.z, 0, right.x) * _foot_z * ls
+		var home := body_pos + right * side * foot_x + Vector3(-right.z, 0, right.x) * foot_z * ls
 		home.y = ground
 
 		# рывок: ноги поджаты и скользят за корпусом
