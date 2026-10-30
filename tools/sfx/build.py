@@ -1,6 +1,6 @@
 # Сборка новых звуков выстрелов и попаданий из слоёв (исходники — assets/incoming, см. CREDITS).
 # Страница сравнения: python -P tools/sfx/make_page.py ПАПКА. Нужны numpy, scipy, Pillow, ffmpeg.
-import sys, os, json
+import sys, os, json, glob
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sfxlab import *
 
@@ -16,6 +16,7 @@ KI = P + "assets/sounds/kenney_impact-sounds/"
 OI = P + "assets/sounds/oga_impacts/"
 RW = P + "assets/incoming/oga_sounds2/x_100-CC0-wood-metal-SFX/"   # rubberduck 100 CC0 metal and wood
 RB = P + "assets/incoming/oga_sounds2/x_sfx_breaking_and_falling/"   # rubberduck 75 CC0 breaking/falling/hit
+FS = P + "assets/incoming/freesound/"   # freesound.org, CC0 (авторы — _sources.json там же)
 
 _cache = {}
 
@@ -94,24 +95,55 @@ def recipe(name):
 
 
 # ----------------------------- ВЫСТРЕЛЫ -----------------------------
+# Основа — записи крупного калибра и сай-фай оружия с freesound.org (CC0, список в assets/incoming/freesound/_sources.json).
+# Без эха: удар и короткое тело, дальше быстрое затухание.
 
-REF = {}   # имя рецепта -> референс, под который подгоняли тембр
-
-
-def gun(layers, dense_keep, dense_ms, tail=(0.8, 0.6, 0.16, 2600), drive=1.8, thr=-16, fo=0.12, seed=1, ref=None, strength=1.0, target="gun", push=8.0):
-    # layers: (сигнал, дБ, задержка мс). Плотная часть коротко, потом хвост эха потише.
-    # ref: настоящая запись — тембр выше 250 Гц подгоняется под неё, низ остаётся свой
-    x = mix(*layers)
-    x = tail_shape(x, dense_keep, dense_ms)
-    x = reverb(x, *tail, seed=seed)
-    if ref is not None:
-        x = match_eq(x, ref, 250, 9, strength)
-    return finish(x, drive, thr=thr, fo=fo, target=target, push=push)
+REF = {}   # имя рецепта -> (id записи, время выстрела, длина) — показывается на странице как исходник
 
 
-def ref_of(name, path, which=0, length=0.3, is_shot=True):
-    REF[name] = (path, which, length, is_shot)
-    return shot(path, which, length) if is_shot else whole(path, 0, length)
+def fsf(i):
+    return glob.glob(FS + f"{i}_*")[0]
+
+
+def at(i, t, length, pre=0.003):
+    # один выстрел из записи i: начало атаки рядом с секундой t
+    x = L(fsf(i)); s = int(t * SR)
+    a = max(0, s - int(0.01 * SR))
+    e = env_db(x[a:s + int(0.03 * SR)], 0.001); pk = int(np.argmax(e)); st = pk
+    while st > 0 and e[st] > e[pk] - 24:
+        st -= 1
+    st = max(0, a + st - int(pre * SR))
+    return fade(x[st:st + int(length * SR)], 0.0005, min(0.03, length / 4))
+
+
+def src(name, i, t, length):
+    REF.setdefault(name, (i, t, length))
+    return at(i, t, length)
+
+
+def snap(dur=0.01, lo=2500, hi=14000, seed=0):
+    # короткий щелчок-вспышка в самом начале
+    return noise_burst(dur, lo, hi, 3, seed)
+
+
+def emag(f0=6000, f1=700, dur=0.07, seed=0):
+    # электромагнитный «вжик»: тон вниз + искры, очень коротко
+    z = zap(f0, f1, dur, dur * 250, harm=(1, 0.6, 0.4, 0.3), fm=0.08)
+    return mix((z, 0, 0), (crackle(dur, 900, dur * 350, seed), -4, 0))
+
+
+def punch(layers, keep, decay, drive=2.0, thr=-15, push=9.0, target="sharp", hpf=30):
+    # сборка: слои → баланс полос → короткий хвост → насыщение, компрессор, лимитер → снова короткий хвост
+    # (после компрессора хвост поднимается — второй проход держит быстрое затухание)
+    x = hp(mix(*layers), hpf, 2)
+    if target:
+        x = tilt_to(x, TARGETS[target])
+    x = tail_shape(x, keep, decay)
+    x = sat(norm(x, -3), drive)
+    x = comp(x, thr, 3.0, att=0.003, rel=0.05)
+    x = limit(norm(x, -0.8), push)
+    x = trim(tail_shape(x, keep, decay), -60)
+    return norm(fade(x, 0.0005, min(0.04, len(x) / SR / 4)), -0.8)
 
 
 def boom_of(x, k=0.5, lpf=1400):
@@ -119,131 +151,166 @@ def boom_of(x, k=0.5, lpf=1400):
     return lp(speed(x, k), lpf, 2)
 
 
+# --- автопушка (3,5 выстрела в секунду) ---
+
 @recipe("shot_A")
 def _():
-    ak = shot(FA + "ak_47_single_near.ogg", 0, 0.12)
-    crack = speed(ak, 0.85)
-    body = boom_of(ak, 0.5, 1500)
-    clank = speed(whole(RW + "metal_hit_01.ogg"), 0.8)
-    return gun([(crack, 0, 0), (body, -2, 0), (thump(85, 45, 0.3, 25, 75), -9, 0), (clank, -15, 18)],
-               0.07, 80, (0.9, 0.7, 0.2, 2600), 1.8, ref=ref_of("shot_A", FA + "ak_47_single_near.ogg"), push=10.5)
+    s = src("shot_A", 854186, 0.008, 0.26)   # 30-мм автопушка
+    return punch([(speed(s, 0.92), 0, 0), (boom_of(s, 0.65, 1800), -3, 0), (thump(95, 42, 0.25, 15, 60), -7, 0),
+                  (snap(0.008, 3000, 14000, 1), -14, 0)], 0.04, 55)
 
 
 @recipe("shot_B")
 def _():
-    cg = shot(FA + "carl_gustav_m45_single_near.ogg", 0, 0.12)
-    crack = speed(cg, 0.8)
-    body = boom_of(shot(FA + "1917_single_near.ogg", 0, 0.12), 0.45, 1200)
-    bar = speed(whole(MB + "cg1.wav", 0, 0.25), 0.8)
-    return gun([(crack, 0, 0), (body, -1, 0), (bar, -6, 0), (thump(75, 40, 0.32, 30, 85), -9, 0)],
-               0.08, 90, (0.9, 0.7, 0.2, 2400), 2.0, seed=2, ref=ref_of("shot_B", FA + "carl_gustav_m45_single_near.ogg"))
+    s = src("shot_B", 183656, 1.912, 0.3)    # пулемёт 12,7 мм (M2), одиночный
+    clank = speed(whole(RW + "metal_hit_01.ogg"), 0.9)
+    return punch([(speed(s, 0.9), 0, 0), (boom_of(s, 0.6, 1600), -2, 0), (thump(85, 40, 0.3, 18, 70), -7, 0), (clank, -18, 12)], 0.035, 60)
 
+
+@recipe("shot_C")
+def _():
+    s = src("shot_C", 122103, 0.037, 0.11)   # ДШК, опущен ниже — крупнее калибр, как КПВТ
+    s2 = at(239138, 0.128, 0.11)
+    return punch([(speed(s, 0.82), 0, 0), (boom_of(s, 0.55, 1500), -2, 0), (hp(s2, 1200), -8, 0), (thump(75, 36, 0.3, 20, 85), -6, 0)], 0.04, 65)
+
+
+@recipe("shot_D")
+def _():
+    s = src("shot_D", 183656, 0.059, 0.25)   # 12,7 мм + электромагнитный разгон + звон ствола
+    return punch([(speed(s, 0.95), 0, 0), (boom_of(s, 0.6, 1600), -3, 0), (emag(6000, 700, 0.07, 2), -9, 0),
+                  (ring([1180, 1730, 2590, 3410], 0.25, 45), -15, 4), (thump(90, 40, 0.25, 15, 60), -7, 0)], 0.03, 50)
+
+
+# --- гатлинг (14 выстрелов в секунду, каждый звук короче 0,12 с) ---
 
 @recipe("minigun_A")
 def _():
-    pp = shot(FA + "ppsh_single_near.ogg", 0, 0.06)
-    crack = speed(pp, 0.9)
-    body = boom_of(pp, 0.6, 1800)
-    return gun([(crack, 0, 0), (body, -3, 0), (thump(115, 62, 0.12, 10, 30), -11, 0)],
-               0.035, 35, (0.4, 0.3, 0.14, 3000), 1.8, fo=0.04, seed=3, ref=ref_of("minigun_A", FA + "ppsh_single_near.ogg", 0, 0.2), push=10.5)
+    s = src("minigun_A", 160355, 0.820, 0.062)   # счетверённый 12,7 мм (Avenger), одиночный хлопок
+    return punch([(s, 0, 0), (boom_of(s, 0.7, 2200), -4, 0), (thump(120, 60, 0.1, 8, 25), -9, 0)], 0.02, 25, push=8)
 
 
 @recipe("minigun_B")
 def _():
-    ar = shot(FA + "ar_15_single_near.ogg", 0, 0.06)
-    cg = speed(whole(MB + "cg1.wav", 0, 0.12), 1.0)
-    return gun([(cg, 0, 0), (hp(ar, 1500), -7, 0), (boom_of(ar, 0.6, 1600), -4, 0), (thump(120, 65, 0.1, 10, 26), -12, 0)],
-               0.03, 32, (0.4, 0.3, 0.12, 3000), 1.8, fo=0.04, seed=4, ref=ref_of("minigun_B", FA + "ar_15_single_near.ogg", 0, 0.2), push=10.5)
+    s = src("minigun_B", 239138, 0.008, 0.1)     # 12,7 мм из очереди
+    return punch([(speed(s, 1.05), 0, 0), (boom_of(s, 0.7, 2000), -4, 0), (thump(115, 58, 0.1, 8, 25), -9, 0)], 0.018, 28, push=8)
 
+
+@recipe("minigun_C")
+def _():
+    p = src("minigun_C", 169775, 0.024, 0.05)    # импульсная винтовка + хлопок 12,7 — «энергопулемёт»
+    return punch([(p, 0, 0), (hp(at(160355, 0.731, 0.05), 800), -6, 0), (thump(130, 60, 0.08, 6, 20), -9, 0)], 0.015, 25, push=8)
+
+
+# --- тяжёлое орудие (0,7 выстрела в секунду) ---
 
 @recipe("cannon_A")
 def _():
-    s17 = shot(FA + "1917_single_near.ogg", 0, 0.15)
-    crack = speed(s17, 0.75)
-    body = boom_of(s17, 0.38, 900)
-    boom = whole(I + "cannon_fire_0.ogg", 0, 0.6)
-    ringm = speed(whole(KI + "impactPlate_heavy_000.ogg"), 0.7)
-    return gun([(crack, 0, 0), (body, -1, 0), (boom, -3, 0), (thump(58, 30, 0.7, 45, 220), -8, 0), (ringm, -15, 8)],
-               0.25, 260, (1.6, 1.3, 0.28, 2200), 1.9, thr=-18, fo=0.3, seed=5, ref=ref_of("cannon_A", FA + "1917_single_near.ogg", 0, 0.4), strength=0.8, target="heavy", push=10)
+    s = src("cannon_A", 239135, 0.024, 0.6)   # танковое орудие
+    return punch([(speed(s, 0.9), 0, 0), (boom_of(s, 0.6, 1200), -2, 0), (thump(62, 30, 0.6, 35, 150), -5, 0),
+                  (snap(0.01, 2500, 12000, 2), -12, 0)], 0.07, 140, thr=-17, target="heavy")
 
 
 @recipe("cannon_B")
 def _():
-    tk = shot(FA + "tikka_single_near.ogg", 0, 0.15)
-    mo = shot(FA + "mosin_nagant_single_near.ogg", 0, 0.15)
-    crack = speed(mo, 0.7)
-    body = boom_of(tk, 0.35, 800)
-    return gun([(crack, 0, 0), (body, 0, 0), (boom_of(mo, 0.5, 1500), -4, 0), (thump(52, 28, 0.8, 50, 250), -7, 0),
-                (noise_burst(0.02, 2500, 12000, 4), -12, 0)],
-               0.22, 240, (1.6, 1.3, 0.3, 2000), 2.0, thr=-18, fo=0.3, seed=6, ref=ref_of("cannon_B", FA + "mosin_nagant_single_near.ogg", 0, 0.4), strength=0.8, target="heavy", push=10)
+    s = src("cannon_B", 175430, 0.018, 0.65)   # гаубица + тяжёлый артвыстрел
+    return punch([(s, 0, 0), (at(441373, 0.010, 0.45), -3, 0), (boom_of(s, 0.55, 1000), -3, 0), (thump(58, 28, 0.7, 40, 170), -5, 0)],
+                 0.07, 150, thr=-17, target="heavy")
 
 
-@recipe("blaster_A")
+@recipe("cannon_C")
 def _():
-    las = whole(LK + "Laser Pistol 4.wav", 0, 0.5)
-    return gun([(las, 0, 0), (thump(125, 55, 0.2, 18, 55), -9, 0), (zap(2600, 280, 0.2, 70), -14, 0),
-                (noise_burst(0.015, 3000, 12000, 3), -14, 0)],
-               0.14, 120, (0.6, 0.45, 0.16, 5000), 1.5, seed=7, target=None)
+    s = src("cannon_C", 865990, 0.109, 0.5)    # Barrett 12,7 мм, опущен — как противотанковое ружьё
+    return punch([(speed(s, 0.8), 0, 0), (boom_of(s, 0.5, 1200), -2, 0), (at(853281, 0.051, 0.5), -4, 0), (thump(66, 30, 0.5, 30, 130), -6, 0)],
+                 0.05, 120, thr=-17, target="heavy")
 
 
-@recipe("blaster_B")
+@recipe("cannon_D")
 def _():
-    las = whole(JC + "single_energy_shot_v1_01.ogg", 0, 0.5)
-    return gun([(las, 0, 0), (thump(110, 50, 0.22, 20, 60), -9, 0), (noise_burst(0.012, 2500, 10000, 3), -14, 0)],
-               0.14, 130, (0.6, 0.45, 0.14, 4500), 1.6, seed=8, target=None)
+    s = src("cannon_D", 127845, 0.011, 0.6)    # танковый выстрел + электромагнитный разряд и искры
+    return punch([(s, 0, 0), (hp(at(183656, 4.950, 0.2), 600), -6, 0), (emag(5000, 400, 0.12, 3), -10, 0),
+                  (crackle(0.3, 300, 90, 4), -16, 10), (thump(60, 28, 0.6, 35, 150), -5, 0)], 0.06, 130, thr=-17, target="heavy")
 
+
+# --- дробовик (8 дробин разом) — у меха это залп картечью ---
 
 @recipe("shotgun_A")
 def _():
-    mb = shot(FA + "mossberg_single_near.ogg", 0, 0.14)
-    m12 = shot(FA + "model_12_single_near.ogg", 0, 0.14)
-    pump = speed(whole(RW + "metal_hit_03.ogg"), 0.75)
-    return gun([(speed(mb, 0.8), 0, 0), (boom_of(m12, 0.45, 1300), -1, 0), (speed(whole(MB + "shotgun.wav", 0, 0.3), 0.85), -6, 0),
-                (thump(78, 38, 0.45, 35, 130), -8, 0), (pump, -15, 330)],
-               0.12, 150, (1.2, 0.9, 0.24, 2800), 2.0, thr=-17, fo=0.2, seed=9, ref=ref_of("shotgun_A", FA + "mossberg_single_near.ogg", 0, 0.4))
+    s1 = src("shotgun_A", 183656, 0.059, 0.25)   # три выстрела 12,7 мм почти разом + шум картечи
+    s2 = at(183656, 1.912, 0.25); s3 = at(183656, 4.950, 0.25)
+    return punch([(s1, 0, 0), (s2, -2, 9), (s3, -3, 17), (boom_of(s1, 0.55, 1400), -3, 0),
+                  (noise_burst(0.12, 300, 9000, 40, 5), -6, 0), (thump(80, 38, 0.35, 25, 90), -5, 0)], 0.05, 80)
 
 
 @recipe("shotgun_B")
 def _():
-    nv = shot(FA + "nova_single_near.ogg", 0, 0.14)
-    sg = whole(MB + "shotgun.wav", 0, 0.4)
-    return gun([(speed(nv, 0.75), 0, 0), (boom_of(nv, 0.42, 1200), -1, 0), (sg, -4, 0), (thump(70, 36, 0.45, 35, 140), -8, 0)],
-               0.12, 150, (1.2, 0.9, 0.22, 2600), 2.2, thr=-17, fo=0.2, seed=10, ref=ref_of("shotgun_B", FA + "nova_single_near.ogg", 0, 0.4))
+    s = src("shotgun_B", 441373, 0.010, 0.4)     # тяжёлый артвыстрел + зенитный залп
+    return punch([(s, 0, 0), (at(701491, 0.114, 0.3), -3, 0), (boom_of(s, 0.6, 1300), -3, 0), (thump(78, 36, 0.35, 25, 95), -5, 0)], 0.05, 90)
 
+
+# --- рельсотрон (заряд 1 с, выстрел раз в 2 с) ---
 
 @recipe("rail_A")
 def _():
-    ar = shot(FA + "ar_15_single_near.ogg", 0, 0.12)
-    las = whole(LK + "Laser Rifle 2.wav", 0, 0.9)
-    sweep = zap(6000, 90, 0.6, 200, harm=(1, 0.4, 0.25, 0.15), fm=0.04)
-    return gun([(hp(ar, 700), -2, 0), (boom_of(ar, 0.4, 1000), -3, 0), (las, -2, 0), (sweep, -12, 0),
-                (thump(68, 30, 0.7, 40, 230), -8, 0), (crackle(0.5, 260, 150), -16, 15)],
-               0.3, 260, (1.6, 1.2, 0.26, 4000), 1.7, thr=-18, fo=0.3, seed=11, ref=ref_of("rail_A", LK + "Laser Rifle 2.wav", 0, 0.9, False), strength=0.6, target="heavy")
+    s = src("rail_A", 162260, 0.036, 0.8)     # запись испытаний рейлгана + разряд и искры
+    return punch([(s, 0, 0), (emag(7000, 500, 0.1, 5), -10, 0), (crackle(0.35, 320, 110, 6), -15, 8), (thump(58, 28, 0.6, 35, 150), -6, 0)],
+                 0.08, 150, thr=-17, target="heavy")
 
 
 @recipe("rail_B")
 def _():
-    dd = trim(L(I + "doomsday_laser_cannon_short.wav"), -50)
-    e = env_db(dd, 0.003); pk = int(np.argmax(e))
-    dis = fade(dd[max(0, pk - int(0.03 * SR)): pk + int(1.0 * SR)], 0.002, 0.2)
-    s11 = shot(FA + "1911_single_near.ogg", 0, 0.12)
-    return gun([(dis, 0, 0), (hp(s11, 900), -5, 25), (boom_of(s11, 0.4, 1000), -4, 25), (thump(60, 28, 0.8, 45, 250), -8, 25)],
-               0.35, 280, (1.5, 1.1, 0.22, 3500), 1.6, thr=-18, fo=0.3, seed=12, target="heavy")
+    s = src("rail_B", 785380, 0.028, 0.8)
+    return punch([(s, 0, 0), (snap(0.012, 3000, 15000, 7), -10, 0), (thump(62, 30, 0.6, 35, 140), -6, 0)], 0.08, 140, thr=-17, target=None)
 
+
+@recipe("rail_C")
+def _():
+    s = src("rail_C", 699655, 0.224, 0.8)     # глухой сай-фай рейлган + щелчок 12,7 сверху
+    return punch([(s, 0, 0), (hp(at(183656, 1.912, 0.15), 1200), -5, 0), (snap(0.012, 3000, 15000, 8), -10, 0),
+                  (thump(60, 28, 0.6, 35, 140), -7, 0)], 0.07, 140, thr=-17, target=None)
+
+
+@recipe("rail_D")
+def _():
+    s = src("rail_D", 155790, 0.196, 0.7)     # корабельный рейлган + сверхзвуковой щелчок
+    return punch([(s, 0, 0), (hp(at(183656, 0.059, 0.15), 1000), -6, 0), (thump(60, 28, 0.6, 35, 140), -6, 0)], 0.07, 130, thr=-17, target="heavy")
+
+
+@recipe("rail_E")
+def _():
+    s = src("rail_E", 183656, 4.950, 0.2)     # синтез: щелчок 12,7 + магнитный свист вниз + треск + звон
+    return punch([(hp(s, 800), 0, 0), (zap(9000, 300, 0.35, 90, harm=(1, 0.5, 0.3, 0.2), fm=0.03), -6, 0),
+                  (noise_burst(0.03, 1500, 14000, 8, 9), -6, 0), (crackle(0.3, 300, 100, 10), -14, 5),
+                  (ring([2300, 3170, 4410], 0.4, 120), -14, 0), (thump(60, 28, 0.6, 35, 140), -5, 0)], 0.05, 120, thr=-17, target=None)
+
+
+# --- бластер (3 выстрела в секунду) ---
+
+def blaster(name, i, t, length=0.35, sub=-10, extra=(), keep=0.05, decay=70):
+    s = src(name, i, t, length)
+    return punch([(s, 0, 0), (thump(130, 55, 0.15, 12, 40), sub, 0), *extra], keep, decay, drive=1.7, target=None)
+
+
+R["blaster_A"] = lambda: blaster("blaster_A", 466868, 0.023)
+R["blaster_B"] = lambda: blaster("blaster_B", 702000, 0.017)
+R["blaster_C"] = lambda: blaster("blaster_C", 475142, 0.018)
+R["blaster_D"] = lambda: blaster("blaster_D", 569901, 0.027, 0.3, -14, ((at(584198, 0.024, 0.15), -4, 0),))
+R["blaster_E"] = lambda: blaster("blaster_E", 861535, 0.954, 0.4)
+R["blaster_F"] = lambda: blaster("blaster_F", 450768, 0.040)
+
+
+# --- гранатомёт (звук запуска, взрыв — отдельно) ---
 
 @recipe("grenade_A")
 def _():
     fl = speed(whole(ML + "flaunch.wav"), 0.85)
     clank = speed(whole(RW + "metal_hit_01.ogg"), 0.7)
-    return gun([(fl, 0, 0), (tube_pop(165, 0.25), -5, 0), (thump(95, 45, 0.3, 20, 85), -7, 0), (clank, -14, 30)],
-               0.15, 150, (0.8, 0.6, 0.16, 2500), 1.7, seed=13, ref=ref_of("grenade_A", ML + "flaunch.wav", 0, 0.6, False), strength=0.7, target="heavy")
+    return punch([(fl, 0, 0), (tube_pop(165, 0.25), -5, 0), (thump(95, 45, 0.3, 20, 85), -7, 0), (clank, -14, 30)], 0.1, 110, target="heavy")
 
 
 @recipe("grenade_B")
 def _():
     rl = whole(ML + "rlaunch.wav", 0, 0.8)
-    return gun([(rl, 0, 0), (tube_pop(140, 0.3, 7), -6, 0), (thump(85, 40, 0.35, 25, 100), -7, 0)],
-               0.18, 170, (0.8, 0.6, 0.14, 2500), 1.8, seed=14, target="heavy")
+    return punch([(rl, 0, 0), (tube_pop(140, 0.3, 7), -6, 0), (thump(85, 40, 0.35, 25, 100), -7, 0)], 0.1, 120, target="heavy")
 
 
 # ----------------------------- ПОПАДАНИЯ -----------------------------

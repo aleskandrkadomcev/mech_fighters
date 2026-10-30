@@ -361,6 +361,7 @@ def hi_distance(a, b, fmin=250):
 
 TARGETS = {
     "gun":    {"sub": -5, "low": -4, "lowmid": -4, "mid": -6, "high": -11, "air": -18},
+    "sharp":  {"sub": -6, "low": -4, "lowmid": -4, "mid": -5, "high": -9, "air": -15},
     "heavy":  {"sub": -3, "low": -3, "lowmid": -5, "mid": -8, "high": -14, "air": -22},
     "armor":  {"sub": -15, "low": -6, "lowmid": -4, "mid": -5, "high": -9, "air": -16},
     "ground": {"sub": -10, "low": -5, "lowmid": -4, "mid": -6, "high": -10, "air": -18},
