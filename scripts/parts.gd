@@ -114,21 +114,21 @@ const DATA := {
 		"weight": 34.0, "capacity": 90.0, "hp": 300.0, "hit_radius": 1.9, "vision": 36.0, "omni": 14.0, "slots": 5,
 		"walk_speed": 7.8, "run_speed": 14.9, "accel": 16.0, "decel": 31.0,
 		"dash_speed": 46.5, "dash_time": 0.28, "dash_cooldown": 2.0, "dash_brake": 110.0, "dash_charges": 1, "dash_ramp": 0.16,
-		"legs_turn_speed": 190.0, "torso_turn_speed": 220.0,
+		"legs_turn_speed": 190.0, "torso_turn_speed": 220.0, "device_hp": 0.5, "turret_count": 2,
 		"stride_walk": 5.7, "stride_run": 6.2, "legs_scale": 1.0, "hull_scale": 1.0},
 	"hero_l1": {"slot": "mech", "name": "Призрак", "class": "Лёгкий", "style": "scout", "model": "hero_l1",
 		"trait": "Убийца: невидимость, дротик-целеуказатель",
 		"weight": 22.0, "capacity": 62.0, "hp": 210.0, "hit_radius": 1.6, "vision": 52.0, "omni": 24.0, "slots": 3,
 		"walk_speed": 8.6, "run_speed": 16.5, "accel": 20.0, "decel": 34.0,
 		"dash_speed": 46.0, "dash_time": 0.24, "dash_cooldown": 1.8, "dash_brake": 115.0, "dash_charges": 1, "dash_ramp": 0.12,
-		"legs_turn_speed": 300.0, "torso_turn_speed": 380.0,
+		"legs_turn_speed": 300.0, "torso_turn_speed": 380.0, "ambush": 0.5,
 		"stride_walk": 5.2, "stride_run": 6.0, "legs_scale": 0.88, "hull_scale": 0.85},
 	"hero_h4": {"slot": "mech", "name": "Гравитон", "class": "Тяжёлый", "style": "heavy", "model": "hero_h4",
 		"trait": "Тянет врагов якорем, ракетный залп, щит",
 		"weight": 54.0, "capacity": 135.0, "hp": 460.0, "hit_radius": 2.3, "vision": 30.0, "omni": 12.0, "slots": 7,
 		"walk_speed": 5.2, "run_speed": 10.0, "accel": 10.0, "decel": 27.0,
 		"dash_speed": 36.0, "dash_time": 0.28, "dash_cooldown": 3.4, "dash_brake": 90.0, "dash_charges": 1, "dash_ramp": 0.2,
-		"legs_turn_speed": 150.0, "torso_turn_speed": 170.0, "resist_explosion": 0.25, "resist_stun": 0.3,
+		"legs_turn_speed": 150.0, "torso_turn_speed": 170.0, "resist_explosion": 0.25, "resist_stun": 0.3, "gravity_boost": 0.5,
 		"stride_walk": 6.0, "stride_run": 6.4, "legs_scale": 1.18, "hull_scale": 1.2},
 	"hero_h5": {"slot": "mech", "name": "Командир", "class": "Тяжёлый", "style": "heavy", "model": "hero_h5",
 		"trait": "Поддержка: авиаудар",
@@ -142,7 +142,7 @@ const DATA := {
 		"weight": 34.0, "capacity": 90.0, "hp": 300.0, "hit_radius": 1.9, "vision": 36.0, "omni": 14.0, "slots": 5,
 		"walk_speed": 7.8, "run_speed": 14.9, "accel": 16.0, "decel": 31.0,
 		"dash_speed": 46.5, "dash_time": 0.28, "dash_cooldown": 2.0, "dash_brake": 110.0, "dash_charges": 1, "dash_ramp": 0.16,
-		"legs_turn_speed": 190.0, "torso_turn_speed": 220.0,
+		"legs_turn_speed": 190.0, "torso_turn_speed": 220.0, "ignite_dps": 6.0, "ignite_time": 3.0,
 		"stride_walk": 5.7, "stride_run": 6.2, "legs_scale": 1.0, "hull_scale": 1.0},
 	"hero_l2": {"slot": "mech", "name": "Десантник", "class": "Лёгкий", "style": "scout", "model": "hero_l2",
 		"trait": "Прыгает в бой: прыжок, связка, форсаж",
@@ -156,7 +156,7 @@ const DATA := {
 		"weight": 22.0, "capacity": 62.0, "hp": 210.0, "hit_radius": 1.6, "vision": 52.0, "omni": 24.0, "slots": 3,
 		"walk_speed": 8.6, "run_speed": 16.5, "accel": 20.0, "decel": 34.0,
 		"dash_speed": 46.0, "dash_time": 0.24, "dash_cooldown": 1.8, "dash_brake": 115.0, "dash_charges": 1, "dash_ramp": 0.12,
-		"legs_turn_speed": 300.0, "torso_turn_speed": 380.0,
+		"legs_turn_speed": 300.0, "torso_turn_speed": 380.0, "rooted_bonus": 0.3,
 		"stride_walk": 5.2, "stride_run": 6.0, "legs_scale": 0.88, "hull_scale": 0.85},
 	"hero_m4": {"slot": "mech", "name": "Глушитель", "class": "Средний", "style": "mid", "model": "hero_m4",
 		"trait": "Сжигает энергию: ЭМИ-снаряд, излучатель импульса",
@@ -505,7 +505,8 @@ const FIELDS := {
 const MECH_STATS := ["capacity", "hp", "hit_radius", "vision", "omni", "torso_turn_speed", "resist_explosion", "resist_stun",
 	"walk_speed", "run_speed", "accel", "decel", "dash_speed", "dash_time", "dash_ramp",
 	"dash_cooldown", "dash_brake", "dash_charges", "legs_turn_speed", "stride_walk", "stride_run", "legs_scale", "hull_scale", "stance",
-	"armor_flat", "regen_hp", "regen_delay", "brace_bonus", "brace_time", "ram_damage", "ram_stun"]
+	"armor_flat", "regen_hp", "regen_delay", "brace_bonus", "brace_time", "ram_damage", "ram_stun",
+	"ignite_dps", "ignite_time", "ambush", "device_hp", "turret_count", "rooted_bonus", "gravity_boost"]
 const WEAPON_STATS := ["ammo", "fire_rate", "damage", "bullet_speed", "range", "spread_stand", "spread_walk", "spread_run",
 	"spread_dash", "spread_per_shot", "spread_shot_max", "spread_grow", "spread_shrink", "recoil", "tracer",
 	"dps", "energy_per_sec", "energy_per_shot", "pellets", "pellet_spread", "falloff", "launch_speed",
@@ -726,6 +727,25 @@ func describe(id: String) -> String:
 				out.append("%s урона от взрывов" % _pct(-v(id, "resist_explosion")))
 			if v(id, "resist_stun") > 0.0:
 				out.append("%s оглушения" % _pct(-v(id, "resist_stun")))
+			# пассивки героев
+			if v(id, "brace_bonus") > 0.0:
+				out.append("упор: стоя бьёт дальше на %s" % _pct(v(id, "brace_bonus")))
+			if v(id, "armor_flat") > 0.0:
+				out.append("бронеплиты: попадания слабее на %s" % _n(v(id, "armor_flat")))
+			if v(id, "regen_hp") > 0.0:
+				out.append("самопочинка вне боя +%s HP/с" % _n(v(id, "regen_hp")))
+			if v(id, "ignite_dps") > 0.0:
+				out.append("пули поджигают: %s урона/с %s с" % [_n(v(id, "ignite_dps")), _n(v(id, "ignite_time"))])
+			if v(id, "ambush") > 0.0:
+				out.append("первый выстрел из невидимости %s урона" % _pct(v(id, "ambush")))
+			if v(id, "device_hp") > 0.0:
+				out.append("устройства крепче на %s" % _pct(v(id, "device_hp")).trim_prefix("+"))
+			if v(id, "turret_count") > 1.0:
+				out.append("мини-турелей за раз: %d" % int(v(id, "turret_count")))
+			if v(id, "rooted_bonus") > 0.0:
+				out.append("по обездвиженным %s урона" % _pct(v(id, "rooted_bonus")))
+			if v(id, "gravity_boost") > 0.0:
+				out.append("гравитационный якорь сильнее на %s" % _pct(v(id, "gravity_boost")).trim_prefix("+"))
 		"core":
 			out.append("энергия %s" % _n(v(id, "energy_max")))
 			out.append("+%s/с" % _n(v(id, "energy_regen")))

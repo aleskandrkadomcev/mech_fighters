@@ -135,6 +135,10 @@ var intercept_left := 0.0       # ПРО-перехват (Бастион): сб
 var _icpt_i := -1
 var _icpt_t := 0.0
 var _jump_from := Vector3.ZERO   # откуда прыгнул (десантный прыжок отбрасывает врагов в эту сторону)
+var burn_left := 0.0            # подожгли пулями Поджигателя: теряет здоровье
+var _burn_dps := 0.0
+var _burn_src: Node = null
+var _burn_tick := 0.0
 var _net_still := false
 var _relay_k := 0.0
 var _peri_k := 0.0
@@ -374,6 +378,9 @@ func damage_mult() -> float:
 	var k := 1.0 if is_player else Cfg.bot_damage
 	if relay_left > 0.0:
 		k *= 1.0 + _relay_k
+	# Призрак: первый выстрел из невидимости сильнее (выстрел тут же снимает невидимость)
+	if is_cloaked() and stats.get("ambush", 0.0) > 0.0:
+		k *= 1.0 + stats["ambush"]
 	return k * _game_mult("damage")
 
 
@@ -521,6 +528,8 @@ func status_list() -> Array:
 		out.append(["Обездвижен", root_left, false, "bolas", "Связка или капкан держит ноги: не ходит и не делает рывок. Корпус и пушки работают."])
 	if no_regen_left > 0.0:
 		out.append(["ЭМИ", no_regen_left, false, "noregen", "Энергия не восстанавливается."])
+	if burn_left > 0.0:
+		out.append(["Горит", burn_left, false, "napalm", "Подожгли пулями: теряет здоровье, пока горит."])
 	if slow_left > 0.0:
 		out.append(["Замедлен", slow_left, false, "slow", "Скорость меньше на %d%%." % roundi(_slow_k * 100.0)])
 	if run_locked:
@@ -920,6 +929,13 @@ func aim_from_ray(o: Vector3, d: Vector3) -> Vector3:
 func take_damage(amount: float, pos: Vector3, _dir: Vector3, kind := "", src: Node = null) -> void:
 	if dead or amount <= 0.0 or shield_left > 0.0 or is_landing():
 		return
+	# пассивки стрелка: Ловчий бьёт обездвиженных сильнее, пули Поджигателя поджигают
+	if src != null and is_instance_valid(src) and src.get("stats") is Dictionary:
+		var sst: Dictionary = src.get("stats")
+		if root_left > 0.0 and sst.get("rooted_bonus", 0.0) > 0.0:
+			amount *= 1.0 + sst["rooted_bonus"]
+		if kind == "" and sst.get("ignite_dps", 0.0) > 0.0 and src.get("team") != team:
+			ignite(sst["ignite_dps"], sst.get("ignite_time", 3.0), src)
 	if kind == "explosion":
 		amount *= 1.0 - stats.get("resist_explosion", 0.0)
 	# бронеплиты Бастиона: каждое попадание слабее (лучи не режут), но не меньше 30%
@@ -1266,6 +1282,17 @@ func shove(dir: Vector3, dist: float) -> void:
 	dir.y = 0.0
 	_shove_v = dir.normalized() * SHOVE_SPEED
 	_shove_t = dist * control_k() / SHOVE_SPEED
+
+
+# подожгли (пули Поджигателя): горит, теряет здоровье; повторное попадание продлевает
+func ignite(dps: float, seconds: float, src: Node) -> void:
+	if dead or purge_left > 0.0:
+		return
+	if burn_left <= 0.0 and seen:
+		Fx.smolder(visual, Vector3.UP * get_hit_height() * 0.5, get_hit_radius() * 0.5, seconds)
+	burn_left = maxf(burn_left, seconds)
+	_burn_dps = dps
+	_burn_src = src
 
 
 # дротик-целеуказатель: все попадания по мне сильнее на k
@@ -1897,6 +1924,13 @@ func _update_abilities(delta: float) -> void:
 		if _icpt_t <= 0.0 and _icpt_i >= 0 and _icpt_i < abilities.size():
 			_icpt_t = 1.0 / maxf(ability_param(_icpt_i, "fire_rate"), 0.5)
 			_intercept(ability_param(_icpt_i, "radius"))
+	# горит: урон раз в полсекунды (вид "fire" — не поджигает заново)
+	if burn_left > 0.0:
+		burn_left = maxf(burn_left - delta, 0.0)
+		_burn_tick += delta
+		if _burn_tick >= 0.5:
+			_burn_tick = 0.0
+			take_damage(_burn_dps * 0.5, global_position + Vector3.UP * 1.0, Vector3.ZERO, "fire", _burn_src if is_instance_valid(_burn_src) else null)
 	# маскировочная сеть: невидим, только пока стоит
 	net_left = maxf(net_left - delta, 0.0)
 	_net_still = Vector2(velocity.x, velocity.z).length() < 0.6
@@ -1981,7 +2015,10 @@ func _try_ability(index: int) -> void:
 		"probe":
 			_throw(index, {"kind": "probe", "params": p})
 		"gravity":
-			_throw(index, {"kind": "gravity", "radius": p["radius"], "duration": p["duration"], "push": p["push"]})
+			# Гравитон: усиленный якорь — шире, дольше и тянет сильнее
+			var gb: float = stats.get("gravity_boost", 0.0)
+			_throw(index, {"kind": "gravity", "radius": p["radius"] * (1.0 + gb * 0.5), "duration": p["duration"] * (1.0 + gb * 0.5),
+				"push": p["push"] * (1.0 + gb)})
 		"barricade":
 			_cast_barricade(index)
 		"drone":
@@ -1996,7 +2033,11 @@ func _try_ability(index: int) -> void:
 		"dome":
 			_cast_dome(index)
 		"turret":
-			_throw(index, {"kind": "turret", "params": p})
+			# Инженер ставит две турели за раз — рядом, поперёк броска
+			var tc := maxi(int(stats.get("turret_count", 1.0)), 1)
+			var side := torso_forward().cross(Vector3.UP).normalized()
+			for k in tc:
+				_throw(index, {"kind": "turret", "params": p}, side * (k - (tc - 1) * 0.5) * 3.0)
 		"roller":
 			_cast_roller(index)
 		"marker":
@@ -2152,6 +2193,7 @@ func _reset_ability_states() -> void:
 	net_left = 0.0
 	_set_siege(false)
 	intercept_left = 0.0
+	burn_left = 0.0
 	marked_left = 0.0
 	_shove_t = 0.0
 	_jump_up = 0.0
@@ -2551,14 +2593,14 @@ func _cast_shot(index: int, kind: String) -> void:
 
 
 # снаряд навесом в точку прицела (не дальше «Дальности»). Зонд — по дуге над стенами точно в точку
-func _throw(index: int, payload: Dictionary) -> void:
+func _throw(index: int, payload: Dictionary, offset := Vector3.ZERO) -> void:
 	var p: Dictionary = abilities[index]["params"]
 	var point := _ability_point()
 	var flat := Vector3(point.x - global_position.x, 0, point.z - global_position.z)
 	var rng: float = p.get("range", 30.0)
 	if flat.length() > rng:
 		flat = flat.normalized() * rng
-	var target := Vector3(global_position.x + flat.x, 0.0, global_position.z + flat.z)
+	var target := Vector3(global_position.x + flat.x + offset.x, 0.0, global_position.z + flat.z + offset.z)
 	var from := global_position + Vector3.UP * get_hit_height() + torso_forward() * 0.5
 	var lob := Lob.new()
 	if payload["kind"] == "probe":
@@ -2580,7 +2622,7 @@ func _cast_barricade(index: int) -> void:
 	var b := Barricade.new()
 	b.team = team
 	b.owner_mech = self
-	b.hp_max = p.get("hp", 400.0)
+	b.hp_max = p.get("hp", 400.0) * (1.0 + stats.get("device_hp", 0.0))
 	b.life = p.get("duration", 25.0)
 	var pos := global_position + dir * (get_hit_radius() + float(p.get("range", 4.5)))
 	b.position = Vector3(pos.x, 0.0, pos.z)

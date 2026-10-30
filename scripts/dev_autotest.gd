@@ -57,6 +57,7 @@ var _camtest := false           # --camtest (окно, без --fixed-fps): пл
 var _abil3test := false         # --abil3test: вторая пачка абилок и правки (баррикада-стена, толчок по дистанции, крипы)
 var _abil2test := false         # --abil2test: абилки 17.10.2026 по очереди (связка, дротик, ЭМИ, напалм, зонд, баррикада, дрон, оборона, якорь, волна, прыжок)
 var _abil4test := false         # --abil4test: абилки героев (капкан, огненная стена, ЭМИ-дротик, нанооблако)
+var _passivetest := false       # --passivetest: пассивки героев (поджог, засада, две турели, по обездвиженным, якорь)
 var _dashtest := false           # --dashtest: рывок разгоняется за «Разгон рывка», а не мгновенно; дальность как без разгона
 var _hudshot := false            # --hudshot: интерфейс как в доте — абилки, полоски, статусы, подсказки на Alt (снимки 40/60/80)
 var _statustest := false         # --statustest: шкала контроля над полоской (оглушение → ЭМИ → замедление) и статусы своего меха
@@ -198,6 +199,8 @@ func setup(main_node: Node3D, args: PackedStringArray) -> void:
 			_abil2test = true
 		elif a == "--abil4test":
 			_abil4test = true
+		elif a == "--passivetest":
+			_passivetest = true
 		elif a == "--abil3test":
 			_abil3test = true
 		elif a == "--camtest":
@@ -312,6 +315,8 @@ func _process(_delta: float) -> void:
 		_run_dashtest()
 	if _abil4test:
 		_run_abil4test()
+	if _passivetest:
+		_run_passivetest()
 	if _abil2test:
 		_run_abil2test()
 	if _abil3test:
@@ -3822,6 +3827,71 @@ func _abil2_put(e, pos: Vector3) -> void:
 # видит ли мех врага своими глазами (без союзников и турелей — они могут видеть сбоку, мимо дыма)
 func _sees(m, e) -> bool:
 	return main.vision._seen_by([{"pos": m.global_position, "r": m.vision_r(), "omni": m.omni_r()}], e.global_position, e.get_hit_radius(), false)
+
+
+# пассивки героев: свой мех по очереди становится героем, враг-мишень напротив
+func _run_passivetest() -> void:
+	var m = main.mech
+	var spot := Vector3(-46, 0.05, -30)
+	if _frame == 5:
+		Cfg.creeps_enabled = 0
+		Cfg.bot_enemies = 1
+		m.global_position = spot
+		m.snap_interpolation(m)
+		var e = _stage_mech(main._spawn_bot(1), "mech_assault", ["autocannon", "laser"], spot + Vector3(14, 0.05, 0))
+		e.demo["fire"] = false
+		e.demo["aim"] = spot
+		set_meta("enemy", e)
+		for s in get_tree().get_nodes_in_group("structures"):
+			s.set_physics_process(false)
+	if _frame < 20:
+		return
+	var e = get_meta("enemy")
+	match _frame:
+		20:
+			m.set_build({"mech": "hero_m1", "core": "core_combat", "weapons": ["autocannon", "autocannon"], "modules": []})
+			m.global_position = spot
+			m.snap_interpolation(m)
+			m.demo = {"move": Vector2.ZERO, "fire": true, "aim": e.global_position + Vector3.UP * 1.5}
+		80:
+			m.demo["fire"] = false
+			_abil2_check("Поджигатель: пули подожгли", e.burn_left > 0.0, "горит ещё %.1f с" % e.burn_left)
+		90:
+			e.respawn(spot + Vector3(14, 0.05, 0), false)
+			m.set_build({"mech": "hero_l1", "core": "core_combat", "weapons": ["autocannon", "autocannon"], "modules": ["mod_cloak"]})
+			m.global_position = spot
+			m.snap_interpolation(m)
+			set_meta("dm", m.damage_mult())
+			_abil2_cast(m, "cloak", m.global_position)
+		95:
+			_abil2_check("Призрак: из невидимости урон больше", m.is_cloaked() and m.damage_mult() > float(get_meta("dm")) * 1.45, "×%.2f → ×%.2f" % [float(get_meta("dm")), m.damage_mult()])
+		100:
+			e.shield_left = 0.0
+			m.set_build({"mech": "hero_l4", "core": "core_combat", "weapons": ["autocannon", "autocannon"], "modules": []})
+			e.root(2.0)
+			set_meta("hp", e.hp)
+			e.take_damage(10.0, e.global_position, Vector3.ZERO, "", m)
+			_abil2_check("Ловчий: по обездвиженному сильнее", float(get_meta("hp")) - e.hp > 12.5, "10 урона → %.1f" % (float(get_meta("hp")) - e.hp))
+		110:
+			m.set_build({"mech": "hero_m3", "core": "core_combat", "weapons": ["autocannon", "autocannon"], "modules": ["mod_turret"]})
+			_abil2_cast(m, "turret", m.global_position + Vector3(8, 0, -6))
+		220:
+			var tu: Array = get_tree().get_nodes_in_group("gadgets").filter(func(g): return g is MiniTurret and g.team == m.team)
+			_abil2_check("Инженер: две турели, крепче", tu.size() == 2 and tu[0].hp >= 150.0 * 1.45, "турелей %d, HP %.0f" % [tu.size(), tu[0].hp if tu.size() > 0 else 0.0])
+		230:
+			m.set_build({"mech": "hero_h4", "core": "core_combat", "weapons": ["autocannon", "autocannon"], "modules": ["mod_gravity"]})
+			_abil2_cast(m, "gravity", e.global_position)
+		300:
+			var gw: Array = get_tree().get_nodes_in_group("gravity").filter(func(g): return g.team == m.team) if get_tree().has_group("gravity") else []
+			if gw.is_empty():
+				for n in get_tree().current_scene.get_children():
+					if n is GravityWell:
+						gw.append(n)
+			_abil2_check("Гравитон: якорь шире", gw.size() > 0 and gw[0].radius > 9.0 * 1.2, "радиус %.1f" % (gw[0].radius if gw.size() > 0 else 0.0))
+		310:
+			var f: int = get_meta("fails", 0)
+			print("[ABIL2] итог: %s" % ("ВСЁ ВЕРНО" if f == 0 else "ошибок %d" % f))
+			get_tree().quit()
 
 
 # абилки героев по очереди: капкан под врага, огненная стена, ЭМИ-дротик, нанооблако под себя, ретранслятор,

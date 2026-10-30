@@ -24,7 +24,7 @@ func _ready() -> void:
 	collision_layer = 4
 	collision_mask = 0
 	monitoring = false
-	hp = float(p.get("hp", 150.0))
+	hp = float(p.get("hp", 150.0)) * (1.0 + (owner_mech.stats.get("device_hp", 0.0) if is_instance_valid(owner_mech) else 0.0))
 	var cs := CollisionShape3D.new()
 	var sh := CylinderShape3D.new()
 	sh.radius = 0.6
