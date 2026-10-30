@@ -125,6 +125,10 @@ var matrix_left := 0.0          # матрица брони: меньше уро
 var _matrix_k := 0.0
 var periscope_left := 0.0       # перископ: дальше видит, сильнее омни
 var relay_left := 0.0           # рядом свой ретранслятор: урон больше (держит, пока мех в его круге)
+var scope_on := false           # прицеливание (Ястреб): дальше бьёт и видит, рельса сильнее, ход медленнее
+var _scope_i := -1
+var net_left := 0.0             # маскировочная сеть: пока стоит на месте — невидим
+var _net_still := false
 var _relay_k := 0.0
 var _peri_k := 0.0
 var _peri_omni := 0.0
@@ -353,6 +357,8 @@ func _speed_mult() -> float:
 		k *= 1.0 - _slow_k
 	if overdrive_left > 0.0:
 		k *= 1.0 + _overdrive_k
+	if scope_on:
+		k *= 1.0 - ability_param(_scope_i, "slow")
 	return k
 
 
@@ -473,7 +479,7 @@ func is_stunned() -> bool:
 
 
 func is_cloaked() -> bool:
-	return cloak_left > 0.0
+	return cloak_left > 0.0 or (net_left > 0.0 and _net_still)
 
 
 # контроль для шкалы над полоской здоровья: самый жёсткий из действующих — [название, сколько осталось 0..1]
@@ -536,6 +542,10 @@ func status_list() -> Array:
 		out.append(["Перископ", periscope_left, true, "periscope", "Обзор и омни-сенсор дальше."])
 	if relay_left > 0.0:
 		out.append(["Ретранслятор", -1.0, true, "relay", "Рядом свой ретранслятор: урон больше на %d%%." % roundi(_relay_k * 100.0)])
+	if scope_on:
+		out.append(["Прицеливание", -1.0, true, "scope", "Пушки и обзор дальше, рельса сильнее, ход медленнее. Повторное нажатие — выключить."])
+	if net_left > 0.0:
+		out.append(["Маскировочная сеть", net_left, true, "camo", "Стоишь — враги не видят (кроме омни-сенсора вблизи). Пошёл — видно. Выстрел снимает сеть."])
 	if stance_on:
 		out.append(["Оборона", -1.0, true, "stance", "Стоит на месте и стреляет, входящий урон меньше на %d%%." % roundi(ability_param(_stance_i, "reduce") * 100.0)])
 	if _game_mult("damage") > 1.0:
@@ -593,6 +603,8 @@ func w_range(i: int) -> float:
 	var r: float = weapons[i]["range"]
 	if braced:
 		r *= 1.0 + stats.get("brace_bonus", 0.0)
+	if scope_on:
+		r *= 1.0 + ability_param(_scope_i, "boost")
 	return r
 
 
@@ -1252,7 +1264,10 @@ func fire_mult() -> float:
 
 # обзор и омни (перископ увеличивает); vision.gd берёт отсюда
 func vision_r() -> float:
-	return stats.get("vision", 35.0) * (1.0 + _peri_k if periscope_left > 0.0 else 1.0)
+	var k := 1.0 + _peri_k if periscope_left > 0.0 else 1.0
+	if scope_on:
+		k *= 1.0 + ability_param(_scope_i, "boost") * 0.5
+	return stats.get("vision", 35.0) * k
 
 
 func omni_r() -> float:
@@ -1745,7 +1760,7 @@ func _fire_rail(i: int, w: Dictionary) -> void:
 		var space := get_world_3d().direct_space_state
 		var ex: Array[RID] = Fx.team_rids(team)
 		var from := origin
-		var dmg: float = w["damage"] * damage_mult()
+		var dmg: float = w["damage"] * damage_mult() * (1.0 + ability_param(_scope_i, "boost") if scope_on else 1.0)
 		for step in 10:
 			var q := PhysicsRayQueryParameters3D.create(from, end, 1 | 4 | 16 | 128)
 			q.collide_with_areas = true
@@ -1853,6 +1868,9 @@ func _update_abilities(delta: float) -> void:
 		blink_left -= delta
 		if blink_left <= 0.0:
 			_finish_blink()
+	# маскировочная сеть: невидим, только пока стоит
+	net_left = maxf(net_left - delta, 0.0)
+	_net_still = Vector2(velocity.x, velocity.z).length() < 0.6
 
 	# залп: ракеты вылетают по одной с паузой
 	if _salvo_left > 0:
@@ -1872,6 +1890,9 @@ func _try_ability(index: int) -> void:
 	if type == "stance" and stance_on:
 		_set_stance(false)
 		return
+	if type == "scope" and scope_on:
+		_set_scope(false)
+		return
 	if type in ["blink", "jump"] and (root_left > 0.0 or stance_on):
 		return          # ноги связаны или стоит в обороне
 	if ability_cd[index] > 0.0 or (type == "rockets" and _salvo_left > 0) or (type == "blink" and blink_left > 0.0):
@@ -1880,6 +1901,9 @@ func _try_ability(index: int) -> void:
 	if ability_charges_max(index) > 0.0 and ability_charges[index] < 1.0:
 		ability_denied.emit(index, "charges")
 		return
+	if type == "burner" and _burner_target(index) == null:
+		ability_denied.emit(index, "target")      # выжигателю не за кого зацепиться: энергию не тратим
+		return
 	if not spend_energy(ability_cost(index)):
 		ability_denied.emit(index, "energy")
 		return
@@ -1887,7 +1911,7 @@ func _try_ability(index: int) -> void:
 		ability_charges[index] -= 1.0
 	if type != "cloak":
 		_break_cloak()
-	if type != "shield" and type != "stance":
+	if not type in ["shield", "stance", "scope"]:
 		ability_cd[index] = ability_cooldown_max(index)
 	var p: Dictionary = abilities[index]["params"]
 	match type:
@@ -1985,6 +2009,14 @@ func _try_ability(index: int) -> void:
 			_throw(index, {"kind": "supply", "params": p})
 		"smoke":
 			_throw(index, {"kind": "smoke", "params": p})
+		"scope":
+			_scope_i = index
+			_set_scope(true)
+		"camo":
+			net_left = p.get("duration", 20.0)
+			Sfx.play_at("step", global_position, -10.0, 0.1)
+		"burner":
+			_cast_burner(index)
 	ability_used.emit(index)
 
 
@@ -2074,6 +2106,8 @@ func _reset_ability_states() -> void:
 	matrix_left = 0.0
 	periscope_left = 0.0
 	relay_left = 0.0
+	_set_scope(false)
+	net_left = 0.0
 	marked_left = 0.0
 	_shove_t = 0.0
 	_jump_up = 0.0
@@ -2083,6 +2117,51 @@ func _reset_ability_states() -> void:
 func _break_cloak() -> void:
 	if cloak_left > 0.0 and _cloak_break:
 		cloak_left = 0.0
+	net_left = 0.0          # маскировочную сеть снимает выстрел и любая другая абилка
+
+
+# прицеливание: включил — дальше бьёт и видит, рельса сильнее, ход медленнее; перезарядка — после выключения
+func _set_scope(on: bool) -> void:
+	if scope_on and not on and _scope_i >= 0 and _scope_i < ability_cd.size():
+		ability_cd[_scope_i] = ability_cooldown_max(_scope_i)
+	if on != scope_on:
+		Sfx.play_at("beep", global_position, -8.0 if on else -12.0, 0.0)
+	scope_on = on
+
+
+# выжигатель: ближайший к прицелу видимый вражеский мех в досягаемости (не дальше ~12 м от точки прицела)
+func _burner_target(index: int) -> Node3D:
+	var rng: float = abilities[index]["params"].get("range", 26.0)
+	var at := _ability_point()
+	var g = get_tree().current_scene
+	var best: Node3D = null
+	var best_d := 8.0
+	for m in get_tree().get_nodes_in_group("mechs"):
+		if m.dead or m.team == team or (g != null and g.has_method("is_visible_to") and not g.is_visible_to(team, m)):
+			continue
+		if Vector2(m.global_position.x - global_position.x, m.global_position.z - global_position.z).length() > rng:
+			continue
+		var d := Vector2(m.global_position.x - at.x, m.global_position.z - at.z).length()
+		if d < best_d:
+			best_d = d
+			best = m
+	return best
+
+
+# выжигатель: луч цепляется к цели и жжёт её энергию, пока цель в досягаемости и стены не мешают
+func _cast_burner(index: int) -> void:
+	var t := _burner_target(index)
+	if t == null:
+		return
+	var p: Dictionary = abilities[index]["params"]
+	var b := BurnerBeam.new()
+	b.shooter = self
+	b.target = t
+	b.life = p.get("duration", 4.0)
+	b.burn = p.get("burn", 30.0)
+	b.rng = p.get("range", 26.0)
+	get_tree().current_scene.add_child(b)
+	Sfx.play_at("laser", global_position, -6.0, 0.05)
 
 
 # щит: сфера вокруг меха (цвет и прозрачность в шейдере ниже), плюс зелёные искры ремонта

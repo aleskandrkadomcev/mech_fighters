@@ -17,7 +17,7 @@ const KIND_COL := [Color(1.0, 0.55, 0.2), Color(0.75, 0.45, 1.0), Color(0.35, 0.
 const AB_KIND := {"rockets": 0, "airstrike": 0, "mine": 0, "napalm": 0, "jump": 0, "turret": 0, "roller": 0, "slug": 0, "rapid": 0,
 	"firewall": 0,
 	"emp": 1, "bolas": 1, "jammer": 1, "emp_shell": 1, "gravity": 1, "repulse": 1, "marker": 1, "trap": 1, "emp_dart": 1,
-	"shield": 2, "repair": 2, "barricade": 2, "drone": 2, "stance": 2, "dome": 2, "matrix": 2, "purge": 2, "nanocloud": 2, "relay": 3, "supply": 3, "smoke": 2}
+	"shield": 2, "repair": 2, "barricade": 2, "drone": 2, "stance": 2, "dome": 2, "matrix": 2, "purge": 2, "nanocloud": 2, "relay": 3, "supply": 3, "smoke": 2, "scope": 0, "camo": 2, "burner": 1}
 
 var mech: Node3D
 var main: Node3D
@@ -594,7 +594,7 @@ func _on_denied(index: int, reason: String) -> void:
 		_ammo_deny = 0.35
 		return
 	_deny_t = 0.3
-	_deny_slot = index if (reason == "cooldown" or reason == "charges") else -2    # -2 = не хватило энергии
+	_deny_slot = index if reason in ["cooldown", "charges", "target"] else -2    # -2 = не хватило энергии; target — не за кого зацепиться
 	if reason == "cooldown" and mech != null and mech.cooldown_left(index) > 0.01:
 		if _cd_tip == null:
 			_cd_tip = _label("", 18)

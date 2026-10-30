@@ -314,6 +314,12 @@ const DATA := {
 	"mod_supply": {"slot": "module", "ability": "supply", "name": "Ящик снабжения", "short": "Снабжение",
 		"weight": 3.0, "energy": 5.0, "cost": 25.0, "cooldown": 20.0, "speed": 26.0, "range": 22.0, "duration": 40.0,
 		"hp": 60.0, "give_energy": 40.0, "give_ammo": 0.5},
+	"mod_scope": {"slot": "module", "ability": "scope", "name": "Прицеливание", "short": "Прицел",
+		"weight": 3.0, "energy": 5.0, "cost": 10.0, "cooldown": 3.0, "boost": 0.5, "slow": 0.5},
+	"mod_camo": {"slot": "module", "ability": "camo", "name": "Маскировочная сеть", "short": "Сеть",
+		"weight": 2.0, "energy": 5.0, "cost": 25.0, "cooldown": 18.0, "duration": 20.0},
+	"mod_burner": {"slot": "module", "ability": "burner", "name": "Выжигатель", "short": "Выжигатель",
+		"weight": 4.0, "energy": 10.0, "cost": 30.0, "cooldown": 14.0, "range": 26.0, "duration": 4.0, "burn": 30.0},
 	"mod_smoke": {"slot": "module", "ability": "smoke", "name": "Дымовая граната", "short": "Дым",
 		"weight": 2.0, "energy": 5.0, "cost": 20.0, "cooldown": 14.0, "speed": 28.0, "range": 30.0, "radius": 6.0,
 		"duration": 8.0},
@@ -519,8 +525,8 @@ const HERO_KITS := {
 	"hero_m3": ["mod_turret", "mod_barricade", "mod_probe"],     # Инженер
 	"hero_l4": ["mod_trap", "mod_bolas", "mod_slug"],            # Ловчий
 	"hero_m1": ["mod_firewall", "mod_napalm", "mod_purge"],      # Поджигатель
-	"mech_hound": ["mod_blink"],                                 # Ястреб: ★прицеливание*, маскировочная сеть*
-	"hero_m4": ["mod_emp_shell", "mod_emp"],                     # Глушитель: ★выжигатель*
+	"mech_hound": ["mod_scope", "mod_camo", "mod_blink"],        # Ястреб
+	"hero_m4": ["mod_burner", "mod_emp_shell", "mod_emp"],       # Глушитель
 	"mech_assault": ["mod_rapid", "mod_rockets", "mod_repair"],  # Штурмовик
 	"hero_h1": ["mod_stance", "mod_slug"],                       # Бастион: ПРО-перехват*
 	"hero_l1": ["mod_cloak", "mod_marker", "mod_emp_dart"],      # Призрак
@@ -833,9 +839,15 @@ func describe(id: String) -> String:
 					out.append("мачта: свои в %s м бьют на %s сильнее %s с; %s HP, её можно сломать" % [_m(v(id, "radius")), _pct(v(id, "boost")), _n(v(id, "duration")), _n(v(id, "hp"))])
 				"supply":
 					out.append("ящик для своих: +%s HP, +%s эн., %s патронов; лежит %s с" % [_n(v(id, "hp")), _n(v(id, "give_energy")), _pct(v(id, "give_ammo")), _n(v(id, "duration"))])
+				"scope":
+					out.append("включил: пушки и обзор дальше на %s, рельса сильнее на %s, ход медленнее на %s" % [_pct(v(id, "boost")), _pct(v(id, "boost")), _pct(v(id, "slow")).trim_prefix("+")])
+				"camo":
+					out.append("%s с: стоишь — враги не видят (кроме омни вблизи), пошёл — видно, выстрел снимает" % _n(v(id, "duration")))
+				"burner":
+					out.append("луч к врагу у прицела: жжёт %s эн./с %s с, до %s м" % [_n(v(id, "burn")), _n(v(id, "duration")), _m(v(id, "range"))])
 				"smoke":
 					out.append("дым %s м на %s с: сквозь него не видно" % [_m(v(id, "radius")), _n(v(id, "duration"))])
-			if d.get("ability", "") in ["shield", "stance"]:
+			if d.get("ability", "") in ["shield", "stance", "scope"]:
 				out.append("вкл. %s эн., кд %s с после выкл." % [_n(v(id, "cost")), _n(v(id, "cooldown"))])
 			elif d.has("ability"):
 				out.append("%s эн., кд %s с" % [_n(v(id, "cost")), _n(v(id, "cooldown"))])

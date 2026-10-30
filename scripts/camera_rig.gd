@@ -46,9 +46,11 @@ func _process(delta: float) -> void:
 	elif "aim_point" in target:
 		aim = target.aim_point
 	if aim != null:
-		var off: Vector3 = (aim - want) * Cfg.cam_lookahead
+		# прицеливание (Ястреб): камера уходит к прицелу намного дальше
+		var scoped: bool = target.get("scope_on") == true
+		var off: Vector3 = (aim - want) * Cfg.cam_lookahead * (1.6 if scoped else 1.0)
 		off.y = 0
-		want += off.limit_length(Cfg.cam_lookahead_max)
+		want += off.limit_length(Cfg.cam_lookahead_max * (2.5 if scoped else 1.0))
 	want.y = 0
 	if not _started:
 		_started = true

@@ -3889,7 +3889,36 @@ func _run_abil4test() -> void:
 			_abil2_check("сквозь дым врага не видно", not _sees(m, e))
 		1250:
 			_abil2_check("дым рассеялся — враг снова виден", _sees(m, e))
+		1255:
+			m.set_build({"mech": "mech_fortress", "core": "core_combat", "weapons": ["autocannon", "autocannon"],
+				"modules": ["mod_scope", "mod_camo", "mod_burner"]})     # у Крепости 7 слотов: вторая сборка
 		1260:
+			e.energy = e.energy_max()
+			set_meta("en", e.energy)
+			_abil2_cast(m, "burner", e.global_position)
+		1380:
+			_abil2_check("выжигатель жжёт энергию", e.energy < float(get_meta("en")) - 30.0 and e.no_regen_left > 0.0, "%.0f → %.0f" % [float(get_meta("en")), e.energy])
+		1400:
+			set_meta("rng", m.w_range(0))
+			set_meta("spd", m._speed_mult())
+			_abil2_cast(m, "scope", m.global_position)
+		1410:
+			_abil2_check("прицеливание: дальше бьёт, медленнее ходит", m.scope_on and m.w_range(0) > float(get_meta("rng")) * 1.4 and m._speed_mult() < float(get_meta("spd")) * 0.6, "дальность %.0f → %.0f" % [float(get_meta("rng")), m.w_range(0)])
+			m._try_ability(m.ability_index("scope"))
+		1420:
+			_abil2_check("прицеливание выключается", not m.scope_on and m.ability_cd[m.ability_index("scope")] > 0.0)
+		1430:
+			_abil2_cast(m, "camo", m.global_position)
+		1460:
+			_abil2_check("сеть: стоит — невидим", m.is_cloaked())
+			m.demo["move"] = Vector2(1, 0)
+		1490:
+			_abil2_check("сеть: пошёл — видно", not m.is_cloaked() and m.net_left > 0.0)
+			m.demo["move"] = Vector2.ZERO
+		1530:
+			m._break_cloak()
+			_abil2_check("сеть: выстрел снимает", m.net_left == 0.0 and not m.is_cloaked())
+		1540:
 			var f: int = get_meta("fails", 0)
 			print("[ABIL2] итог: %s" % ("ВСЁ ВЕРНО" if f == 0 else "ошибок %d" % f))
 			get_tree().quit()
