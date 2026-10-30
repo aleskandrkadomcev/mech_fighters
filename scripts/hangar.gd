@@ -306,7 +306,7 @@ func _build_ui() -> void:
 	bottom.add_child(more)
 	var reset := _button("Стандартная сборка")
 	reset.pressed.connect(func() -> void:
-		_build = Parts.DEFAULT_BUILD.duplicate(true)
+		_build = Parts.hero_build(_build["mech"])
 		_refresh_rows()
 		_refresh_info())
 	bottom.add_child(reset)
@@ -372,7 +372,8 @@ func _mech_card(id: String) -> Button:
 	t.custom_minimum_size = Vector2(205, 0)
 	box.add_child(t)
 	b.pressed.connect(func() -> void:
-		_build["mech"] = id
+		# выбрал героя — ставятся его абилки (дальше их можно поменять в плитках модулей)
+		_build = Parts.hero_build(id, _build)
 		_refresh_rows()
 		_refresh_info())
 	_card_btns[id] = b

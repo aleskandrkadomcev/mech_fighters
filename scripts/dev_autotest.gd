@@ -52,6 +52,7 @@ var _proptest := false           # --proptest: кучка ящиков не ме
 var _pingtest := false           # --pingtest: Alt+клик — обычная метка, Alt + зажатая ЛКМ — круговое меню, выбор по направлению мыши
 var _herotest := false          # --herotest: герои из моделей ходят и стреляют, стволы на месте
 var _hangarshots: Array = []     # --hangarshots=hero_l4,hero_m5: мехи по очереди в ангаре (снимки кадрами 50, 90, 130...)
+var _kittest := false           # --kittest: наборы абилок героев
 var _camtest := false           # --camtest (окно, без --fixed-fps): плавность камеры, когда двигаешь мышью (сдвиг к прицелу)
 var _abil3test := false         # --abil3test: вторая пачка абилок и правки (баррикада-стена, толчок по дистанции, крипы)
 var _abil2test := false         # --abil2test: абилки 17.10.2026 по очереди (связка, дротик, ЭМИ, напалм, зонд, баррикада, дрон, оборона, якорь, волна, прыжок)
@@ -200,6 +201,8 @@ func setup(main_node: Node3D, args: PackedStringArray) -> void:
 			_camtest = true
 		elif a == "--herotest":
 			_herotest = true
+		elif a == "--kittest":
+			_kittest = true
 		elif a.begins_with("--hangarshots="):
 			_hangarshots = Array(a.substr(14).split(","))
 		elif a == "--pingtest":
@@ -314,6 +317,8 @@ func _process(_delta: float) -> void:
 		_run_herotest()
 	if not _hangarshots.is_empty():
 		_run_hangarshots()
+	if _kittest:
+		_run_kittest()
 	if _pingtest:
 		_run_pingtest()
 	if _ruintest:
@@ -4160,6 +4165,28 @@ func _jerk(a: Array) -> float:
 #  становится каждым героем, идёт вперёд и стреляет из обеих пушек. Проверка: мех дошёл (ноги работают),
 #  выстрелы были, стволы (muzzle) рядом с мехом и впереди корпуса
 # ------------------------------------------------------------------
+
+#  Наборы героев (--kittest): сборка каждого героя рабочая, в ангаре выбор меха ставит его абилки, после «Применить»
+#  у меха столько абилок, сколько в наборе
+func _run_kittest() -> void:
+	if _frame != 10:
+		return
+	var fails := 0
+	for id in Parts.HERO_KITS:
+		var b: Dictionary = Parts.hero_build(id)
+		var r: Dictionary = Parts.compute(b)
+		main.hangar.open(main.mech.build)
+		main.hangar._mech_card(id).pressed.emit()
+		main.hangar._on_apply()
+		var n: int = main.mech.abilities.size()
+		var ok: bool = r["ok"] and main.mech.build["mech"] == id and n == Parts.HERO_KITS[id].size()
+		if not ok:
+			fails += 1
+		print("[KIT] %-12s %-12s абилок %d/%d, сборка %s %s %s" % [id, Parts.pname(id), n, Parts.HERO_KITS[id].size(),
+			"рабочая" if r["ok"] else str(r["problems"]), ",".join(main.mech.abilities.map(func(a): return a["name"])), "ВЕРНО" if ok else "ОШИБКА"])
+	print("[KIT] итог: %s" % ("ВСЁ ВЕРНО" if fails == 0 else "ошибок %d" % fails))
+	get_tree().quit()
+
 
 #  Снимки в ангаре (--hangarshots=hero_l4,hero_m5 --shots=50,90): каждый мех 40 кадров на подиуме, вид три четверти
 func _run_hangarshots() -> void:

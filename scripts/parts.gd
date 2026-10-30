@@ -31,8 +31,8 @@ const DATA := {
 		"dash_speed": 50.0, "dash_time": 0.22, "dash_cooldown": 1.6, "dash_brake": 120.0, "dash_charges": 2, "dash_ramp": 0.12,
 		"legs_turn_speed": 320.0, "torso_turn_speed": 340.0,
 		"stride_walk": 5.0, "stride_run": 6.0, "legs_scale": 0.85, "hull_scale": 0.8},
-	"mech_hound": {"slot": "mech", "name": "Гончая", "class": "Лёгкий", "style": "scout", "model": "hero_l5",
-		"trait": "Разведчик: дальний обзор и сильный омни-сенсор",
+	"mech_hound": {"slot": "mech", "name": "Ястреб", "class": "Лёгкий", "style": "scout", "model": "hero_l5",
+		"trait": "Снайпер: дальний обзор, телепорт",
 		"weight": 22.0, "capacity": 62.0, "hp": 210.0, "hit_radius": 1.6, "vision": 52.0, "omni": 24.0, "slots": 3,
 		"walk_speed": 8.6, "run_speed": 16.5, "accel": 20.0, "decel": 34.0,
 		"dash_speed": 46.0, "dash_time": 0.24, "dash_cooldown": 1.8, "dash_brake": 115.0, "dash_charges": 1, "dash_ramp": 0.12,
@@ -96,81 +96,81 @@ const DATA := {
 		"stride_walk": 6.0, "stride_run": 6.4, "legs_scale": 1.18, "hull_scale": 1.2, "stance": 0.35},
 	# ГЕРОИ (28.10.2026): модели Сани, пушки модели остаются; числа пока как у похожих мехов, имена рабочие
 	"hero_art1": {"slot": "mech", "name": "Осадник", "class": "Тяжёлый", "model": "hero_art1", "style": "siege",
-		"trait": "Артиллерия: одна длинная пушка (герой, модель art1)",
+		"trait": "Артиллерия: бьёт издалека, ставит мины. Упор: стоя бьёт дальше и точнее",
 		"weight": 48.0, "capacity": 115.0, "hp": 380.0, "hit_radius": 2.15, "vision": 34.0, "omni": 12.0, "slots": 6,
 		"walk_speed": 5.8, "run_speed": 11.0, "accel": 12.0, "decel": 28.0,
 		"dash_speed": 38.0, "dash_time": 0.26, "dash_cooldown": 3.0, "dash_brake": 90.0, "dash_charges": 1, "dash_ramp": 0.2,
 		"legs_turn_speed": 160.0, "torso_turn_speed": 190.0, "brace_bonus": 0.25, "brace_time": 0.6,
 		"stride_walk": 6.0, "stride_run": 6.4, "legs_scale": 1.12, "hull_scale": 1.12},
-	"hero_h1": {"slot": "mech", "name": "H1", "class": "Тяжёлый", "style": "heavy", "model": "hero_h1",
-		"trait": "Тяжёлый с Гатлингами на плечах (герой, модель h1)",
+	"hero_h1": {"slot": "mech", "name": "Бастион", "class": "Тяжёлый", "style": "heavy", "model": "hero_h1",
+		"trait": "Танк: оборонительная позиция, болванка. Бронеплиты: попадания слабее на 3",
 		"weight": 54.0, "capacity": 135.0, "hp": 460.0, "hit_radius": 2.3, "vision": 30.0, "omni": 12.0, "slots": 7,
 		"walk_speed": 5.2, "run_speed": 10.0, "accel": 10.0, "decel": 27.0,
 		"dash_speed": 36.0, "dash_time": 0.28, "dash_cooldown": 3.4, "dash_brake": 90.0, "dash_charges": 1, "dash_ramp": 0.2,
-		"legs_turn_speed": 150.0, "torso_turn_speed": 170.0, "resist_explosion": 0.25, "resist_stun": 0.3,
+		"legs_turn_speed": 150.0, "torso_turn_speed": 170.0, "resist_explosion": 0.25, "resist_stun": 0.3, "armor_flat": 3.0,
 		"stride_walk": 6.0, "stride_run": 6.4, "legs_scale": 1.18, "hull_scale": 1.2},
-	"hero_m3": {"slot": "mech", "name": "M3", "class": "Средний", "style": "mid", "model": "hero_m3",
-		"trait": "Средний, пушки в плечевых блоках (герой, модель m3)",
+	"hero_m3": {"slot": "mech", "name": "Инженер", "class": "Средний", "style": "mid", "model": "hero_m3",
+		"trait": "Мини-турели, баррикада, скан-зонд",
 		"weight": 34.0, "capacity": 90.0, "hp": 300.0, "hit_radius": 1.9, "vision": 36.0, "omni": 14.0, "slots": 5,
 		"walk_speed": 7.8, "run_speed": 14.9, "accel": 16.0, "decel": 31.0,
 		"dash_speed": 46.5, "dash_time": 0.28, "dash_cooldown": 2.0, "dash_brake": 110.0, "dash_charges": 1, "dash_ramp": 0.16,
 		"legs_turn_speed": 190.0, "torso_turn_speed": 220.0,
 		"stride_walk": 5.7, "stride_run": 6.2, "legs_scale": 1.0, "hull_scale": 1.0},
-	"hero_l1": {"slot": "mech", "name": "L1", "class": "Лёгкий", "style": "scout", "model": "hero_l1",
-		"trait": "Лёгкий на длинных ногах (герой, модель l1)",
+	"hero_l1": {"slot": "mech", "name": "Призрак", "class": "Лёгкий", "style": "scout", "model": "hero_l1",
+		"trait": "Убийца: невидимость, дротик-целеуказатель",
 		"weight": 22.0, "capacity": 62.0, "hp": 210.0, "hit_radius": 1.6, "vision": 52.0, "omni": 24.0, "slots": 3,
 		"walk_speed": 8.6, "run_speed": 16.5, "accel": 20.0, "decel": 34.0,
 		"dash_speed": 46.0, "dash_time": 0.24, "dash_cooldown": 1.8, "dash_brake": 115.0, "dash_charges": 1, "dash_ramp": 0.12,
 		"legs_turn_speed": 300.0, "torso_turn_speed": 380.0,
 		"stride_walk": 5.2, "stride_run": 6.0, "legs_scale": 0.88, "hull_scale": 0.85},
-	"hero_h4": {"slot": "mech", "name": "H4", "class": "Тяжёлый", "style": "heavy", "model": "hero_h4",
-		"trait": "Тяжёлый с ракетными блоками на плечах (герой, модель h4)",
+	"hero_h4": {"slot": "mech", "name": "Гравитон", "class": "Тяжёлый", "style": "heavy", "model": "hero_h4",
+		"trait": "Тянет врагов якорем, ракетный залп, щит",
 		"weight": 54.0, "capacity": 135.0, "hp": 460.0, "hit_radius": 2.3, "vision": 30.0, "omni": 12.0, "slots": 7,
 		"walk_speed": 5.2, "run_speed": 10.0, "accel": 10.0, "decel": 27.0,
 		"dash_speed": 36.0, "dash_time": 0.28, "dash_cooldown": 3.4, "dash_brake": 90.0, "dash_charges": 1, "dash_ramp": 0.2,
 		"legs_turn_speed": 150.0, "torso_turn_speed": 170.0, "resist_explosion": 0.25, "resist_stun": 0.3,
 		"stride_walk": 6.0, "stride_run": 6.4, "legs_scale": 1.18, "hull_scale": 1.2},
-	"hero_h5": {"slot": "mech", "name": "H5", "class": "Тяжёлый", "style": "heavy", "model": "hero_h5",
-		"trait": "Тяжёлый со спаренными стволами на плечах (герой, модель h5)",
+	"hero_h5": {"slot": "mech", "name": "Командир", "class": "Тяжёлый", "style": "heavy", "model": "hero_h5",
+		"trait": "Поддержка: авиаудар",
 		"weight": 54.0, "capacity": 135.0, "hp": 460.0, "hit_radius": 2.3, "vision": 30.0, "omni": 12.0, "slots": 7,
 		"walk_speed": 5.2, "run_speed": 10.0, "accel": 10.0, "decel": 27.0,
 		"dash_speed": 36.0, "dash_time": 0.28, "dash_cooldown": 3.4, "dash_brake": 90.0, "dash_charges": 1, "dash_ramp": 0.2,
 		"legs_turn_speed": 150.0, "torso_turn_speed": 170.0, "resist_explosion": 0.25, "resist_stun": 0.3,
 		"stride_walk": 6.0, "stride_run": 6.4, "legs_scale": 1.18, "hull_scale": 1.2},
-	"hero_m1": {"slot": "mech", "name": "M1", "class": "Средний", "style": "mid", "model": "hero_m1",
-		"trait": "Средний с Гатлингами под плечами (герой, модель m1)",
+	"hero_m1": {"slot": "mech", "name": "Поджигатель", "class": "Средний", "style": "mid", "model": "hero_m1",
+		"trait": "Напалм, аварийный перезапуск",
 		"weight": 34.0, "capacity": 90.0, "hp": 300.0, "hit_radius": 1.9, "vision": 36.0, "omni": 14.0, "slots": 5,
 		"walk_speed": 7.8, "run_speed": 14.9, "accel": 16.0, "decel": 31.0,
 		"dash_speed": 46.5, "dash_time": 0.28, "dash_cooldown": 2.0, "dash_brake": 110.0, "dash_charges": 1, "dash_ramp": 0.16,
 		"legs_turn_speed": 190.0, "torso_turn_speed": 220.0,
 		"stride_walk": 5.7, "stride_run": 6.2, "legs_scale": 1.0, "hull_scale": 1.0},
-	"hero_l2": {"slot": "mech", "name": "L2", "class": "Лёгкий", "style": "scout", "model": "hero_l2",
-		"trait": "Лёгкий с длинным носом, пушки разные по сторонам (герой, модель l2)",
+	"hero_l2": {"slot": "mech", "name": "Десантник", "class": "Лёгкий", "style": "scout", "model": "hero_l2",
+		"trait": "Прыгает в бой: прыжок, связка, форсаж",
 		"weight": 22.0, "capacity": 62.0, "hp": 210.0, "hit_radius": 1.6, "vision": 52.0, "omni": 24.0, "slots": 3,
 		"walk_speed": 8.6, "run_speed": 16.5, "accel": 20.0, "decel": 34.0,
 		"dash_speed": 46.0, "dash_time": 0.24, "dash_cooldown": 1.8, "dash_brake": 115.0, "dash_charges": 1, "dash_ramp": 0.12,
 		"legs_turn_speed": 300.0, "torso_turn_speed": 380.0,
 		"stride_walk": 5.2, "stride_run": 6.0, "legs_scale": 0.88, "hull_scale": 0.85},
-	"hero_l4": {"slot": "mech", "name": "L4", "class": "Лёгкий", "style": "scout", "model": "hero_l4",
-		"trait": "Лёгкий с пушками на руках (герой, модель l4)",
+	"hero_l4": {"slot": "mech", "name": "Ловчий", "class": "Лёгкий", "style": "scout", "model": "hero_l4",
+		"trait": "Охотник: связка, тяжёлая болванка",
 		"weight": 22.0, "capacity": 62.0, "hp": 210.0, "hit_radius": 1.6, "vision": 52.0, "omni": 24.0, "slots": 3,
 		"walk_speed": 8.6, "run_speed": 16.5, "accel": 20.0, "decel": 34.0,
 		"dash_speed": 46.0, "dash_time": 0.24, "dash_cooldown": 1.8, "dash_brake": 115.0, "dash_charges": 1, "dash_ramp": 0.12,
 		"legs_turn_speed": 300.0, "torso_turn_speed": 380.0,
 		"stride_walk": 5.2, "stride_run": 6.0, "legs_scale": 0.88, "hull_scale": 0.85},
-	"hero_m4": {"slot": "mech", "name": "M4", "class": "Средний", "style": "mid", "model": "hero_m4",
-		"trait": "Средний с винтовкой вдоль борта и пушкой на руке (герой, модель m4)",
+	"hero_m4": {"slot": "mech", "name": "Глушитель", "class": "Средний", "style": "mid", "model": "hero_m4",
+		"trait": "Сжигает энергию: ЭМИ-снаряд, излучатель импульса",
 		"weight": 34.0, "capacity": 90.0, "hp": 300.0, "hit_radius": 1.9, "vision": 36.0, "omni": 14.0, "slots": 5,
 		"walk_speed": 7.8, "run_speed": 14.9, "accel": 16.0, "decel": 31.0,
 		"dash_speed": 46.5, "dash_time": 0.28, "dash_cooldown": 2.0, "dash_brake": 110.0, "dash_charges": 1, "dash_ramp": 0.16,
 		"legs_turn_speed": 190.0, "torso_turn_speed": 220.0,
 		"stride_walk": 5.7, "stride_run": 6.2, "legs_scale": 1.0, "hull_scale": 1.0},
-	"hero_m5": {"slot": "mech", "name": "M5", "class": "Средний", "style": "mid", "model": "hero_m5",
-		"trait": "Средний с Гатлингами по бокам, ноги с обратным коленом (герой, модель m5)",
+	"hero_m5": {"slot": "mech", "name": "Механик", "class": "Средний", "style": "mid", "model": "hero_m5",
+		"trait": "Чинит своих дроном, глушит врагов. Самопочинка: вне боя чинится сам",
 		"weight": 34.0, "capacity": 90.0, "hp": 300.0, "hit_radius": 1.9, "vision": 36.0, "omni": 14.0, "slots": 5,
 		"walk_speed": 7.8, "run_speed": 14.9, "accel": 16.0, "decel": 31.0,
 		"dash_speed": 46.5, "dash_time": 0.28, "dash_cooldown": 2.0, "dash_brake": 110.0, "dash_charges": 1, "dash_ramp": 0.16,
-		"legs_turn_speed": 190.0, "torso_turn_speed": 220.0,
+		"legs_turn_speed": 190.0, "torso_turn_speed": 220.0, "regen_hp": 10.0, "regen_delay": 4.0,
 		"stride_walk": 5.7, "stride_run": 6.2, "legs_scale": 1.0, "hull_scale": 1.0},
 
 	# ---------------- ЯДРА ----------------
@@ -486,6 +486,26 @@ const DEFAULT_BUILD := {
 	"mech": "mech_assault", "core": "core_combat",
 	"weapons": ["autocannon", "autocannon"],
 	"modules": ["mod_rockets", "mod_emp", "mod_armor", "mod_radiator"],
+}
+
+# ГЕРОИ: стандартные абилки (первая — фирменная, на Q), «МЕХИправки.txt», концепт 23.10.2026.
+# Абилок со звёздочкой (ещё нет в игре) тут нет — их места пока пустые. В ангаре набор можно поменять
+const HERO_KITS := {
+	"hero_art1": ["mod_mines"],                                  # Осадник: ★осадный режим*, дымовая граната*
+	"mech_wasp": ["mod_roller", "mod_jammer", "mod_overdrive"],  # Оса: ★два рывка — свойство меха
+	"mech_fortress": ["mod_dome", "mod_matrix", "mod_repulse"],  # Крепость
+	"hero_m5": ["mod_drone", "mod_jammer"],                      # Механик: нанооблако*
+	"hero_m3": ["mod_turret", "mod_barricade", "mod_probe"],     # Инженер
+	"hero_l4": ["mod_bolas", "mod_slug"],                        # Ловчий: ★капкан*
+	"hero_m1": ["mod_napalm", "mod_purge"],                      # Поджигатель: ★огненная стена*
+	"mech_hound": ["mod_blink"],                                 # Ястреб: ★прицеливание*, маскировочная сеть*
+	"hero_m4": ["mod_emp_shell", "mod_emp"],                     # Глушитель: ★выжигатель*
+	"mech_assault": ["mod_rapid", "mod_rockets", "mod_repair"],  # Штурмовик
+	"hero_h1": ["mod_stance", "mod_slug"],                       # Бастион: ПРО-перехват*
+	"hero_l1": ["mod_cloak", "mod_marker"],                      # Призрак: ЭМИ-дротик*
+	"hero_h5": ["mod_airstrike"],                                # Командир: ★ретранслятор*, ящик снабжения*
+	"hero_l2": ["mod_jump", "mod_bolas", "mod_overdrive"],       # Десантник: прыжок пока без толчка к своим*
+	"hero_h4": ["mod_gravity", "mod_rockets", "mod_shield"],     # Гравитон
 }
 
 # старые сборки (ноги + корпус) переводим на мехов по корпусу
@@ -949,6 +969,18 @@ func upgrade_build(b: Dictionary) -> Dictionary:
 	if not DATA.has(out.get("core", "")):
 		out["core"] = "core_combat"
 	return out
+
+
+# сборка героя: его стандартные абилки, ядро и пушки — из base (не влезает по весу — стандартные).
+# У меха без набора модули остаются из base
+func hero_build(mech_id: String, base: Dictionary = DEFAULT_BUILD) -> Dictionary:
+	var b := {"mech": mech_id, "core": base.get("core", DEFAULT_BUILD["core"]),
+		"weapons": (base.get("weapons", DEFAULT_BUILD["weapons"]) as Array).duplicate(),
+		"modules": (HERO_KITS.get(mech_id, base.get("modules", [])) as Array).duplicate()}
+	if not compute(b)["ok"]:
+		b["core"] = DEFAULT_BUILD["core"]
+		b["weapons"] = (DEFAULT_BUILD["weapons"] as Array).duplicate()
+	return b
 
 
 # случайная рабочая сборка (для ботов)
