@@ -296,6 +296,18 @@ const DATA := {
 		"weight": 3.0, "energy": 10.0, "cost": 30.0, "cooldown": 18.0, "duration": 5.0, "boost": 0.5},
 	"mod_periscope": {"slot": "module", "ability": "periscope", "name": "Перископ", "short": "Перископ",
 		"weight": 2.0, "energy": 5.0, "cost": 20.0, "cooldown": 20.0, "duration": 8.0, "boost": 0.6, "omni": 10.0},
+	# абилки героев (30.10.2026, «МЕХИправки.txt» — концепт героев)
+	"mod_trap": {"slot": "module", "ability": "trap", "name": "Капкан", "short": "Капкан",
+		"weight": 3.0, "energy": 5.0, "cost": 20.0, "cooldown": 10.0, "charges": 2, "speed": 26.0, "range": 22.0,
+		"trigger_radius": 1.6, "arm_time": 1.0, "duration": 2.5, "damage": 15.0},
+	"mod_firewall": {"slot": "module", "ability": "firewall", "name": "Огненная стена", "short": "Огн. стена",
+		"weight": 5.0, "energy": 10.0, "cost": 35.0, "cooldown": 16.0, "speed": 28.0, "range": 28.0, "length": 12.0,
+		"width": 2.4, "duration": 6.0, "dps": 20.0, "slow": 0.3},
+	"mod_emp_dart": {"slot": "module", "ability": "emp_dart", "name": "ЭМИ-дротик", "short": "ЭМИ-дротик",
+		"weight": 2.0, "energy": 5.0, "cost": 20.0, "cooldown": 12.0, "speed": 45.0, "range": 32.0, "burn": 50.0, "no_regen_time": 3.0},
+	"mod_nanocloud": {"slot": "module", "ability": "nanocloud", "name": "Нанооблако", "short": "Облако",
+		"weight": 4.0, "energy": 10.0, "cost": 35.0, "cooldown": 18.0, "speed": 26.0, "range": 26.0, "radius": 6.0,
+		"duration": 6.0, "heal_per_sec": 15.0},
 
 	# ---------------- ПОСТРОЙКИ (не для ангара: турели и штаб на карте) ----------------
 	"turret_t1": {"slot": "structure", "name": "Турель 1 уровня (у центра)",
@@ -477,7 +489,7 @@ const WEAPON_STATS := ["ammo", "fire_rate", "damage", "bullet_speed", "range", "
 	"radius", "edge_damage", "charge_time", "pierce", "spin_up"]
 const ABILITY_STATS := ["cost", "cooldown", "count", "salvo_delay", "speed", "range", "damage", "radius",
 	"edge_damage", "scatter", "stun_time", "no_regen_time",
-	"duration", "break_on_fire", "charges", "trigger_radius", "arm_time", "slow", "slow_time", "heal_per_sec", "delay", "upkeep", "energy_per_damage", "absorb", "dps", "burn", "push", "reduce", "omni", "hp", "shove", "boost", "fire_rate"]
+	"duration", "break_on_fire", "charges", "trigger_radius", "arm_time", "slow", "slow_time", "heal_per_sec", "delay", "upkeep", "energy_per_damage", "absorb", "dps", "burn", "push", "reduce", "omni", "hp", "shove", "boost", "fire_rate", "length", "width"]
 # значения, если у меха такого числа нет
 const MECH_DEFAULTS := {"dash_charges": 1.0, "moving_spread": 1.0, "energy_regen_mult": 1.0, "cd_mult": 1.0, "brace_time": 0.6,
 	"regen_delay": 4.0, "legs_scale": 1.0, "hull_scale": 1.0, "stance": 1.0}
@@ -494,15 +506,15 @@ const HERO_KITS := {
 	"hero_art1": ["mod_mines"],                                  # Осадник: ★осадный режим*, дымовая граната*
 	"mech_wasp": ["mod_roller", "mod_jammer", "mod_overdrive"],  # Оса: ★два рывка — свойство меха
 	"mech_fortress": ["mod_dome", "mod_matrix", "mod_repulse"],  # Крепость
-	"hero_m5": ["mod_drone", "mod_jammer"],                      # Механик: нанооблако*
+	"hero_m5": ["mod_drone", "mod_nanocloud", "mod_jammer"],     # Механик
 	"hero_m3": ["mod_turret", "mod_barricade", "mod_probe"],     # Инженер
-	"hero_l4": ["mod_bolas", "mod_slug"],                        # Ловчий: ★капкан*
-	"hero_m1": ["mod_napalm", "mod_purge"],                      # Поджигатель: ★огненная стена*
+	"hero_l4": ["mod_trap", "mod_bolas", "mod_slug"],            # Ловчий
+	"hero_m1": ["mod_firewall", "mod_napalm", "mod_purge"],      # Поджигатель
 	"mech_hound": ["mod_blink"],                                 # Ястреб: ★прицеливание*, маскировочная сеть*
 	"hero_m4": ["mod_emp_shell", "mod_emp"],                     # Глушитель: ★выжигатель*
 	"mech_assault": ["mod_rapid", "mod_rockets", "mod_repair"],  # Штурмовик
 	"hero_h1": ["mod_stance", "mod_slug"],                       # Бастион: ПРО-перехват*
-	"hero_l1": ["mod_cloak", "mod_marker"],                      # Призрак: ЭМИ-дротик*
+	"hero_l1": ["mod_cloak", "mod_marker", "mod_emp_dart"],      # Призрак
 	"hero_h5": ["mod_airstrike"],                                # Командир: ★ретранслятор*, ящик снабжения*
 	"hero_l2": ["mod_jump", "mod_bolas", "mod_overdrive"],       # Десантник: прыжок пока без толчка к своим*
 	"hero_h4": ["mod_gravity", "mod_rockets", "mod_shield"],     # Гравитон
@@ -800,6 +812,14 @@ func describe(id: String) -> String:
 					out.append("скорострельность %s на %s с" % [_pct(v(id, "boost")), _n(v(id, "duration"))])
 				"periscope":
 					out.append("обзор %s, омни +%s м на %s с" % [_pct(v(id, "boost")), _m(v(id, "omni")), _n(v(id, "duration"))])
+				"trap":
+					out.append("бросаешь на землю, враг наступил — обездвижен %s с и %s урона; врагу не виден, пока не засечёт омни" % [_n(v(id, "duration")), _n(v(id, "damage"))])
+				"firewall":
+					out.append("полоса огня %s м поперёк броска: %s урона/с %s с, замедление %s" % [_m(v(id, "length")), _n(v(id, "dps")), _n(v(id, "duration")), _pct(v(id, "slow")).trim_prefix("+")])
+				"emp_dart":
+					out.append("дротик: сжигает %s эн., энергия не растёт %s с, до %s м" % [_n(v(id, "burn")), _n(v(id, "no_regen_time")), _m(v(id, "range"))])
+				"nanocloud":
+					out.append("облако чинит своих +%s HP/с %s с, радиус %s м" % [_n(v(id, "heal_per_sec")), _n(v(id, "duration")), _m(v(id, "radius"))])
 			if d.get("ability", "") in ["shield", "stance"]:
 				out.append("вкл. %s эн., кд %s с после выкл." % [_n(v(id, "cost")), _n(v(id, "cooldown"))])
 			elif d.has("ability"):

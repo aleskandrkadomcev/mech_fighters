@@ -495,7 +495,7 @@ func status_list() -> Array:
 	if marked_left > 0.0:
 		out.append(["Метка", marked_left, false, "marker", "Дротик-целеуказатель: по тебе проходит на %d%% больше урона." % roundi(_mark_k * 100.0)])
 	if root_left > 0.0:
-		out.append(["Обездвижен", root_left, false, "bolas", "Связка держит ноги: не ходит и не делает рывок. Корпус и пушки работают."])
+		out.append(["Обездвижен", root_left, false, "bolas", "Связка или капкан держит ноги: не ходит и не делает рывок. Корпус и пушки работают."])
 	if no_regen_left > 0.0:
 		out.append(["ЭМИ", no_regen_left, false, "noregen", "Энергия не восстанавливается."])
 	if slow_left > 0.0:
@@ -1955,6 +1955,17 @@ func _try_ability(index: int) -> void:
 			_peri_k = p.get("boost", 0.6)
 			_peri_omni = p.get("omni", 10.0)
 			Sfx.play_at("beep", global_position, -6.0, 0.0)
+		"trap":
+			_throw(index, {"kind": "trap", "params": p})
+		"firewall":
+			var fd := _ability_point() - global_position
+			fd.y = 0.0
+			_throw(index, {"kind": "firewall", "params": p, "dps": p.get("dps", 20.0) * damage_mult(),
+				"dir": fd if fd.length() > 0.1 else torso_forward()})
+		"emp_dart":
+			_cast_shot(index, "empd")
+		"nanocloud":
+			_throw(index, {"kind": "nanocloud", "params": p})
 	ability_used.emit(index)
 
 

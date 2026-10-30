@@ -56,6 +56,7 @@ var _kittest := false           # --kittest: наборы абилок геро�
 var _camtest := false           # --camtest (окно, без --fixed-fps): плавность камеры, когда двигаешь мышью (сдвиг к прицелу)
 var _abil3test := false         # --abil3test: вторая пачка абилок и правки (баррикада-стена, толчок по дистанции, крипы)
 var _abil2test := false         # --abil2test: абилки 17.10.2026 по очереди (связка, дротик, ЭМИ, напалм, зонд, баррикада, дрон, оборона, якорь, волна, прыжок)
+var _abil4test := false         # --abil4test: абилки героев (капкан, огненная стена, ЭМИ-дротик, нанооблако)
 var _dashtest := false           # --dashtest: рывок разгоняется за «Разгон рывка», а не мгновенно; дальность как без разгона
 var _hudshot := false            # --hudshot: интерфейс как в доте — абилки, полоски, статусы, подсказки на Alt (снимки 40/60/80)
 var _statustest := false         # --statustest: шкала контроля над полоской (оглушение → ЭМИ → замедление) и статусы своего меха
@@ -195,6 +196,8 @@ func setup(main_node: Node3D, args: PackedStringArray) -> void:
 			_dashtest = true
 		elif a == "--abil2test":
 			_abil2test = true
+		elif a == "--abil4test":
+			_abil4test = true
 		elif a == "--abil3test":
 			_abil3test = true
 		elif a == "--camtest":
@@ -307,6 +310,8 @@ func _process(_delta: float) -> void:
 		_run_hudshot()
 	if _dashtest:
 		_run_dashtest()
+	if _abil4test:
+		_run_abil4test()
 	if _abil2test:
 		_run_abil2test()
 	if _abil3test:
@@ -3812,6 +3817,56 @@ func _abil2_put(e, pos: Vector3) -> void:
 	e.global_position = pos
 	e.velocity = Vector3.ZERO
 	e.snap_interpolation(e)
+
+
+# абилки героев по очереди: капкан под врага, огненная стена, ЭМИ-дротик, нанооблако под себя
+func _run_abil4test() -> void:
+	var m = main.mech
+	var spot := Vector3(-46, 0.05, -30)
+	if _frame == 5:
+		Cfg.creeps_enabled = 0
+		Cfg.bot_enemies = 1
+		m.set_build({"mech": "mech_fortress", "core": "core_combat", "weapons": ["autocannon", "autocannon"],
+			"modules": ["mod_trap", "mod_firewall", "mod_emp_dart", "mod_nanocloud"]})
+		m.shield_left = 0.0
+		m.global_position = spot
+		m.snap_interpolation(m)
+		m.demo = {"move": Vector2.ZERO, "fire": false, "aim": spot + Vector3(14, 1.5, 0)}
+		var e = _stage_mech(main._spawn_bot(1), "mech_assault", ["autocannon", "laser"], spot + Vector3(14, 0.05, 0))
+		e.demo["fire"] = false
+		e.demo["aim"] = spot
+		set_meta("enemy", e)
+		for s in get_tree().get_nodes_in_group("structures"):
+			s.set_physics_process(false)
+	if _frame < 20:
+		return
+	var e = get_meta("enemy")
+	match _frame:
+		20:
+			_abil2_cast(m, "trap", e.global_position)
+		130:
+			_abil2_check("капкан обездвижил", e.root_left > 0.0, "осталось %.2f с" % e.root_left)
+		170:
+			set_meta("hp", e.hp)
+			_abil2_cast(m, "firewall", e.global_position)
+		290:
+			_abil2_check("огненная стена жжёт и замедляет", e.hp < float(get_meta("hp")) - 5.0 and e.slow_left > 0.0, "HP %.0f → %.0f" % [float(get_meta("hp")), e.hp])
+		300:
+			e.energy = e.energy_max()
+			set_meta("en", e.energy)
+			_abil2_cast(m, "emp_dart", e.global_position + Vector3.UP * 1.5)
+		340:
+			_abil2_check("ЭМИ-дротик сжёг энергию", e.energy < float(get_meta("en")) - 10.0 and e.no_regen_left > 0.0, "%.0f → %.0f" % [float(get_meta("en")), e.energy])
+		350:
+			m.hp = m.max_hp() * 0.5
+			set_meta("myhp", m.hp)
+			_abil2_cast(m, "nanocloud", m.global_position)
+		500:
+			_abil2_check("нанооблако чинит своего", m.hp > float(get_meta("myhp")) + 10.0, "HP %.0f → %.0f" % [float(get_meta("myhp")), m.hp])
+		510:
+			var f: int = get_meta("fails", 0)
+			print("[ABIL2] итог: %s" % ("ВСЁ ВЕРНО" if f == 0 else "ошибок %d" % f))
+			get_tree().quit()
 
 
 func _run_abil2test() -> void:

@@ -135,6 +135,15 @@ func _hit(hit: Dictionary) -> void:
 			if target.has_method("mark"):
 				target.mark(t, float(p.get("boost", 0.25)))
 				_stick(target, pos, t)
+		elif kind == "empd":
+			# ЭМИ-дротик: сжигает энергию и не даёт ей расти, искрит синим, пока действует
+			var nr := float(p.get("no_regen_time", 3.0))
+			if target.has_method("drain_energy"):
+				target.drain_energy(float(p.get("burn", 50.0)))
+			if target.has_method("block_regen"):
+				target.block_regen(nr)
+			_stick(target, pos, nr)
+			Fx.pulse(pos, 1.6)
 		elif kind == "slug":
 			var k: float = shooter.damage_mult() if is_instance_valid(shooter) else 1.0
 			target.take_damage(float(p.get("damage", 70.0)) * k, pos, _vel.normalized(), "", shooter if is_instance_valid(shooter) else null)
@@ -183,4 +192,6 @@ func _stick(target: Node3D, pos: Vector3, t: float) -> void:
 func _glow() -> StandardMaterial3D:
 	if kind == "mark":
 		return mat("mark_glow", Color(1.0, 0.2, 0.15) * 2.5, true)
+	if kind == "empd":
+		return mat("empd_glow", Color(0.35, 0.65, 1.0) * 2.5, true)
 	return mat("dart_glow", Color(1.0, 0.85, 0.3) * 2.5, true)

@@ -6,9 +6,14 @@ extends Node3D
 ## Свои и вражеские мины выглядят по-разному: своя — гладкая шайба с зелёным огоньком,
 ## вражеская — ржавая, с четырьмя штырями-взрывателями и красным огоньком. Огонёк есть и на антенне над травой.
 
+## Капкан Ловчего (kind "trap") — та же мина по видимости, но без взрыва: стальные челюсти захлопываются
+## на ноге того, кто наступил (мех обездвижен, крип оглушён), и чуть ранят.
+
 var team := 0
 var owner_mech: Node
-var p := {}                     # числа минного укладчика из parts.gd
+var kind := "mine"              # "trap" — капкан
+var p := {}                     # числа минного укладчика (или капкана) из parts.gd
+var _jaws: Array[Node3D] = []   # челюсти капкана: раскрыты, при срабатывании захлопываются
 var seen := true                # видна ли команде игрока
 var triggered := false
 var _arm := 0.0
@@ -26,6 +31,9 @@ func _ready() -> void:
 	if friend:
 		_on = Color(0.3, 1.0, 0.4)
 		_off = Color(0.05, 0.25, 0.08)
+	if kind == "trap":
+		_build_trap()
+		return
 	var body := MeshInstance3D.new()
 	var cm := CylinderMesh.new()
 	cm.top_radius = 0.7
@@ -114,11 +122,14 @@ func _physics_process(delta: float) -> void:
 		var d: Vector3 = u[1] - global_position
 		d.y = 0
 		if d.length() <= tr + float(u[3]) * 0.5:
-			_trigger()
+			_trigger(u[0])
 			return
 
 
-func _trigger() -> void:
+func _trigger(who: Node = null) -> void:
+	if kind == "trap":
+		_snap(who)
+		return
 	triggered = true
 	_boom_in = p.get("delay", 0.5)
 	Sfx.play_at("beep", global_position, -2.0, 0.0)
@@ -127,6 +138,9 @@ func _trigger() -> void:
 
 
 func _explode() -> void:
+	if kind == "trap":
+		queue_free()          # капкан захлопнулся и отпустил: убираем
+		return
 	var radius: float = p.get("radius", 6.0)
 	var dmg_c: float = p.get("damage", 60.0)
 	var k_owner: float = owner_mech.damage_mult() if is_instance_valid(owner_mech) else 1.0
@@ -137,3 +151,76 @@ func _explode() -> void:
 		if is_instance_valid(n) and n.has_method("apply_slow"):
 			n.apply_slow(p.get("slow", 0.3), p.get("slow_time", 4.0))
 	queue_free()
+
+
+# капкан: стальное кольцо-основание и зубастые челюсти по кругу, раскрыты наружу; огонёк в середине
+func _build_trap() -> void:
+	var friend: bool = team == Fx.player_team
+	var steel := StandardMaterial3D.new()
+	steel.albedo_color = Color(0.32, 0.33, 0.34) if friend else Color(0.36, 0.26, 0.2)
+	steel.metallic = 0.7
+	steel.roughness = 0.45
+	var base := MeshInstance3D.new()
+	var bm := CylinderMesh.new()
+	bm.top_radius = 0.55
+	bm.bottom_radius = 0.65
+	bm.height = 0.1
+	bm.radial_segments = 14
+	base.mesh = bm
+	base.material_override = steel
+	base.position.y = 0.05
+	add_child(base)
+	var tm := BoxMesh.new()
+	tm.size = Vector3(0.1, 0.32, 0.05)
+	for side in [-1.0, 1.0]:
+		var jaw := Node3D.new()
+		jaw.position = Vector3(0, 0.08, 0.3 * side)
+		jaw.rotation.x = 1.15 * side          # раскрыт: челюсть отогнута наружу
+		add_child(jaw)
+		_jaws.append(jaw)
+		var bar := MeshInstance3D.new()
+		var bbm := BoxMesh.new()
+		bbm.size = Vector3(1.1, 0.06, 0.06)
+		bar.mesh = bbm
+		bar.material_override = steel
+		bar.position.y = 0.3
+		jaw.add_child(bar)
+		for k in 6:
+			var tooth := MeshInstance3D.new()
+			tooth.mesh = tm
+			tooth.material_override = steel
+			tooth.position = Vector3(-0.45 + k * 0.18, 0.15, 0)
+			jaw.add_child(tooth)
+	var light := MeshInstance3D.new()
+	var lm := CylinderMesh.new()
+	lm.top_radius = 0.12
+	lm.bottom_radius = 0.12
+	lm.height = 0.06
+	light.mesh = lm
+	_light_mat = StandardMaterial3D.new()
+	_light_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_light_mat.albedo_color = _on
+	light.material_override = _light_mat
+	light.position.y = 0.12
+	add_child(light)
+
+
+# капкан сработал: челюсти схлопываются на ноге, мех обездвижен (крип оглушён), немного урона
+func _snap(who: Node) -> void:
+	triggered = true
+	_boom_in = 0.9
+	for jaw in _jaws:
+		var tw := create_tween()
+		tw.tween_property(jaw, "rotation:x", 0.0, 0.08)
+	Sfx.play_at("hit", global_position, 0.0, 0.05)
+	Fx.spark(global_position + Vector3.UP * 0.3, Vector3.UP, true, false)
+	if who == null or not is_instance_valid(who):
+		return
+	var t: float = p.get("duration", 2.5)
+	if who.has_method("root"):
+		who.root(t)
+	elif who.has_method("stun"):
+		who.stun(t * 0.5)
+	var k: float = owner_mech.damage_mult() if is_instance_valid(owner_mech) else 1.0
+	who.take_damage(float(p.get("damage", 15.0)) * k, who.global_position + Vector3.UP * 0.5, Vector3.ZERO, "",
+		owner_mech if is_instance_valid(owner_mech) else null)

@@ -7,7 +7,10 @@ extends Node3D
 ## Баллистика настоящая: гравитация Cfg.gravity() (земная при масштабе Cfg.METERS_PER_UNIT),
 ## поэтому граната и снаряд падают как настоящие.
 ## payload: kind "explosive" (урон по площади), "emp" (урон + оглушение + энергия не растёт + сжигание энергии),
-## "napalm" (горящее пятно), "probe" (скан-зонд), "gravity" (гравитационный якорь) — снаряды абилок меха.
+## "napalm" (горящее пятно), "probe" (скан-зонд), "gravity" (гравитационный якорь), "trap" (капкан),
+## "firewall" (огненная стена), "nanocloud" (нанооблако) — снаряды абилок меха.
+
+const Mine := preload("res://scripts/mine.gd")
 
 var team := 0
 var shooter: Node
@@ -296,7 +299,7 @@ func _land() -> void:
 				n.drain_energy(_p["burn"])
 			if _p.get("damage", 0.0) > 0.0 and n.has_method("take_damage"):
 				n.take_damage(_p["damage"], n.global_position + Vector3.UP * 2.0, d.normalized(), "", src)
-	elif _p.get("kind", "") in ["napalm", "probe", "gravity", "turret"]:
+	elif _p.get("kind", "") in ["napalm", "probe", "gravity", "turret", "trap", "firewall", "nanocloud"]:
 		_spawn_device(Vector3(_to.x, 0.0, _to.z), src)
 	else:
 		Fx.explosion(pos, radius)
@@ -341,6 +344,34 @@ func _spawn_device(at: Vector3, src: Node) -> void:
 			tu.owner_mech = src
 			tu.p = _p.get("params", {})
 			n = tu
+		"trap":
+			var tr: Node3D = Mine.new()
+			tr.kind = "trap"
+			tr.team = team
+			tr.owner_mech = src
+			tr.p = _p.get("params", {})
+			n = tr
+		"firewall":
+			var fw := FireWall.new()
+			var fp: Dictionary = _p.get("params", {})
+			fw.team = team
+			fw.shooter = src
+			fw.dir = _p.get("dir", Vector3.FORWARD)
+			fw.length = fp.get("length", 12.0)
+			fw.width = fp.get("width", 2.4)
+			fw.life = fp.get("duration", 6.0)
+			fw.dps = _p.get("dps", 20.0)
+			fw.slow = fp.get("slow", 0.3)
+			n = fw
+		"nanocloud":
+			var nc := NanoCloud.new()
+			var np: Dictionary = _p.get("params", {})
+			nc.team = team
+			nc.shooter = src
+			nc.radius = np.get("radius", 6.0)
+			nc.life = np.get("duration", 6.0)
+			nc.heal_per_sec = np.get("heal_per_sec", 15.0)
+			n = nc
 	n.position = at
 	get_tree().current_scene.add_child(n)
 	n.reset_physics_interpolation()
