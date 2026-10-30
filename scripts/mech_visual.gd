@@ -449,16 +449,18 @@ func _build_torso(weapon_looks: Array, rockets: bool) -> void:
 				pods = _hull_mid()
 				ports = [Vector3(-1.32, 2.05, -0.35), Vector3(1.32, 2.05, -0.35)]
 				jets = [Vector3(-0.42, 0.95, 1.85), Vector3(0.42, 0.95, 1.85)]
-	# двигатели рывка сзади
+	# двигатели рывка сзади (у мехов из моделей — только струя: дорисованных деталей на них нет, Саня)
 	for j in jets:
-		_cyl(torso, 0.2, 0.35, j - Vector3(0, 0, 0.3), m_dark, Vector3(PI / 2, 0, 0))
+		if model == "":
+			_cyl(torso, 0.2, 0.35, j - Vector3(0, 0, 0.3), m_dark, Vector3(PI / 2, 0, 0))
 		thrusters.append(_dash_plume(torso, j))
 	_build_exhaust((jets[0] + jets[1]) * 0.5 + Vector3(0, 0, 0.4))
 	if model == "":
 		_build_style_parts()
 	for i in 2:
 		var s := -1.0 if i == 0 else 1.0
-		# ракетный блок: только если стоит ракетная установка
+		# ракетный блок: только если стоит ракетная установка (у мехов из моделей коробку не рисуем — ракеты
+		# вылетают из точки модуля)
 		var pp: Vector3 = ports[i]
 		var port := Node3D.new()
 		port.position = pp + Vector3(0, 0.05, -0.45)
@@ -468,7 +470,7 @@ func _build_torso(weapon_looks: Array, rockets: bool) -> void:
 		mfl.visible = false
 		mfl.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		missile_flashes.append(mfl)
-		if rockets:
+		if rockets and model == "":
 			var w := 0.55 if cls == "light" else 0.8
 			_box(torso, Vector3(w, 0.5, 0.95), pp + Vector3(0, 0, 0.05), m_armor)
 			_box(torso, Vector3(0.1, 0.06, 1.0), pp + Vector3(w * 0.3, 0.27, 0.05), m_accent)
