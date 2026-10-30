@@ -124,6 +124,8 @@ var _rapid_k := 0.0
 var matrix_left := 0.0          # матрица брони: меньше урона
 var _matrix_k := 0.0
 var periscope_left := 0.0       # перископ: дальше видит, сильнее омни
+var relay_left := 0.0           # рядом свой ретранслятор: урон больше (держит, пока мех в его круге)
+var _relay_k := 0.0
 var _peri_k := 0.0
 var _peri_omni := 0.0
 var marked_left := 0.0          # на мне дротик-целеуказатель: получаю больше урона
@@ -357,7 +359,15 @@ func _speed_mult() -> float:
 # урон: у ботов свой множитель, плюс бонус команды с точки «Арсенал»
 func damage_mult() -> float:
 	var k := 1.0 if is_player else Cfg.bot_damage
+	if relay_left > 0.0:
+		k *= 1.0 + _relay_k
 	return k * _game_mult("damage")
+
+
+# ретранслятор Командира рядом: урон больше, пока держит (сам ретранслятор продлевает раз в четверть секунды)
+func relay_buff(k: float, seconds: float) -> void:
+	relay_left = maxf(relay_left, seconds)
+	_relay_k = k
 
 
 func _game_mult(kind: String) -> float:
@@ -524,6 +534,8 @@ func status_list() -> Array:
 		out.append(["Форсированная подача", rapid_left, true, "rapid", "Пушки стреляют на %d%% чаще." % roundi(_rapid_k * 100.0)])
 	if periscope_left > 0.0:
 		out.append(["Перископ", periscope_left, true, "periscope", "Обзор и омни-сенсор дальше."])
+	if relay_left > 0.0:
+		out.append(["Ретранслятор", -1.0, true, "relay", "Рядом свой ретранслятор: урон больше на %d%%." % roundi(_relay_k * 100.0)])
 	if stance_on:
 		out.append(["Оборона", -1.0, true, "stance", "Стоит на месте и стреляет, входящий урон меньше на %d%%." % roundi(ability_param(_stance_i, "reduce") * 100.0)])
 	if _game_mult("damage") > 1.0:
@@ -729,6 +741,7 @@ func _physics_process(delta: float) -> void:
 	purge_left = maxf(purge_left - delta, 0.0)
 	overdrive_left = maxf(overdrive_left - delta, 0.0)
 	rapid_left = maxf(rapid_left - delta, 0.0)
+	relay_left = maxf(relay_left - delta, 0.0)
 	matrix_left = maxf(matrix_left - delta, 0.0)
 	periscope_left = maxf(periscope_left - delta, 0.0)
 	marked_left = maxf(marked_left - delta, 0.0)
@@ -1966,6 +1979,12 @@ func _try_ability(index: int) -> void:
 			_cast_shot(index, "empd")
 		"nanocloud":
 			_throw(index, {"kind": "nanocloud", "params": p})
+		"relay":
+			_throw(index, {"kind": "relay", "params": p})
+		"supply":
+			_throw(index, {"kind": "supply", "params": p})
+		"smoke":
+			_throw(index, {"kind": "smoke", "params": p})
 	ability_used.emit(index)
 
 
@@ -2054,6 +2073,7 @@ func _reset_ability_states() -> void:
 	rapid_left = 0.0
 	matrix_left = 0.0
 	periscope_left = 0.0
+	relay_left = 0.0
 	marked_left = 0.0
 	_shove_t = 0.0
 	_jump_up = 0.0

@@ -6,10 +6,15 @@ const KINDS := {
 	"energy": {"color": Color(1.0, 0.85, 0.25), "name": "энергия"},
 	"ammo": {"color": Color(1.0, 0.5, 0.2), "name": "патроны"},
 	"charge": {"color": Color(0.4, 0.85, 1.0), "name": "расходник"},
+	"supply": {"color": Color(0.45, 1.0, 0.5), "name": "снабжение"},
 }
 
 var kind := "ammo"
 var seen := true
+var team := -1                  # чей ящик: -1 — берёт любой; ящик снабжения Командира — только своя команда
+var life := -1.0                # сколько лежит (секунды); -1 — пока не подберут
+var supply := {}                # ящик снабжения: числа абилки (hp — ремонт, give_energy, give_ammo — доля патронов)
+var _age := 0.0
 var _box: Node3D
 var _t := 0.0
 
@@ -23,7 +28,7 @@ func _ready() -> void:
 	match kind:
 		"energy":
 			_build_battery(col)
-		"ammo":
+		"ammo", "supply":
 			_build_ammo(col)
 		_:
 			_build_missile(col)
@@ -122,11 +127,15 @@ func _build_missile(col: Color) -> void:
 
 func _physics_process(delta: float) -> void:
 	_t += delta
+	_age += delta
+	if life > 0.0 and _age > life:
+		queue_free()
+		return
 	_box.position.y = 1.1 + sin(_t * 3.0) * 0.15
 	_box.rotation.y = _t * 1.4
 	visible = seen
 	for m in get_tree().get_nodes_in_group("mechs"):
-		if m.dead:
+		if m.dead or (team >= 0 and m.team != team):
 			continue
 		var d: Vector3 = m.global_position - global_position
 		d.y = 0
@@ -147,6 +156,15 @@ func _apply(m) -> bool:
 			return m.add_ammo(Cfg.loot_ammo)
 		"charge":
 			return m.add_charge(Cfg.loot_charges)
+		"supply":
+			# ящик снабжения: всё сразу — патроны, энергия, ремонт (берёт, если хоть что-то нужно)
+			var need: bool = m.needs_ammo() or m.energy < m.energy_max() - 1.0 or m.hp < m.max_hp() - 1.0
+			if not need:
+				return false
+			m.add_ammo(float(supply.get("give_ammo", 0.5)))
+			m.add_energy(float(supply.get("give_energy", 40.0)))
+			m.heal(float(supply.get("hp", 60.0)))
+			return true
 	return false
 
 
@@ -159,4 +177,6 @@ func useful_for(m) -> bool:
 			return m.needs_ammo()
 		"charge":
 			return m.needs_charges()
+		"supply":
+			return (team < 0 or m.team == team) and (m.needs_ammo() or m.hp < m.max_hp() * 0.7)
 	return false

@@ -8,9 +8,11 @@ extends Node3D
 ## поэтому граната и снаряд падают как настоящие.
 ## payload: kind "explosive" (урон по площади), "emp" (урон + оглушение + энергия не растёт + сжигание энергии),
 ## "napalm" (горящее пятно), "probe" (скан-зонд), "gravity" (гравитационный якорь), "trap" (капкан),
-## "firewall" (огненная стена), "nanocloud" (нанооблако) — снаряды абилок меха.
+## "firewall" (огненная стена), "nanocloud" (нанооблако), "relay" (ретранслятор), "supply" (ящик снабжения),
+## "smoke" (дымовая граната) — снаряды абилок меха.
 
 const Mine := preload("res://scripts/mine.gd")
+const Pickup := preload("res://scripts/pickup.gd")
 
 var team := 0
 var shooter: Node
@@ -299,7 +301,7 @@ func _land() -> void:
 				n.drain_energy(_p["burn"])
 			if _p.get("damage", 0.0) > 0.0 and n.has_method("take_damage"):
 				n.take_damage(_p["damage"], n.global_position + Vector3.UP * 2.0, d.normalized(), "", src)
-	elif _p.get("kind", "") in ["napalm", "probe", "gravity", "turret", "trap", "firewall", "nanocloud"]:
+	elif _p.get("kind", "") in ["napalm", "probe", "gravity", "turret", "trap", "firewall", "nanocloud", "relay", "supply", "smoke"]:
 		_spawn_device(Vector3(_to.x, 0.0, _to.z), src)
 	else:
 		Fx.explosion(pos, radius)
@@ -372,6 +374,26 @@ func _spawn_device(at: Vector3, src: Node) -> void:
 			nc.life = np.get("duration", 6.0)
 			nc.heal_per_sec = np.get("heal_per_sec", 15.0)
 			n = nc
+		"relay":
+			var rl := RelayMast.new()
+			rl.team = team
+			rl.owner_mech = src
+			rl.p = _p.get("params", {})
+			n = rl
+		"supply":
+			var sp: Node3D = Pickup.new()
+			var spp: Dictionary = _p.get("params", {})
+			sp.kind = "supply"
+			sp.team = team
+			sp.life = spp.get("duration", 40.0)
+			sp.supply = spp
+			n = sp
+		"smoke":
+			var sm := SmokeCloud.new()
+			var smp: Dictionary = _p.get("params", {})
+			sm.radius = smp.get("radius", 6.0)
+			sm.life = smp.get("duration", 8.0)
+			n = sm
 	n.position = at
 	get_tree().current_scene.add_child(n)
 	n.reset_physics_interpolation()

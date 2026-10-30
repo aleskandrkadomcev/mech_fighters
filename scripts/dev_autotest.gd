@@ -3819,7 +3819,13 @@ func _abil2_put(e, pos: Vector3) -> void:
 	e.snap_interpolation(e)
 
 
-# абилки героев по очереди: капкан под врага, огненная стена, ЭМИ-дротик, нанооблако под себя
+# видит ли мех врага своими глазами (без союзников и турелей — они могут видеть сбоку, мимо дыма)
+func _sees(m, e) -> bool:
+	return main.vision._seen_by([{"pos": m.global_position, "r": m.vision_r(), "omni": m.omni_r()}], e.global_position, e.get_hit_radius(), false)
+
+
+# абилки героев по очереди: капкан под врага, огненная стена, ЭМИ-дротик, нанооблако под себя, ретранслятор,
+# ящик снабжения, дым между мехами (врага не видно, потом снова видно)
 func _run_abil4test() -> void:
 	var m = main.mech
 	var spot := Vector3(-46, 0.05, -30)
@@ -3827,7 +3833,7 @@ func _run_abil4test() -> void:
 		Cfg.creeps_enabled = 0
 		Cfg.bot_enemies = 1
 		m.set_build({"mech": "mech_fortress", "core": "core_combat", "weapons": ["autocannon", "autocannon"],
-			"modules": ["mod_trap", "mod_firewall", "mod_emp_dart", "mod_nanocloud"]})
+			"modules": ["mod_trap", "mod_firewall", "mod_emp_dart", "mod_nanocloud", "mod_relay", "mod_supply", "mod_smoke"]})
 		m.shield_left = 0.0
 		m.global_position = spot
 		m.snap_interpolation(m)
@@ -3864,6 +3870,26 @@ func _run_abil4test() -> void:
 		500:
 			_abil2_check("нанооблако чинит своего", m.hp > float(get_meta("myhp")) + 10.0, "HP %.0f → %.0f" % [float(get_meta("myhp")), m.hp])
 		510:
+			set_meta("dm", m.damage_mult())
+			_abil2_cast(m, "relay", m.global_position + Vector3(2, 0, 0))
+		600:
+			_abil2_check("ретранслятор усилил урон", m.relay_left > 0.0 and m.damage_mult() > float(get_meta("dm")) * 1.15, "×%.2f → ×%.2f" % [float(get_meta("dm")), m.damage_mult()])
+		610:
+			m.hp = m.max_hp() * 0.5
+			m.energy = 10.0
+			set_meta("myhp", m.hp)
+			_abil2_cast(m, "supply", m.global_position + Vector3(0, 0, 2))
+			m.energy = 10.0
+		720:
+			_abil2_check("ящик снабжения подобран", m.hp > float(get_meta("myhp")) + 30.0 and m.energy > 40.0, "HP %.0f → %.0f, энергия %.0f" % [float(get_meta("myhp")), m.hp, m.energy])
+		730:
+			_abil2_check("враг виден до дыма", _sees(m, e))
+			_abil2_cast(m, "smoke", spot + Vector3(7, 0, 0))
+		830:
+			_abil2_check("сквозь дым врага не видно", not _sees(m, e))
+		1250:
+			_abil2_check("дым рассеялся — враг снова виден", _sees(m, e))
+		1260:
 			var f: int = get_meta("fails", 0)
 			print("[ABIL2] итог: %s" % ("ВСЁ ВЕРНО" if f == 0 else "ошибок %d" % f))
 			get_tree().quit()

@@ -308,6 +308,15 @@ const DATA := {
 	"mod_nanocloud": {"slot": "module", "ability": "nanocloud", "name": "Нанооблако", "short": "Облако",
 		"weight": 4.0, "energy": 10.0, "cost": 35.0, "cooldown": 18.0, "speed": 26.0, "range": 26.0, "radius": 6.0,
 		"duration": 6.0, "heal_per_sec": 15.0},
+	"mod_relay": {"slot": "module", "ability": "relay", "name": "Ретранслятор", "short": "Ретранслятор",
+		"weight": 4.0, "energy": 10.0, "cost": 35.0, "cooldown": 22.0, "speed": 24.0, "range": 20.0, "radius": 12.0,
+		"duration": 15.0, "boost": 0.2, "hp": 150.0},
+	"mod_supply": {"slot": "module", "ability": "supply", "name": "Ящик снабжения", "short": "Снабжение",
+		"weight": 3.0, "energy": 5.0, "cost": 25.0, "cooldown": 20.0, "speed": 26.0, "range": 22.0, "duration": 40.0,
+		"hp": 60.0, "give_energy": 40.0, "give_ammo": 0.5},
+	"mod_smoke": {"slot": "module", "ability": "smoke", "name": "Дымовая граната", "short": "Дым",
+		"weight": 2.0, "energy": 5.0, "cost": 20.0, "cooldown": 14.0, "speed": 28.0, "range": 30.0, "radius": 6.0,
+		"duration": 8.0},
 
 	# ---------------- ПОСТРОЙКИ (не для ангара: турели и штаб на карте) ----------------
 	"turret_t1": {"slot": "structure", "name": "Турель 1 уровня (у центра)",
@@ -489,7 +498,7 @@ const WEAPON_STATS := ["ammo", "fire_rate", "damage", "bullet_speed", "range", "
 	"radius", "edge_damage", "charge_time", "pierce", "spin_up"]
 const ABILITY_STATS := ["cost", "cooldown", "count", "salvo_delay", "speed", "range", "damage", "radius",
 	"edge_damage", "scatter", "stun_time", "no_regen_time",
-	"duration", "break_on_fire", "charges", "trigger_radius", "arm_time", "slow", "slow_time", "heal_per_sec", "delay", "upkeep", "energy_per_damage", "absorb", "dps", "burn", "push", "reduce", "omni", "hp", "shove", "boost", "fire_rate", "length", "width"]
+	"duration", "break_on_fire", "charges", "trigger_radius", "arm_time", "slow", "slow_time", "heal_per_sec", "delay", "upkeep", "energy_per_damage", "absorb", "dps", "burn", "push", "reduce", "omni", "hp", "shove", "boost", "fire_rate", "length", "width", "give_energy", "give_ammo"]
 # значения, если у меха такого числа нет
 const MECH_DEFAULTS := {"dash_charges": 1.0, "moving_spread": 1.0, "energy_regen_mult": 1.0, "cd_mult": 1.0, "brace_time": 0.6,
 	"regen_delay": 4.0, "legs_scale": 1.0, "hull_scale": 1.0, "stance": 1.0}
@@ -503,7 +512,7 @@ const DEFAULT_BUILD := {
 # ГЕРОИ: стандартные абилки (первая — фирменная, на Q), «МЕХИправки.txt», концепт 23.10.2026.
 # Абилок со звёздочкой (ещё нет в игре) тут нет — их места пока пустые. В ангаре набор можно поменять
 const HERO_KITS := {
-	"hero_art1": ["mod_mines"],                                  # Осадник: ★осадный режим*, дымовая граната*
+	"hero_art1": ["mod_mines", "mod_smoke"],                     # Осадник: ★осадный режим*
 	"mech_wasp": ["mod_roller", "mod_jammer", "mod_overdrive"],  # Оса: ★два рывка — свойство меха
 	"mech_fortress": ["mod_dome", "mod_matrix", "mod_repulse"],  # Крепость
 	"hero_m5": ["mod_drone", "mod_nanocloud", "mod_jammer"],     # Механик
@@ -515,7 +524,7 @@ const HERO_KITS := {
 	"mech_assault": ["mod_rapid", "mod_rockets", "mod_repair"],  # Штурмовик
 	"hero_h1": ["mod_stance", "mod_slug"],                       # Бастион: ПРО-перехват*
 	"hero_l1": ["mod_cloak", "mod_marker", "mod_emp_dart"],      # Призрак
-	"hero_h5": ["mod_airstrike"],                                # Командир: ★ретранслятор*, ящик снабжения*
+	"hero_h5": ["mod_relay", "mod_airstrike", "mod_supply"],     # Командир
 	"hero_l2": ["mod_jump", "mod_bolas", "mod_overdrive"],       # Десантник: прыжок пока без толчка к своим*
 	"hero_h4": ["mod_gravity", "mod_rockets", "mod_shield"],     # Гравитон
 }
@@ -820,6 +829,12 @@ func describe(id: String) -> String:
 					out.append("дротик: сжигает %s эн., энергия не растёт %s с, до %s м" % [_n(v(id, "burn")), _n(v(id, "no_regen_time")), _m(v(id, "range"))])
 				"nanocloud":
 					out.append("облако чинит своих +%s HP/с %s с, радиус %s м" % [_n(v(id, "heal_per_sec")), _n(v(id, "duration")), _m(v(id, "radius"))])
+				"relay":
+					out.append("мачта: свои в %s м бьют на %s сильнее %s с; %s HP, её можно сломать" % [_m(v(id, "radius")), _pct(v(id, "boost")), _n(v(id, "duration")), _n(v(id, "hp"))])
+				"supply":
+					out.append("ящик для своих: +%s HP, +%s эн., %s патронов; лежит %s с" % [_n(v(id, "hp")), _n(v(id, "give_energy")), _pct(v(id, "give_ammo")), _n(v(id, "duration"))])
+				"smoke":
+					out.append("дым %s м на %s с: сквозь него не видно" % [_m(v(id, "radius")), _n(v(id, "duration"))])
 			if d.get("ability", "") in ["shield", "stance"]:
 				out.append("вкл. %s эн., кд %s с после выкл." % [_n(v(id, "cost")), _n(v(id, "cooldown"))])
 			elif d.has("ability"):

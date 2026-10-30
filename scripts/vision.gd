@@ -15,6 +15,7 @@ var player_team := 0
 var map_rect := Rect2(-120, -70, 240, 140)   # x, z, ширина, глубина карты
 var mask_texture: Texture2D
 var _vis := [{}, {}]             # что видит каждая команда: id узла -> true
+var _smokes: Array = []          # облака дымовых гранат (обновляется каждый пересчёт видимости)
 var _t := 0.0
 var _viewport: SubViewport
 var _drawer: Node2D
@@ -184,12 +185,25 @@ func _seen_by(viewers: Array, pos: Vector3, radius: float, hidden: bool) -> bool
 		var reach: float = (v["omni"] if hidden else v["r"]) + radius
 		if d.length() > reach:
 			continue
-		if v.get("nolos", false) or _los(v["pos"], pos):
+		if v.get("nolos", false):
+			return true
+		if _smoked(v["pos"], pos):
+			continue
+		if _los(v["pos"], pos):
+			return true
+	return false
+
+
+# дым дымовой гранаты между глазом и целью: не видно (облаков мало, проверка дешёвая)
+func _smoked(a: Vector3, b: Vector3) -> bool:
+	for sm in _smokes:
+		if is_instance_valid(sm) and sm.blocks(a, b):
 			return true
 	return false
 
 
 func _update() -> void:
+	_smokes = get_tree().get_nodes_in_group("smoke")
 	for team in 2:
 		var viewers := _viewers(team)
 		var vis := {}
