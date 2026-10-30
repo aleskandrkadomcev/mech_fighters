@@ -14,6 +14,15 @@
 - oga_100_cc0_sfx — «100 CC0 SFX», rubberduck (opengameart.org/content/100-cc0-sfx), CC0.
 - oga_misc/qubodup_synthetic_explosion — «Synthesized explosion», qubodup (opengameart.org/content/synthesized-explosion), CC0.
 - jc_scifi_vol1 — «JC Sounds Sci-Fi Pack Vol 1», автор JC Sounds (opengameart.org/content/jc-sounds-sci-fi-pack-vol-1), CC-BY 4.0 — В ТИТРАХ ИГРЫ УКАЗАТЬ: «Sound effects by JC Sounds (CC-BY 4.0)».
+ЗВУКИ ДЛЯ ВЫСТРЕЛОВ И ПОПАДАНИЙ, скачаны 31.10.2026 (сырьё в assets/incoming/oga_sounds2 и itch_lentikula, сборка слоями — tools/sfx/build.py; пока не в игре):
+- «Chaingun, pistol, rifle, shotgun shots» и «4 projectile launches» — Michel Baradari, apollo-music.de (opengameart.org/content/chaingun-pistol-rifle-shotgun-shots, /4-projectile-launches), CC-BY 3.0 — В ТИТРАХ: «Sounds by Michel Baradari, apollo-music.de (CC-BY 3.0)».
+- «Sci-Fi Weapon Shots SFX» — Lentikula (lentikula.itch.io/sci-fi-weapon-shots-sfx-freecc0), CC0.
+- «Cannon fire», «Cannon hit», «Cannon hit wall» — thimras (opengameart.org), CC0.
+- «Doomsday Laser Cannon» — tad (opengameart.org), CC0.
+- «27 Metal Audio Samples» — blacklodgegames (opengameart.org), CC0.
+- «100 CC0 metal and wood SFX», «75 CC0 breaking / falling / hit sfx», «60 CC0 Sci-Fi SFX», «100 CC0 SFX #2», «25 CC0 bang / firework SFX» — rubberduck (opengameart.org), CC0.
+- «Metal Impact Sounds» — bmaczero (opengameart.org), CC0. «Laser weapon burst fire» — celestialghost8, CC0.
+- Скачаны про запас, CC-BY (если пойдут в игру — в титры): «Sci-Fi Sound Effects Library» — Little Robot Sound Factory, CC-BY 3.0; «Light Machine Gun» — kuraiwolf, CC-BY 4.0; «Metal Hit» — marcelofg55, CC-BY 3.0; «Metal hit» — ycake, CC-BY 4.0.
 ЭФФЕКТЫ (assets/fx_packs/godotshaders), godotshaders.com, автор и лицензия — в первой строке каждого файла:
 - scifi_shield (flakmonkey, CC0), shield_intersection (ramjing, CC0; поправлен под GL Compatibility), shield_multiple_impacts (zestfulfibre, CC0), energy_shield_impact (dan, MIT), bubble_forcefield (ironsidedev, CC0), scifi_hologram (kubikpixel, MIT; переведён на Godot 4), hologram_scanlines (pixeldreamerstudio, MIT), lightning_3d (loop_box, CC0), lightning_ball (thelastflapjack, CC0), dissolve_glowing_edge (pixeldreamerstudio, MIT), jet_thruster (madserb, CC0), rising_energy_wave (madserb, CC0).
   MIT: при выпуске игры положить в титры/файл лицензий текст MIT с именами авторов (kubikpixel, pixeldreamerstudio, dan).
