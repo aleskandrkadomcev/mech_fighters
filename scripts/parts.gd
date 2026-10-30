@@ -598,7 +598,7 @@ func v(id: String, field: String) -> float:
 		return float(_over[id][field])
 	if DATA.has(id) and DATA[id].has(field):
 		return float(DATA[id][field])
-	return float(MECH_DEFAULTS.get(field, 0.0)) if id.begins_with("mech_") else 0.0
+	return float(MECH_DEFAULTS.get(field, 0.0)) if DATA.has(id) and DATA[id].get("slot", "") == "mech" else 0.0
 
 
 func text(id: String, field: String) -> String:

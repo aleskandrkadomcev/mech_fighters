@@ -4394,11 +4394,13 @@ func _run_kittest() -> void:
 		main.hangar._mech_card(id).pressed.emit()
 		main.hangar._on_apply()
 		var n: int = main.mech.abilities.size()
-		var ok: bool = r["ok"] and main.mech.build["mech"] == id and n == Parts.HERO_KITS[id].size()
+		var st: Dictionary = main.mech.stats
+		var ok: bool = r["ok"] and main.mech.build["mech"] == id and n == Parts.HERO_KITS[id].size() \
+			and st["energy_regen"] > 0.0 and st["cd_mult"] > 0.0
 		if not ok:
 			fails += 1
-		print("[KIT] %-12s %-12s абилок %d/%d, сборка %s %s %s" % [id, Parts.pname(id), n, Parts.HERO_KITS[id].size(),
-			"рабочая" if r["ok"] else str(r["problems"]), ",".join(main.mech.abilities.map(func(a): return a["name"])), "ВЕРНО" if ok else "ОШИБКА"])
+		print("[KIT] %-12s %-12s абилок %d/%d, энергия +%.1f/с, перезарядка ×%.2f, сборка %s %s %s" % [id, Parts.pname(id), n, Parts.HERO_KITS[id].size(),
+			st["energy_regen"], st["cd_mult"], "рабочая" if r["ok"] else str(r["problems"]), ",".join(main.mech.abilities.map(func(a): return a["name"])), "ВЕРНО" if ok else "ОШИБКА"])
 	print("[KIT] итог: %s" % ("ВСЁ ВЕРНО" if fails == 0 else "ошибок %d" % fails))
 	get_tree().quit()
 
