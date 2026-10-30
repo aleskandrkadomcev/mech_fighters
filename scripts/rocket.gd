@@ -167,6 +167,23 @@ func _explode(pos: Vector3) -> void:
 	queue_free()
 
 
+# сбита ПРО-перехватом: вспышка в воздухе, урона нет
+func intercept() -> void:
+	Fx.burst(global_position, Color(1.0, 0.7, 0.3), 1.2)
+	Sfx.play_at("hit", global_position, -4.0, 0.1)
+	if marker != null and is_instance_valid(marker):
+		marker.queue_free()
+	if _trail != null:
+		var scene := get_tree().current_scene
+		var gp := _trail.global_position
+		remove_child(_trail)
+		scene.add_child(_trail)
+		_trail.global_position = gp
+		_trail.emitting = false
+		get_tree().create_timer(1.4).timeout.connect(_trail.queue_free)
+	queue_free()
+
+
 # светящаяся чёрточка выхлопа за соплом: ширина w, длина len, середина сдвинута назад на back
 func _exhaust(mat: Material, w: float, len: float, back: float) -> void:
 	var q := MeshInstance3D.new()

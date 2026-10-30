@@ -47,10 +47,12 @@ func _process(delta: float) -> void:
 		aim = target.aim_point
 	if aim != null:
 		# прицеливание (Ястреб): камера уходит к прицелу намного дальше
+		# осадный режим (Осадник): ещё дальше — мортира бьёт на 80 м
 		var scoped: bool = target.get("scope_on") == true
-		var off: Vector3 = (aim - want) * Cfg.cam_lookahead * (1.6 if scoped else 1.0)
+		var siege: bool = target.get("siege_on") == true
+		var off: Vector3 = (aim - want) * Cfg.cam_lookahead * (2.0 if siege else (1.6 if scoped else 1.0))
 		off.y = 0
-		want += off.limit_length(Cfg.cam_lookahead_max * (2.5 if scoped else 1.0))
+		want += off.limit_length(Cfg.cam_lookahead_max * (4.0 if siege else (2.5 if scoped else 1.0)))
 	want.y = 0
 	if not _started:
 		_started = true

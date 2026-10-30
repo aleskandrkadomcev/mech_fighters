@@ -399,6 +399,15 @@ func _spawn_device(at: Vector3, src: Node) -> void:
 	n.reset_physics_interpolation()
 
 
+# сбит ПРО-перехватом: вспышка в воздухе, урона нет
+func intercept() -> void:
+	Fx.burst(global_position, Color(1.0, 0.7, 0.3), 1.2)
+	Sfx.play_at("hit", global_position, -4.0, 0.1)
+	if marker != null and is_instance_valid(marker):
+		marker.queue_free()
+	_drop_trail()
+
+
 func _drop_trail() -> void:
 	if _trail != null:
 		var gp := _trail.global_position

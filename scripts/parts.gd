@@ -320,6 +320,14 @@ const DATA := {
 		"weight": 2.0, "energy": 5.0, "cost": 25.0, "cooldown": 18.0, "duration": 20.0},
 	"mod_burner": {"slot": "module", "ability": "burner", "name": "Выжигатель", "short": "Выжигатель",
 		"weight": 4.0, "energy": 10.0, "cost": 30.0, "cooldown": 14.0, "range": 26.0, "duration": 4.0, "burn": 30.0},
+	"mod_siege": {"slot": "module", "ability": "siege", "name": "Осадный режим", "short": "Осада",
+		"weight": 6.0, "energy": 10.0, "cost": 15.0, "cooldown": 4.0, "range": 54.0, "damage": 120.0, "radius": 6.0,
+		"edge_damage": 0.35, "fire_rate": 0.33},
+	"mod_intercept": {"slot": "module", "ability": "intercept", "name": "ПРО-перехват", "short": "ПРО",
+		"weight": 4.0, "energy": 10.0, "cost": 30.0, "cooldown": 16.0, "duration": 5.0, "radius": 10.0, "fire_rate": 4.0},
+	"mod_dropjump": {"slot": "module", "ability": "dropjump", "name": "Десантный прыжок", "short": "Десант",
+		"weight": 5.0, "energy": 10.0, "cost": 35.0, "cooldown": 14.0, "range": 26.0, "delay": 1.2, "damage": 50.0,
+		"radius": 6.0, "edge_damage": 0.4, "shove": 8.0},
 	"mod_smoke": {"slot": "module", "ability": "smoke", "name": "Дымовая граната", "short": "Дым",
 		"weight": 2.0, "energy": 5.0, "cost": 20.0, "cooldown": 14.0, "speed": 28.0, "range": 30.0, "radius": 6.0,
 		"duration": 8.0},
@@ -518,7 +526,7 @@ const DEFAULT_BUILD := {
 # ГЕРОИ: стандартные абилки (первая — фирменная, на Q), «МЕХИправки.txt», концепт 23.10.2026.
 # Абилок со звёздочкой (ещё нет в игре) тут нет — их места пока пустые. В ангаре набор можно поменять
 const HERO_KITS := {
-	"hero_art1": ["mod_mines", "mod_smoke"],                     # Осадник: ★осадный режим*
+	"hero_art1": ["mod_siege", "mod_mines", "mod_smoke"],        # Осадник
 	"mech_wasp": ["mod_roller", "mod_jammer", "mod_overdrive"],  # Оса: ★два рывка — свойство меха
 	"mech_fortress": ["mod_dome", "mod_matrix", "mod_repulse"],  # Крепость
 	"hero_m5": ["mod_drone", "mod_nanocloud", "mod_jammer"],     # Механик
@@ -528,10 +536,10 @@ const HERO_KITS := {
 	"mech_hound": ["mod_scope", "mod_camo", "mod_blink"],        # Ястреб
 	"hero_m4": ["mod_burner", "mod_emp_shell", "mod_emp"],       # Глушитель
 	"mech_assault": ["mod_rapid", "mod_rockets", "mod_repair"],  # Штурмовик
-	"hero_h1": ["mod_stance", "mod_slug"],                       # Бастион: ПРО-перехват*
+	"hero_h1": ["mod_stance", "mod_intercept", "mod_slug"],      # Бастион
 	"hero_l1": ["mod_cloak", "mod_marker", "mod_emp_dart"],      # Призрак
 	"hero_h5": ["mod_relay", "mod_airstrike", "mod_supply"],     # Командир
-	"hero_l2": ["mod_jump", "mod_bolas", "mod_overdrive"],       # Десантник: прыжок пока без толчка к своим*
+	"hero_l2": ["mod_dropjump", "mod_bolas", "mod_overdrive"],   # Десантник
 	"hero_h4": ["mod_gravity", "mod_rockets", "mod_shield"],     # Гравитон
 }
 
@@ -845,9 +853,15 @@ func describe(id: String) -> String:
 					out.append("%s с: стоишь — враги не видят (кроме омни вблизи), пошёл — видно, выстрел снимает" % _n(v(id, "duration")))
 				"burner":
 					out.append("луч к врагу у прицела: жжёт %s эн./с %s с, до %s м" % [_n(v(id, "burn")), _n(v(id, "duration")), _m(v(id, "range"))])
+				"siege":
+					out.append("включил: стоит, пушки молчат, ЛКМ/ПКМ — снаряд по дуге до %s м: %s урона, радиус %s м, раз в %s с" % [_m(v(id, "range")), _n(v(id, "damage")), _m(v(id, "radius")), _n(1.0 / maxf(v(id, "fire_rate"), 0.05))])
+				"intercept":
+					out.append("%s с сбивает вражеские ракеты и гранаты в %s м, %s в секунду" % [_n(v(id, "duration")), _m(v(id, "radius")), _n(v(id, "fire_rate"))])
+				"dropjump":
+					out.append("прыжок до %s м, удар %s урона, врагов в %s м отбрасывает на %s м к твоим" % [_m(v(id, "range")), _n(v(id, "damage")), _m(v(id, "radius")), _m(v(id, "shove"))])
 				"smoke":
 					out.append("дым %s м на %s с: сквозь него не видно" % [_m(v(id, "radius")), _n(v(id, "duration"))])
-			if d.get("ability", "") in ["shield", "stance", "scope"]:
+			if d.get("ability", "") in ["shield", "stance", "scope", "siege"]:
 				out.append("вкл. %s эн., кд %s с после выкл." % [_n(v(id, "cost")), _n(v(id, "cooldown"))])
 			elif d.has("ability"):
 				out.append("%s эн., кд %s с" % [_n(v(id, "cost")), _n(v(id, "cooldown"))])

@@ -128,6 +128,13 @@ var relay_left := 0.0           # рядом свой ретранслятор: 
 var scope_on := false           # прицеливание (Ястреб): дальше бьёт и видит, рельса сильнее, ход медленнее
 var _scope_i := -1
 var net_left := 0.0             # маскировочная сеть: пока стоит на месте — невидим
+var siege_on := false           # осадный режим (Осадник): стоит, вместо пушек бьёт мортирой далеко
+var _siege_i := -1
+var _siege_cd := 0.0
+var intercept_left := 0.0       # ПРО-перехват (Бастион): сбивает вражеские ракеты и гранаты рядом
+var _icpt_i := -1
+var _icpt_t := 0.0
+var _jump_from := Vector3.ZERO   # откуда прыгнул (десантный прыжок отбрасывает врагов в эту сторону)
 var _net_still := false
 var _relay_k := 0.0
 var _peri_k := 0.0
@@ -544,6 +551,10 @@ func status_list() -> Array:
 		out.append(["Ретранслятор", -1.0, true, "relay", "Рядом свой ретранслятор: урон больше на %d%%." % roundi(_relay_k * 100.0)])
 	if scope_on:
 		out.append(["Прицеливание", -1.0, true, "scope", "Пушки и обзор дальше, рельса сильнее, ход медленнее. Повторное нажатие — выключить."])
+	if siege_on:
+		out.append(["Осадный режим", -1.0, true, "siege", "Стоит на упорах: пушки молчат, ЛКМ/ПКМ — снаряд по дуге далеко. Повторное нажатие — сложиться."])
+	if intercept_left > 0.0:
+		out.append(["ПРО-перехват", intercept_left, true, "intercept", "Сбивает вражеские ракеты и гранаты рядом."])
 	if net_left > 0.0:
 		out.append(["Маскировочная сеть", net_left, true, "camo", "Стоишь — враги не видят (кроме омни-сенсора вблизи). Пошёл — видно. Выстрел снимает сеть."])
 	if stance_on:
@@ -568,6 +579,14 @@ func ability_active(index: int) -> float:
 			return blink_left
 		"stance":
 			return 1.0 if stance_on and _stance_i == index else 0.0
+		"siege":
+			return 1.0 if siege_on and _siege_i == index else 0.0
+		"scope":
+			return 1.0 if scope_on and _scope_i == index else 0.0
+		"intercept":
+			return intercept_left
+		"camo":
+			return net_left
 		"purge":
 			return purge_left
 		"matrix":
@@ -690,9 +709,9 @@ func can_cast(index: int) -> bool:
 	if index < 0 or index >= abilities.size():
 		return false
 	var type: String = abilities[index]["type"]
-	if (type == "shield" and barrier_on) or (type == "stance" and stance_on):
+	if (type == "shield" and barrier_on) or (type == "stance" and stance_on) or (type == "siege" and siege_on):
 		return not dead and not is_stunned()     # выключить щит и оборону можно всегда
-	if type in ["blink", "jump"] and (root_left > 0.0 or stance_on):
+	if type in ["blink", "jump", "dropjump"] and (root_left > 0.0 or stance_on or siege_on):
 		return false
 	if dead or (is_stunned() and type != "purge") or ability_cd[index] > 0.0 or energy < ability_cost(index):
 		return false
@@ -787,8 +806,8 @@ func _physics_process(delta: float) -> void:
 			if abilities[i]["type"] != "purge":      # перезапуск снимает оглушение — его жать можно
 				_ability_pressed[i] = false
 
-	if root_left > 0.0 or stance_on:
-		# обездвижен или в обороне: ноги стоят, корпус крутится, стреляет
+	if root_left > 0.0 or stance_on or siege_on:
+		# обездвижен, в обороне или в осадном режиме: ноги стоят, корпус крутится, стреляет
 		_move = Vector2.ZERO
 		_run = false
 		_dash_pressed = false
@@ -819,7 +838,7 @@ func _physics_process(delta: float) -> void:
 		_snap_next = false
 		snap_interpolation(self)
 	_update_ability_fx(delta)
-	visual.braced = braced or stance_on
+	visual.braced = braced or stance_on or siege_on
 	if _bar != null:
 		_bar.set_ratio(hp / maxf(max_hp(), 1.0))
 		var ctl := control_info()
@@ -1495,6 +1514,9 @@ func _update_spread(delta: float) -> void:
 # ------------------------------------------------------------------
 
 func _update_fire(delta: float) -> void:
+	if siege_on:
+		_update_siege(delta)      # в осадном режиме пушки молчат, кнопки стрельбы бьют мортирой
+		return
 	# две одинаковые пушки (настройка «Одинаковые пушки на ЛКМ»): обе стреляют на любую кнопку мыши
 	var linked: bool = Cfg.link_guns > 0 and weapons.size() == 2 and weapons[0]["id"] == weapons[1]["id"]
 	for i in weapons.size():
@@ -1868,6 +1890,13 @@ func _update_abilities(delta: float) -> void:
 		blink_left -= delta
 		if blink_left <= 0.0:
 			_finish_blink()
+	# ПРО-перехват: сбивает ближайшую вражескую ракету или гранату рядом, несколько раз в секунду
+	if intercept_left > 0.0:
+		intercept_left = maxf(intercept_left - delta, 0.0)
+		_icpt_t -= delta
+		if _icpt_t <= 0.0 and _icpt_i >= 0 and _icpt_i < abilities.size():
+			_icpt_t = 1.0 / maxf(ability_param(_icpt_i, "fire_rate"), 0.5)
+			_intercept(ability_param(_icpt_i, "radius"))
 	# маскировочная сеть: невидим, только пока стоит
 	net_left = maxf(net_left - delta, 0.0)
 	_net_still = Vector2(velocity.x, velocity.z).length() < 0.6
@@ -1893,7 +1922,10 @@ func _try_ability(index: int) -> void:
 	if type == "scope" and scope_on:
 		_set_scope(false)
 		return
-	if type in ["blink", "jump"] and (root_left > 0.0 or stance_on):
+	if type == "siege" and siege_on:
+		_set_siege(false)
+		return
+	if type in ["blink", "jump", "dropjump"] and (root_left > 0.0 or stance_on or siege_on):
 		return          # ноги связаны или стоит в обороне
 	if ability_cd[index] > 0.0 or (type == "rockets" and _salvo_left > 0) or (type == "blink" and blink_left > 0.0):
 		ability_denied.emit(index, "cooldown")
@@ -1911,7 +1943,7 @@ func _try_ability(index: int) -> void:
 		ability_charges[index] -= 1.0
 	if type != "cloak":
 		_break_cloak()
-	if not type in ["shield", "stance", "scope"]:
+	if not type in ["shield", "stance", "scope", "siege"]:
 		ability_cd[index] = ability_cooldown_max(index)
 	var p: Dictionary = abilities[index]["params"]
 	match type:
@@ -2017,6 +2049,16 @@ func _try_ability(index: int) -> void:
 			Sfx.play_at("step", global_position, -10.0, 0.1)
 		"burner":
 			_cast_burner(index)
+		"siege":
+			_siege_i = index
+			_set_siege(true)
+		"intercept":
+			_icpt_i = index
+			intercept_left = p.get("duration", 5.0)
+			_icpt_t = 0.0
+			Sfx.play_at("beep", global_position, -6.0, 0.0)
+		"dropjump":
+			_start_jump(index)
 	ability_used.emit(index)
 
 
@@ -2108,6 +2150,8 @@ func _reset_ability_states() -> void:
 	relay_left = 0.0
 	_set_scope(false)
 	net_left = 0.0
+	_set_siege(false)
+	intercept_left = 0.0
 	marked_left = 0.0
 	_shove_t = 0.0
 	_jump_up = 0.0
@@ -2118,6 +2162,56 @@ func _break_cloak() -> void:
 	if cloak_left > 0.0 and _cloak_break:
 		cloak_left = 0.0
 	net_left = 0.0          # маскировочную сеть снимает выстрел и любая другая абилка
+
+
+# осадный режим: включил — стоит на упорах, пушки молчат, ЛКМ/ПКМ — снаряд по дуге в точку прицела
+func _set_siege(on: bool) -> void:
+	if siege_on and not on and _siege_i >= 0 and _siege_i < ability_cd.size():
+		ability_cd[_siege_i] = ability_cooldown_max(_siege_i)
+	if on != siege_on:
+		Sfx.play_at("land", global_position, -6.0 if on else -10.0, 0.1)
+	siege_on = on
+
+
+func _update_siege(delta: float) -> void:
+	_siege_cd = maxf(_siege_cd - delta, 0.0)
+	if not (_fire or _fire2) or _siege_cd > 0.0 or disarm_left > 0.0 or is_stunned() or _siege_i < 0:
+		return
+	var p: Dictionary = abilities[_siege_i]["params"]
+	var flat := Vector3(aim_point.x - global_position.x, 0.0, aim_point.z - global_position.z)
+	var rng: float = p.get("range", 54.0)
+	if flat.length() > rng:
+		flat = flat.normalized() * rng
+	var target := Vector3(global_position.x + flat.x, 0.0, global_position.z + flat.z)
+	var from := global_position + Vector3.UP * get_hit_height() + torso_forward() * 0.5
+	var lob := Lob.new()
+	lob.setup(from, target, 2.0 + flat.length() * 0.15, self, {"kind": "explosive", "damage": p.get("damage", 120.0) * damage_mult(),
+		"radius": p.get("radius", 6.0), "edge_damage": p.get("edge_damage", 0.35)})
+	get_tree().current_scene.add_child(lob)
+	_siege_cd = 1.0 / maxf(p.get("fire_rate", 0.33), 0.05)
+	_break_cloak()
+	if seen:
+		Fx.light_flash(from, Color(1.0, 0.7, 0.35), 10.0, 2.0, 0.12)
+	Sfx.play_at("boom", global_position, -4.0, 0.1)
+	Fx.shake_at.emit(global_position, Cfg.shake_explosion * 0.3)
+
+
+# ПРО-перехват: ближайшая вражеская ракета или граната в радиусе гаснет в воздухе (чёрточка-трассер к ней)
+func _intercept(r: float) -> void:
+	var best: Node3D = null
+	var best_d := r
+	for g in ["rockets", "lobs"]:
+		for n in get_tree().get_nodes_in_group(g):
+			if not is_instance_valid(n) or n.is_queued_for_deletion() or n.get("team") == team:
+				continue
+			var d: float = n.global_position.distance_to(global_position)
+			if d < best_d:
+				best_d = d
+				best = n
+	if best == null:
+		return
+	Fx.rail_beam(global_position + Vector3.UP * get_hit_height(), best.global_position, team)
+	best.intercept()
 
 
 # прицеливание: включил — дальше бьёт и видит, рельса сильнее, ход медленнее; перезарядка — после выключения
@@ -2563,6 +2657,7 @@ func _start_jump(index: int) -> void:
 	if to.length() > p.get("range", 26.0):
 		to = to.normalized() * p.get("range", 26.0)
 	_jump_dest = _free_spot(global_position + to)
+	_jump_from = global_position
 	_jump_i = index
 	_jump_up = JUMP_UP
 	_cancel_blink()
@@ -2600,6 +2695,19 @@ func _jump_slam() -> void:
 		Fx.dust_cloud(c, p.get("radius", 5.0) * 0.5)
 	Fx.shake_at.emit(c, Cfg.shake_explosion * 0.8)
 	Sfx.play_at("boom", c, -3.0, 0.1)
+	# десантный прыжок: врагов у места приземления отбрасывает туда, откуда прыгнул, — к своим
+	if abilities[_jump_i]["type"] == "dropjump":
+		for m in get_tree().get_nodes_in_group("mechs"):
+			if m.dead or m.team == team:
+				continue
+			var d: Vector3 = m.global_position - c
+			d.y = 0
+			if d.length() > p.get("radius", 6.0) + m.get_hit_radius():
+				continue
+			var home: Vector3 = _jump_from - m.global_position
+			home.y = 0
+			if home.length() > 0.1:
+				m.shove(home.normalized(), p.get("shove", 8.0))
 
 
 # купольный щит: генератор у ног, купол держит вражеские пули, гранаты и снаряды снаружи

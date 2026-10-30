@@ -3918,7 +3918,42 @@ func _run_abil4test() -> void:
 		1530:
 			m._break_cloak()
 			_abil2_check("сеть: выстрел снимает", m.net_left == 0.0 and not m.is_cloaked())
-		1540:
+		1545:
+			m.set_build({"mech": "mech_fortress", "core": "core_combat", "weapons": ["autocannon", "autocannon"],
+				"modules": ["mod_siege", "mod_intercept", "mod_dropjump"]})
+			e.global_position = spot + Vector3(30, 0.05, 0)
+			e.snap_interpolation(e)
+		1550:
+			m.energy = m.energy_max()
+			_abil2_cast(m, "siege", m.global_position)
+			m.demo["move"] = Vector2(1, 0)
+			set_meta("pos", m.global_position)
+			set_meta("hp", e.hp)
+			m.demo["aim"] = e.global_position + Vector3.UP * 1.5
+			m.demo["fire"] = true
+		1760:
+			_abil2_check("осадный режим: стоит и бьёт мортирой далеко", m.siege_on and m.global_position.distance_to(get_meta("pos")) < 0.5 and e.hp < float(get_meta("hp")) - 30.0, "враг в %.0f м, HP %.0f → %.0f" % [30.0 * Cfg.METERS_PER_UNIT, float(get_meta("hp")), e.hp])
+			m.demo["fire"] = false
+			m.demo["move"] = Vector2.ZERO
+			m._try_ability(m.ability_index("siege"))
+		1770:
+			_abil2_check("осадный режим сложился", not m.siege_on)
+			_abil2_cast(m, "intercept", m.global_position)
+			var g: Node3D = preload("res://scripts/lob.gd").new()
+			var from: Vector3 = e.global_position + Vector3.UP * 3.0
+			g.setup(from, m.global_position, 8.0, e, {"kind": "explosive", "damage": 80.0, "radius": 5.0, "edge_damage": 0.4})
+			get_tree().current_scene.add_child(g)
+			set_meta("myhp", m.hp)
+		1990:
+			_abil2_check("ПРО сбил гранату", m.hp >= float(get_meta("myhp")) - 0.5 and get_tree().get_nodes_in_group("lobs").is_empty(), "HP %.0f → %.0f" % [float(get_meta("myhp")), m.hp])
+			e.respawn(spot + Vector3(14, 0.05, 0), false)     # враг мог погибнуть от осадных снарядов
+		1995:
+			e.shield_left = 0.0
+			set_meta("ex", e.global_position.x)
+			_abil2_cast(m, "dropjump", e.global_position + Vector3(0, 0, -6))    # сбоку от врага (на него самого не сесть), подальше от стены
+		2140:
+			_abil2_check("десантный прыжок отбросил врага к своим", e.global_position.x < float(get_meta("ex")) - 3.0, "x врага %.1f → %.1f (свои слева)" % [float(get_meta("ex")), e.global_position.x])
+		2150:
 			var f: int = get_meta("fails", 0)
 			print("[ABIL2] итог: %s" % ("ВСЁ ВЕРНО" if f == 0 else "ошибок %d" % f))
 			get_tree().quit()
